@@ -1,0 +1,14 @@
+ArenaMW cumulative - Dialogue CASEFIX + Beast KNA + God Rays/Fog Depth Bridge V4
+
+Includes previous cumulative fixes plus:
+- first-person world-depth capture immediately before OpenMW 0.47 clears depth for hands/weapons,
+- separate final overlay depth so fog/light shafts do not paint over first-person weapon geometry,
+- atmospheric fog repaired in first and third person, with visible horizon aerial perspective and world-space low-frequency density,
+- God Rays no longer depend on the unstable OSG sun occlusion-query result,
+- screen-space 3x3 sun-source depth occlusion: rays shut off when geometry covers the sun,
+- positive-only 16-sample light shafts (no dark radial-band subtraction),
+- external cached sun-query access removed to avoid the V3 OSG query path regression.
+
+SSAO remains removed.
+Photon volumetric clouds remain removed and cleanup is preserved.
+Custom-model NPC animation blocking remains preserved.

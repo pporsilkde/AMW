@@ -1,0 +1,6 @@
+God Rays V5 soft occlusion update:
+- 17-sample apparent sun-disc coverage.
+- Thin branches/leaves no longer act as a global on/off switch for screen illumination.
+- Partial sun coverage primarily attenuates the direct/core glow.
+- Radial shafts remain locally occluded and stable.
+- Full sun occlusion still fades the effect out.

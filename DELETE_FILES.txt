@@ -1,0 +1,3 @@
+files/shaders/native_volumetric_clouds.frag
+files/shaders/native_photon_crepuscular.frag
+files/shaders/PHOTON_SHADERS_LICENSE.txt

@@ -1,0 +1,8 @@
+ArenaMW God Rays/Fog V6 - remove legacy OSG sun occlusion query
+
+- Disables creation of the two legacy osg::OcclusionQueryNode objects used by SunFlash/SunGlare.
+- Removes the runtime source of repeated: osgOQ: QG: Invalid RQCB.
+- Replaces the old query-driven flash/glare visually in native_final.frag.
+- Uses the same 17-sample soft sun-disc coverage as God Rays V5.
+- Thin branches/leaves only attenuate glare; full cover fades it out.
+- Keeps first-person depth bridge, fog, God Rays V5, dialogue CASEFIX and Beast KNA fixes.
