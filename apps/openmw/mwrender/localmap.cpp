@@ -694,8 +694,13 @@ void LocalMap::MapSegment::createFogOfWarTexture()
 void LocalMap::MapSegment::initFogOfWar()
 {
     mFogOfWarImage = new osg::Image;
-    // Assign a PixelBufferObject for asynchronous transfer of data to the GPU
+    // Desktop benefits from asynchronous PBO uploads. On Android the renderer
+    // runs through NG-GL4ES, where the dynamic fog image's PBO path can leave the
+    // alpha texture permanently opaque. The large local-map window then becomes
+    // a black rectangle even though the underlying RTT (and HUD minimap) is fine.
+#ifndef __ANDROID__
     mFogOfWarImage->setPixelBufferObject(new osg::PixelBufferObject);
+#endif
     mFogOfWarImage->allocateImage(sFogOfWarResolution, sFogOfWarResolution, 1, GL_RGBA, GL_UNSIGNED_BYTE);
     assert(mFogOfWarImage->isDataContiguous());
     std::vector<uint32_t> data;

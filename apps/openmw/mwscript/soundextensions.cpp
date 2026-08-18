@@ -41,7 +41,9 @@ namespace MWScript
 
                     MWBase::Environment::get().getSoundManager()->say (ptr, file);
 
-                    if (MWBase::Environment::get().getWindowManager ()->getSubtitlesEnabled())
+                    MWBase::WindowManager* winMgr = MWBase::Environment::get().getWindowManager();
+                    if (winMgr->getSubtitlesEnabled()
+                        && !winMgr->containsMode(MWGui::GM_Dialogue))
                         context.messageBox (text);
                 }
         };

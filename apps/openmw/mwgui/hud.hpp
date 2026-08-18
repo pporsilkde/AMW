@@ -95,7 +95,8 @@ namespace MWGui
         struct HorizontalCompassMarkerState
         {
             MyGUI::TextBox* mWidget = nullptr;
-            MWWorld::Ptr mActor;
+            MWWorld::Ptr mObject;
+            std::string mIdentity;
             float mCurrentLeft = 0.f;
             float mTargetLeft = 0.f;
             float mAlpha = 0.f;
@@ -124,6 +125,8 @@ namespace MWGui
         std::string mSpellName;
         float mWeaponSpellTimer;
         float mGameTimeUpdateTimer;
+        std::string mGameTimeCaption;
+        bool mGameTimeShowingCellName;
 
         bool mMapVisible;
         bool mMinimapBaseVisible;
@@ -193,6 +196,7 @@ namespace MWGui
         void updateFocusedTargetPanel(float dt);
 
         void updatePositions();
+        void updateGameTimeAndCellName(float dt);
         void updateHorizontalCompass();
         void updateHorizontalCompassMarkers(float dt);
     };

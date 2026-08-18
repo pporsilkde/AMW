@@ -6,6 +6,7 @@
 #include <MyGUI_ProgressBar.h>
 #include <MyGUI_Button.h>
 #include <MyGUI_InputManager.h>
+#include <MyGUI_LanguageManager.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TextBox.h>
@@ -42,6 +43,13 @@
 
 namespace
 {
+    // The location name temporarily replaces the clock below the compass.
+    // Only the time animates: fade it out, show the location steadily, then fade time back in.
+    constexpr float sCompassInfoFadeDuration = 0.35f;
+    constexpr float sCompassLocationHoldDuration = 4.f;
+    constexpr float sCompassInfoSequenceDuration
+        = sCompassInfoFadeDuration * 2.f + sCompassLocationHoldDuration;
+
     std::string getWeaponSpellBoxMode()
     {
         const auto modeKey = std::make_pair(std::string("GUI"), std::string("weapon spell box mode"));
@@ -90,12 +98,17 @@ namespace
     enum class HorizontalCompassMarkerKind
     {
         Enemy = 0,
-        Ally = 1
+        Ally = 1,
+        Door = 2,
+        DetectKey = 3,
+        DetectEnchantment = 4,
+        DetectCreature = 5
     };
 
     struct HorizontalCompassMarkerCandidate
     {
-        MWWorld::Ptr mActor;
+        MWWorld::Ptr mObject;
+        std::string mIdentity;
         int mLeft = 0;
         float mDistanceSquared = 0.f;
         HorizontalCompassMarkerKind mKind = HorizontalCompassMarkerKind::Ally;
@@ -109,8 +122,32 @@ namespace
                 return MyGUI::Colour(1.00f, 0.18f, 0.16f);
             case HorizontalCompassMarkerKind::Ally:
                 return MyGUI::Colour(0.14f, 0.74f, 0.22f);
+            case HorizontalCompassMarkerKind::Door:
+            case HorizontalCompassMarkerKind::DetectKey:
+            case HorizontalCompassMarkerKind::DetectEnchantment:
+            case HorizontalCompassMarkerKind::DetectCreature:
+                return MyGUI::Colour::parse(MyGUI::LanguageManager::getInstance().replaceTags("#{fontcolour=normal}"));
         }
         return MyGUI::Colour(1.f, 1.f, 1.f);
+    }
+
+    std::string getHorizontalCompassMarkerCaption(HorizontalCompassMarkerKind kind)
+    {
+        switch (kind)
+        {
+            case HorizontalCompassMarkerKind::Door:
+                return "⌂";
+            case HorizontalCompassMarkerKind::DetectKey:
+                return "○─";
+            case HorizontalCompassMarkerKind::DetectEnchantment:
+                return "✦";
+            case HorizontalCompassMarkerKind::DetectCreature:
+                return "△";
+            case HorizontalCompassMarkerKind::Enemy:
+            case HorizontalCompassMarkerKind::Ally:
+                return "●";
+        }
+        return "●";
     }
 }
 
@@ -197,6 +234,8 @@ namespace MWGui
         , mCellNameScrolling(false)
         , mWeaponSpellTimer(0.f)
         , mGameTimeUpdateTimer(0.f)
+        , mGameTimeCaption("00:00")
+        , mGameTimeShowingCellName(false)
         , mMapVisible(true)
         , mMinimapBaseVisible(true)
         , mEffectBaseVisible(true)
@@ -288,6 +327,17 @@ namespace MWGui
         getWidget(mCellNameBox, "CellName");
         getWidget(mWeaponSpellBox, "WeaponSpellName");
         getWidget(mGameTimeBox, "GameTime");
+        if (mGameTimeBox)
+        {
+            mGameTimeBox->setFontHeight(18);
+            mGameTimeBox->setTextAlign(MyGUI::Align::Center);
+            mGameTimeBox->setCaption(mGameTimeCaption);
+        }
+        // Location now shares the clock line, so retire the old standalone caption.
+        if (mCellNameClip)
+            mCellNameClip->setVisible(false);
+        if (mCellNameBox)
+            mCellNameBox->setVisible(false);
 
         getWidget(mHorizontalCompass, "HorizontalCompass");
         constexpr int horizontalCompassTickCount = 11;
@@ -314,10 +364,10 @@ namespace MWGui
         for (int i = 0; i < horizontalCompassMarkerCount; ++i)
         {
             MyGUI::TextBox* marker = mHorizontalCompass->createWidget<MyGUI::TextBox>("NormalText",
-                MyGUI::IntCoord(0, 4, 22, 22), MyGUI::Align::Default);
+                MyGUI::IntCoord(0, 3, 32, 22), MyGUI::Align::Default);
             marker->setCaption("●");
             marker->setFontName("CompassMarkerFont");
-            marker->setFontHeight(21);
+            marker->setFontHeight(18);
             marker->setTextAlign(MyGUI::Align::Center);
             marker->setTextShadow(true);
             marker->setTextShadowColour(MyGUI::Colour::Black);
@@ -341,6 +391,7 @@ namespace MWGui
         mMainWidget->eventMouseMove += MyGUI::newDelegate(this, &HUD::onWorldMouseOver);
         mMainWidget->eventMouseLostFocus += MyGUI::newDelegate(this, &HUD::onWorldMouseLostFocus);
 
+        updatePositions();
         mSpellIcons = new SpellIcons();
     }
 
@@ -532,31 +583,14 @@ namespace MWGui
     {
         if (mCellName != cellName)
         {
-            mCellNameTimer = 5.0f;
             mCellName = cellName;
+            mCellNameTimer = Settings::Manager::getBool("show cell name", "HUD")
+                ? sCompassInfoSequenceDuration : 0.f;
 
-            mCellNameBox->setCaptionWithReplacing("#{sCell=" + mCellName + "}");
-
-            const int clipWidth = mCellNameClip ? mCellNameClip->getWidth() : mCellNameBox->getWidth();
-            const int clipHeight = mCellNameClip ? mCellNameClip->getHeight() : mCellNameBox->getHeight();
-            const int textWidth = mCellNameBox->getTextSize().width + 8;
-            mCellNameScrolling = textWidth > clipWidth;
-            mCellNameScrollOffset = 0.f;
-            mCellNameScrollPause = mCellNameScrolling ? 0.75f : 0.f;
-            mCellNameScrollDirection = -1;
-
-            if (mCellNameScrolling)
-            {
-                mCellNameBox->setTextAlign(MyGUI::Align::Left | MyGUI::Align::VCenter);
-                mCellNameBox->setCoord(0, 0, textWidth, clipHeight);
-            }
-            else
-            {
-                mCellNameBox->setTextAlign(MyGUI::Align::Center);
-                mCellNameBox->setCoord(0, 0, clipWidth, clipHeight);
-            }
-
-            mCellNameBox->setVisible(mMapVisible && Settings::Manager::getBool("show cell name", "HUD"));
+            if (mCellNameClip)
+                mCellNameClip->setVisible(false);
+            if (mCellNameBox)
+                mCellNameBox->setVisible(false);
         }
     }
 
@@ -582,8 +616,7 @@ namespace MWGui
         }
         if (mCompass)
             mCompass->setVisible(showMinimap);
-        if (mGameTimeBox)
-            mGameTimeBox->setVisible(Settings::Manager::getBool("show game time", "HUD"));
+        // Clock/location visibility and timed replacement are handled together below.
         if (mEffectBox)
             mEffectBox->setVisible(mEffectBaseVisible && Settings::Manager::getBool("show status effects", "HUD"));
         if (mFpsBox)
@@ -594,59 +627,9 @@ namespace MWGui
         updateHorizontalCompass();
         updateHorizontalCompassMarkers(dt);
 
-        if (mGameTimeBox && mGameTimeBox->getVisible())
-        {
-            mGameTimeUpdateTimer -= dt;
-            if (mGameTimeUpdateTimer <= 0.f)
-            {
-                const float gameHour = MWBase::Environment::get().getWorld()->getTimeStamp().getHour();
-                int hours = static_cast<int>(std::floor(gameHour)) % 24;
-                int minutes = static_cast<int>(std::floor((gameHour - std::floor(gameHour)) * 60.f + 0.5f));
-                if (minutes >= 60)
-                {
-                    minutes = 0;
-                    hours = (hours + 1) % 24;
-                }
+        updateGameTimeAndCellName(dt);
 
-                std::ostringstream stream;
-                stream << std::setfill('0') << std::setw(2) << hours << ':'
-                       << std::setfill('0') << std::setw(2) << minutes;
-                mGameTimeBox->setCaption(stream.str());
-
-                mGameTimeUpdateTimer = 0.2f;
-            }
-        }
-
-        mCellNameTimer -= dt;
         mWeaponSpellTimer -= dt;
-        if (mCellNameTimer < 0 || !Settings::Manager::getBool("show cell name", "HUD"))
-            mCellNameBox->setVisible(false);
-        else if (mCellNameBox->getVisible() && mCellNameScrolling && mCellNameClip)
-        {
-            if (mCellNameScrollPause > 0.f)
-                mCellNameScrollPause = std::max(0.f, mCellNameScrollPause - dt);
-            else
-            {
-                constexpr float cellNameScrollSpeed = 34.f;
-                mCellNameScrollOffset += mCellNameScrollDirection * cellNameScrollSpeed * std::max(0.f, dt);
-                const float minimumOffset = static_cast<float>(mCellNameClip->getWidth() - mCellNameBox->getWidth());
-
-                if (mCellNameScrollOffset <= minimumOffset)
-                {
-                    mCellNameScrollOffset = minimumOffset;
-                    mCellNameScrollDirection = 1;
-                    mCellNameScrollPause = 0.75f;
-                }
-                else if (mCellNameScrollOffset >= 0.f)
-                {
-                    mCellNameScrollOffset = 0.f;
-                    mCellNameScrollDirection = -1;
-                    mCellNameScrollPause = 0.75f;
-                }
-
-                mCellNameBox->setPosition(static_cast<int>(std::lround(mCellNameScrollOffset)), 0);
-            }
-        }
         if (mWeaponSpellTimer < 0)
             mWeaponSpellBox->setVisible(false);
 
@@ -735,6 +718,97 @@ namespace MWGui
     }
 
 
+    void HUD::updateGameTimeAndCellName(float dt)
+    {
+        if (!mGameTimeBox)
+            return;
+
+        dt = std::max(0.f, dt);
+        const bool showTime = Settings::Manager::getBool("show game time", "HUD");
+        const bool showLocation = Settings::Manager::getBool("show cell name", "HUD");
+
+        mGameTimeUpdateTimer -= dt;
+        if (mGameTimeUpdateTimer <= 0.f)
+        {
+            const float gameHour = MWBase::Environment::get().getWorld()->getTimeStamp().getHour();
+            int hours = static_cast<int>(std::floor(gameHour)) % 24;
+            int minutes = static_cast<int>(std::floor((gameHour - std::floor(gameHour)) * 60.f + 0.5f));
+            if (minutes >= 60)
+            {
+                minutes = 0;
+                hours = (hours + 1) % 24;
+            }
+
+            std::ostringstream stream;
+            stream << std::setfill('0') << std::setw(2) << hours << ':'
+                   << std::setfill('0') << std::setw(2) << minutes;
+            mGameTimeCaption = stream.str();
+            mGameTimeUpdateTimer = 0.2f;
+        }
+
+        if (!showLocation)
+            mCellNameTimer = 0.f;
+        else if (mCellNameTimer > 0.f)
+            mCellNameTimer = std::max(0.f, mCellNameTimer - dt);
+
+        bool displayLocation = false;
+        float alpha = 1.f;
+        const bool locationSequence = showLocation && !mCellName.empty() && mCellNameTimer > 0.f;
+
+        if (locationSequence)
+        {
+            if (!showTime)
+            {
+                displayLocation = true;
+                alpha = 1.f;
+            }
+            else
+            {
+                const float elapsed = sCompassInfoSequenceDuration - mCellNameTimer;
+                const float fade = sCompassInfoFadeDuration;
+                const float locationEnd = fade + sCompassLocationHoldDuration;
+
+                if (elapsed < fade)
+                {
+                    displayLocation = false;
+                    alpha = 1.f - elapsed / fade;
+                }
+                else if (elapsed < locationEnd)
+                {
+                    displayLocation = true;
+                    alpha = 1.f;
+                }
+                else
+                {
+                    displayLocation = false;
+                    alpha = (elapsed - locationEnd) / fade;
+                }
+            }
+        }
+
+        alpha = std::max(0.f, std::min(1.f, alpha));
+        const bool visible = displayLocation ? showLocation : showTime;
+        mGameTimeBox->setVisible(visible);
+        mGameTimeBox->setAlpha(visible ? alpha : 0.f);
+
+        if (!visible)
+            return;
+
+        if (displayLocation)
+        {
+            if (!mGameTimeShowingCellName)
+            {
+                mGameTimeBox->setCaptionWithReplacing("#{sCell=" + mCellName + "}");
+                mGameTimeShowingCellName = true;
+            }
+        }
+        else
+        {
+            mGameTimeBox->setCaption(mGameTimeCaption);
+            mGameTimeShowingCellName = false;
+        }
+    }
+
     void HUD::setPlayerDir(float x, float y)
     {
         LocalMapBase::setPlayerDir(x, y);
@@ -804,7 +878,8 @@ namespace MWGui
         {
             for (HorizontalCompassMarkerState& state : mHorizontalCompassMarkers)
             {
-                state.mActor = MWWorld::Ptr();
+                state.mObject = MWWorld::Ptr();
+                state.mIdentity.clear();
                 state.mAlpha = 0.f;
                 state.mTargetAlpha = 0.f;
                 state.mSeen = false;
@@ -830,32 +905,44 @@ namespace MWGui
                 const MWWorld::Ptr player = world->getPlayerPtr();
                 if (!player.isEmpty() && player.isInCell())
                 {
-                    // Lower enum value wins if an actor temporarily appears in both collections.
-                    std::map<MWWorld::Ptr, HorizontalCompassMarkerKind> actors;
-                    const auto addActor = [&actors](const MWWorld::Ptr& actor, HorizontalCompassMarkerKind kind)
+                    // Lower enum value has visual priority if a reference belongs to several groups.
+                    std::map<MWWorld::Ptr, HorizontalCompassMarkerKind> objects;
+                    const auto addObject = [&objects](const MWWorld::Ptr& object, HorizontalCompassMarkerKind kind)
                     {
-                        if (actor.isEmpty())
+                        if (object.isEmpty())
                             return;
-                        const auto result = actors.emplace(actor, kind);
+                        const auto result = objects.emplace(object, kind);
                         if (!result.second && static_cast<int>(kind) < static_cast<int>(result.first->second))
                             result.first->second = kind;
                     };
 
-                    // Only local single-player actors are queried. No TES3MP player list or packets.
                     for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(player))
-                        addActor(enemy, HorizontalCompassMarkerKind::Enemy);
+                        addObject(enemy, HorizontalCompassMarkerKind::Enemy);
 
                     std::set<MWWorld::Ptr> allies;
                     mechanics->getActorsSidingWith(player, allies);
                     for (const MWWorld::Ptr& ally : allies)
-                        addActor(ally, HorizontalCompassMarkerKind::Ally);
+                        addObject(ally, HorizontalCompassMarkerKind::Ally);
+
+                    // Native detection logic already includes spells, abilities, potions and enchanted items.
+                    const auto addDetected = [world, &player, &addObject](MWBase::World::DetectionType type,
+                        HorizontalCompassMarkerKind kind)
+                    {
+                        std::vector<MWWorld::Ptr> detected;
+                        world->listDetectedReferences(player, detected, type);
+                        for (const MWWorld::Ptr& object : detected)
+                            addObject(object, kind);
+                    };
+                    addDetected(MWBase::World::Detect_Key, HorizontalCompassMarkerKind::DetectKey);
+                    addDetected(MWBase::World::Detect_Enchantment, HorizontalCompassMarkerKind::DetectEnchantment);
+                    addDetected(MWBase::World::Detect_Creature, HorizontalCompassMarkerKind::DetectCreature);
 
                     constexpr float markerRange = 8192.f;
                     constexpr float markerRangeSquared = markerRange * markerRange;
                     constexpr float pixelsPerDegree = 4.f;
                     constexpr int compassInnerPadding = 10;
                     const int markerWidth = mHorizontalCompassMarkers.empty()
-                        ? 22
+                        ? 32
                         : mHorizontalCompassMarkers.front().mWidget->getWidth();
                     const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
                     const int compassWidth = mHorizontalCompass->getWidth();
@@ -865,33 +952,21 @@ namespace MWGui
                     const float maximumVisibleDegrees = maximumMarkerOffset / pixelsPerDegree;
 
                     std::vector<HorizontalCompassMarkerCandidate> candidates;
-                    candidates.reserve(actors.size());
-                    for (const auto& actorEntry : actors)
+                    candidates.reserve(objects.size() + 24);
+
+                    const auto appendCandidate = [&](const MWWorld::Ptr& object, const std::string& identity,
+                        HorizontalCompassMarkerKind kind, float worldX, float worldY, float distanceSquared)
                     {
-                        const MWWorld::Ptr& actor = actorEntry.first;
-                        const HorizontalCompassMarkerKind kind = actorEntry.second;
-                        if (actor == player || !actor.isInCell() || actor.getCell() != player.getCell())
-                            continue;
-                        if (actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
-                            || actor.getRefData().isDeleted())
-                            continue;
-                        if (!actor.getClass().isActor() || actor.getClass().getCreatureStats(actor).isDead())
-                            continue;
-
-                        const osg::Vec3f offset = actor.getRefData().getPosition().asVec3() - playerPosition;
-                        const float distanceSquared = offset.x() * offset.x() + offset.y() * offset.y();
                         if (distanceSquared > markerRangeSquared || distanceSquared < 1.f)
-                            continue;
+                            return;
 
-                        const float bearing = std::atan2(offset.x(), offset.y());
+                        const float bearing = std::atan2(worldX - playerPosition.x(), worldY - playerPosition.y());
                         float relativeAngle = bearing - mHorizontalCompassAngle;
                         while (relativeAngle > osg::PI)
                             relativeAngle -= static_cast<float>(osg::PI) * 2.f;
                         while (relativeAngle < -osg::PI)
                             relativeAngle += static_cast<float>(osg::PI) * 2.f;
 
-                        // Skyrim-style edge behaviour: actors behind the player stay pinned
-                        // to the nearest compass edge instead of disappearing.
                         const float relativeDegrees = osg::RadiansToDegrees(relativeAngle);
                         const float displayedDegrees = std::max(-maximumVisibleDegrees,
                             std::min(maximumVisibleDegrees, relativeDegrees));
@@ -899,11 +974,61 @@ namespace MWGui
                             compassCenter + displayedDegrees * pixelsPerDegree - markerWidth * 0.5f));
 
                         HorizontalCompassMarkerCandidate candidate;
-                        candidate.mActor = actor;
+                        candidate.mObject = object;
+                        candidate.mIdentity = identity;
                         candidate.mLeft = left;
                         candidate.mDistanceSquared = distanceSquared;
                         candidate.mKind = kind;
                         candidates.push_back(candidate);
+                    };
+
+                    for (const auto& objectEntry : objects)
+                    {
+                        const MWWorld::Ptr& object = objectEntry.first;
+                        const HorizontalCompassMarkerKind kind = objectEntry.second;
+                        if (object == player || !object.isInCell())
+                            continue;
+                        if (object.getRefData().getCount() <= 0 || !object.getRefData().isEnabled()
+                            || object.getRefData().isDeleted())
+                            continue;
+
+                        const bool actorMarker = kind == HorizontalCompassMarkerKind::Enemy
+                            || kind == HorizontalCompassMarkerKind::Ally
+                            || kind == HorizontalCompassMarkerKind::DetectCreature;
+                        if (actorMarker)
+                        {
+                            if (!object.getClass().isActor() || object.getClass().getCreatureStats(object).isDead())
+                                continue;
+                            if (kind != HorizontalCompassMarkerKind::DetectCreature
+                                && object.getCell() != player.getCell())
+                                continue;
+                        }
+
+                        const osg::Vec3f position = object.getRefData().getPosition().asVec3();
+                        const float dx = position.x() - playerPosition.x();
+                        const float dy = position.y() - playerPosition.y();
+                        appendCandidate(object, std::string(), kind, position.x(), position.y(), dx * dx + dy * dy);
+                    }
+
+                    // Outdoors only: show nearby teleport doors that lead into interiors.
+                    if (player.getCell()->getCell()->isExterior())
+                    {
+                        std::vector<MWBase::World::DoorMarker> doors;
+                        world->getDoorMarkers(player.getCell(), doors);
+                        for (const MWBase::World::DoorMarker& door : doors)
+                        {
+                            if (door.dest.mPaged)
+                                continue;
+
+                            const float dx = door.x - playerPosition.x();
+                            const float dy = door.y - playerPosition.y();
+                            std::ostringstream identity;
+                            identity << "door:" << door.name << ':'
+                                << static_cast<int>(std::lround(door.x)) << ':'
+                                << static_cast<int>(std::lround(door.y));
+                            appendCandidate(MWWorld::Ptr(), identity.str(), HorizontalCompassMarkerKind::Door,
+                                door.x, door.y, dx * dx + dy * dy);
+                        }
                     }
 
                     std::sort(candidates.begin(), candidates.end(),
@@ -921,10 +1046,14 @@ namespace MWGui
                         const HorizontalCompassMarkerCandidate& candidate = candidates[candidateIndex];
                         HorizontalCompassMarkerState* selectedState = nullptr;
 
-                        // Keep one widget attached to the same actor so nearby markers never swap.
                         for (HorizontalCompassMarkerState& state : mHorizontalCompassMarkers)
                         {
-                            if (!state.mActor.isEmpty() && state.mActor == candidate.mActor)
+                            const bool sameObject = !candidate.mObject.isEmpty()
+                                && !state.mObject.isEmpty() && state.mObject == candidate.mObject;
+                            const bool sameIdentity = candidate.mObject.isEmpty()
+                                && state.mObject.isEmpty() && !candidate.mIdentity.empty()
+                                && state.mIdentity == candidate.mIdentity;
+                            if (sameObject || sameIdentity)
                             {
                                 selectedState = &state;
                                 break;
@@ -935,7 +1064,7 @@ namespace MWGui
                         {
                             for (HorizontalCompassMarkerState& state : mHorizontalCompassMarkers)
                             {
-                                if (!state.mSeen && state.mActor.isEmpty())
+                                if (!state.mSeen && state.mObject.isEmpty() && state.mIdentity.empty())
                                 {
                                     selectedState = &state;
                                     break;
@@ -955,16 +1084,20 @@ namespace MWGui
                         if (!selectedState)
                             continue;
 
-                        const bool newActor = selectedState->mActor.isEmpty()
-                            || selectedState->mActor != candidate.mActor;
+                        const bool newMarker = (!candidate.mObject.isEmpty()
+                                && (selectedState->mObject.isEmpty() || selectedState->mObject != candidate.mObject))
+                            || (candidate.mObject.isEmpty()
+                                && (selectedState->mIdentity != candidate.mIdentity || !selectedState->mObject.isEmpty()));
                         const float oldTargetLeft = selectedState->mTargetLeft;
-                        selectedState->mActor = candidate.mActor;
+                        selectedState->mObject = candidate.mObject;
+                        selectedState->mIdentity = candidate.mIdentity;
                         selectedState->mSeen = true;
                         selectedState->mTargetLeft = static_cast<float>(candidate.mLeft);
                         selectedState->mTargetAlpha = 1.f;
+                        selectedState->mWidget->setCaption(getHorizontalCompassMarkerCaption(candidate.mKind));
                         selectedState->mWidget->setTextColour(getHorizontalCompassMarkerColour(candidate.mKind));
 
-                        if (newActor)
+                        if (newMarker)
                         {
                             selectedState->mCurrentLeft = selectedState->mTargetLeft;
                             selectedState->mAlpha = 0.f;
@@ -972,7 +1105,6 @@ namespace MWGui
                         }
                         else if (std::abs(selectedState->mTargetLeft - oldTargetLeft) > compassWidth * 0.65f)
                         {
-                            // Crossing the exact rear direction changes the nearest edge.
                             selectedState->mCurrentLeft = selectedState->mTargetLeft;
                         }
                     }
@@ -1007,12 +1139,13 @@ namespace MWGui
                 const float maximumLeft = static_cast<float>(std::max(
                     compassInnerPadding, mHorizontalCompass->getWidth() - compassInnerPadding - markerWidth));
                 state.mCurrentLeft = std::max(minimumLeft, std::min(maximumLeft, state.mCurrentLeft));
-                state.mWidget->setPosition(static_cast<int>(std::lround(state.mCurrentLeft)), 4);
+                state.mWidget->setPosition(static_cast<int>(std::lround(state.mCurrentLeft)), 3);
                 state.mWidget->setAlpha(state.mAlpha);
             }
             else
             {
-                state.mActor = MWWorld::Ptr();
+                state.mObject = MWWorld::Ptr();
+                state.mIdentity.clear();
                 state.mAlpha = 0.f;
                 state.mWidget->setAlpha(0.f);
             }
@@ -1367,15 +1500,28 @@ namespace MWGui
         mSneakBox->setPosition((viewSize.width - mSneakBox->getWidth()) / 2,
                                (viewSize.height - mSneakBox->getHeight()) / 2);
 
+        if (mHorizontalCompass && mGameTimeBox)
+        {
+            const int infoWidth = std::max(360, mHorizontalCompass->getWidth());
+            constexpr int infoHeight = 28;
+            constexpr int infoGap = 1;
+            const int infoLeft = (viewSize.width - infoWidth) / 2;
+            const int infoTop = mHorizontalCompass->getTop() + mHorizontalCompass->getHeight() + infoGap;
+            mGameTimeBox->setCoord(infoLeft, infoTop, infoWidth, infoHeight);
+            mGameTimeBox->setFontHeight(18);
+            mGameTimeBox->setTextAlign(MyGUI::Align::Center);
+        }
+        if (mCellNameClip)
+            mCellNameClip->setVisible(false);
+        if (mCellNameBox)
+            mCellNameBox->setVisible(false);
+
         // effect box can have variable width -> variable left coordinate
         int effectsDx = 0;
         if (!mMinimapBox->getVisible ())
             effectsDx = mEffectBoxBaseRight - mMinimapBoxBaseRight;
 
         mMapVisible = mMinimapBox->getVisible ();
-        if (!mMapVisible)
-            mCellNameBox->setVisible(false);
-
         mEffectBox->setPosition((viewSize.width - mEffectBoxBaseRight) - mEffectBox->getWidth() + effectsDx, mEffectBox->getTop());
     }
 
@@ -1602,8 +1748,7 @@ namespace MWGui
             const int panelLeft = std::max(horizontalMargin,
                 std::min(stableCentreX - totalWidth / 2, maximumLeft));
 
-            // Reserve both the compass and the location-name region. This keeps the
-            // panel stable when the city/cell caption appears or fades out.
+            // Reserve the compass and its shared clock/location line so the panel stays stable.
             int baseY = verticalMargin;
             if (mHorizontalCompass && mHorizontalCompass->getVisible())
             {
@@ -1612,12 +1757,11 @@ namespace MWGui
                 baseY = std::max(baseY,
                     compassCoord.top + compassCoord.height + targetPanelCompassGap);
             }
-            if (mCellNameClip)
+            if (mGameTimeBox)
             {
-                const MyGUI::IntCoord locationCoord = mCellNameClip->getAbsoluteCoord();
-                constexpr int targetPanelLocationGap = 6;
-                baseY = std::max(baseY,
-                    locationCoord.top + locationCoord.height + targetPanelLocationGap);
+                const MyGUI::IntCoord infoCoord = mGameTimeBox->getAbsoluteCoord();
+                constexpr int targetPanelInfoGap = 5;
+                baseY = std::max(baseY, infoCoord.top + infoCoord.height + targetPanelInfoGap);
             }
             baseY = std::min(baseY, maximumTop);
 
