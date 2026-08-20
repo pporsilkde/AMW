@@ -374,7 +374,7 @@ namespace MWGui
     {
         mGuiMode = mode;
         if (mItemView)
-            mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container);
+            mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container || mode == GM_Companion);
 
         std::string setting = getModeSetting();
         setPinButtonVisible(mode == GM_Inventory);
@@ -525,10 +525,10 @@ namespace MWGui
         if (!mSortModel || !mTradeModel)
             return;
 
-        // Barter/container list rows transfer on the first click. Do not let
-        // MyGUI's subsequent double-click event act on the item that has moved
-        // into the same visual row.
-        if (mTrading || mGuiMode == GM_Container)
+        // Barter/container/companion list rows transfer on the first click. Do
+        // not let MyGUI's subsequent double-click event act on the item that
+        // has moved into the same visual row.
+        if (mTrading || mGuiMode == GM_Container || mGuiMode == GM_Companion)
             return;
 
         if (index < 0 || index >= static_cast<int>(mSortModel->getItemCount()))
@@ -547,9 +547,9 @@ namespace MWGui
         const ItemStack quickItem = mTradeModel->getItem(sourceIndex);
         int quickCount = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : quickItem.mCount;
 
-        // Companion mode keeps the previous double-click quick transfer. Barter
-        // and containers already returned above because those modes now use a
-        // single click.
+        // Companion now transfers on the first click too (see onItemSelectedFromSourceModel),
+        // so this block is unreachable in practice, same as the Container branch above
+        // that already returns early. Left in place defensively, mirroring that pattern.
         if (mGuiMode == GM_Companion && mDragAndDrop->getTransferTargetView())
         {
             mSelectedItem = sourceIndex;
@@ -634,12 +634,12 @@ namespace MWGui
             return;
         }
 
-        if (mGuiMode == GM_Container && mDragAndDrop->getTransferTargetView())
+        if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
-            // Containers mirror barter: one click sends the whole stack to the
-            // opposite pane, Ctrl+click sends one. Reuse the existing DnD drop
-            // path so ownership/capacity/model callbacks stay identical to a
-            // manual drag rather than bypassing container validation.
+            // Containers and companions mirror barter: one click sends the whole
+            // stack to the opposite pane, Ctrl+click sends one. Reuse the existing
+            // DnD drop path so ownership/capacity/model callbacks stay identical to
+            // a manual drag rather than bypassing container validation.
             mSelectedItem = index;
             ensureSelectedItemUnequipped(count);
             mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
