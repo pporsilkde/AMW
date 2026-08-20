@@ -9,8 +9,16 @@
 
 namespace MWRender
 {
+namespace
+{
+    // Underwater fog must be fully opaque slightly *before* the far plane, so
+    // that geometry being clipped there is already hidden by the water colour.
+    constexpr float sUnderwaterFogFarMargin = 0.92f;
+}
+
     FogManager::FogManager()
-        : mLandFogStart(0.f)
+        : mViewDistance(std::numeric_limits<float>::max())
+        , mLandFogStart(0.f)
         , mLandFogEnd(std::numeric_limits<float>::max())
         , mUnderwaterFogStart(0.f)
         , mUnderwaterFogEnd(std::numeric_limits<float>::max())
@@ -30,6 +38,8 @@ namespace MWRender
     void FogManager::configure(float viewDistance, float fogDepth, float underwaterFog,
         float /*dlFactor*/, float /*dlOffset*/, const osg::Vec4f &color)
     {
+        mViewDistance = std::max(1.f, viewDistance);
+
         if (fogDepth == 0.f)
         {
             mLandFogStart = 0.f;
@@ -51,6 +61,11 @@ namespace MWRender
         viewDistance = std::max(1.f, viewDistance);
         const float noFog = std::numeric_limits<float>::max();
 
+        // Track the live far plane. The underwater envelope below is *not*
+        // recomputed from it (that caused pulsing), but it is clamped against
+        // it when queried, which is what keeps the cut edge hidden.
+        mViewDistance = viewDistance;
+
         // Preserve the currently configured fog density while moving its start/end
         // together with the adaptive view distance. The max-float sentinel means
         // that this cell/weather intentionally has no distance fog.
@@ -67,14 +82,32 @@ namespace MWRender
         // recalculated only when the cell, weather or water configuration changes.
     }
 
+    float FogManager::underwaterFogEnd() const
+    {
+        if (mViewDistance >= std::numeric_limits<float>::max())
+            return mUnderwaterFogEnd;
+        return std::min(mUnderwaterFogEnd, mViewDistance * sUnderwaterFogFarMargin);
+    }
+
+    float FogManager::underwaterFogStart() const
+    {
+        const float end = underwaterFogEnd();
+        if (mUnderwaterFogEnd <= 0.f || end >= mUnderwaterFogEnd)
+            return std::min(mUnderwaterFogStart, end);
+
+        // Compress start and end together so the configured fog density (the
+        // start/end ratio) survives being squeezed against a nearer far plane.
+        return end * (mUnderwaterFogStart / mUnderwaterFogEnd);
+    }
+
     float FogManager::getFogStart(bool isUnderwater) const
     {
-        return isUnderwater ? mUnderwaterFogStart : mLandFogStart;
+        return isUnderwater ? underwaterFogStart() : mLandFogStart;
     }
 
     float FogManager::getFogEnd(bool isUnderwater) const
     {
-        return isUnderwater ? mUnderwaterFogEnd : mLandFogEnd;
+        return isUnderwater ? underwaterFogEnd() : mLandFogEnd;
     }
 
     osg::Vec4f FogManager::getFogColor(bool isUnderwater) const

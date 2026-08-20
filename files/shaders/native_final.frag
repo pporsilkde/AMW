@@ -206,6 +206,10 @@ vec3 computeGodRays(vec2 uv)
     if (radial > 1.28)
         return vec3(0.0);
 
+    float sunLuma = dot(max(sunColor, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    if (sunLuma < 0.015)
+        return vec3(0.0);
+
     float sunCoverage = sunDiscCoverage();
     // Only a nearly *fully* covered disc may switch shafts off. Partial
     // coverage (branches, leaves, fences) is intentionally soft so it cannot
@@ -218,27 +222,52 @@ vec3 computeGodRays(vec2 uv)
         * mix(0.72, 1.0, smoothstep(0.14, 0.88, sunCoverage));
     float coreSource = fullOcclusionGate * smoothstep(0.05, 0.82, sunCoverage);
 
-    // Positive-only radial light integration. We never subtract/darken the
-    // scene, so occluders create bright shafts through their gaps rather than
-    // the long dark bands seen in the previous implementation.
-    const float sampleCount = 16.0;
+    // Volumetric march from the fragment toward the sun, accumulating
+    // transmittance instead of averaging raw sky samples. Light physically
+    // travels sun -> eye, so an occluder encountered early on this walk must
+    // extinguish everything sampled behind it. That is what makes a trunk or
+    // a rock carve a correctly shaped shadow *through* the shaft, rather than
+    // merely dimming the whole radial average as the previous version did.
+    const float sampleCount = 24.0;
     vec2 stepUv = toSun / sampleCount;
-    vec2 p = uv + stepUv * 0.35;
-    float decay = 1.0;
+
+    // Per-pixel jitter of the first sample position. Without it the fixed step
+    // length produces concentric banding rings around the sun; the offset is
+    // averaged out by neighbouring pixels and re-rolled each frame.
+    float jitter = hash12(gl_FragCoord.xy * 1.37 + vec2(mod(frameTime * 13.0, 57.0)));
+    vec2 p = uv + stepUv * (0.25 + jitter * 0.75);
+
+    // Extinction per occluded step, and the classic radial decay. Both are
+    // scaled by the step length so the look stays stable regardless of how far
+    // the fragment sits from the sun.
+    float stepLength = radial / sampleCount;
+    float extinction = 26.0 * stepLength;
+    float decayRate = exp(-1.35 * stepLength);
+
+    float transmittance = 1.0;
     float accumulated = 0.0;
     float norm = 0.0;
+    float decay = 1.0;
 
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < 24; ++i)
     {
-        if (p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0)
-        {
-            float visibility = skyVisibilityAt(p);
-            float w = decay * (1.0 - float(i) * 0.018);
-            accumulated += visibility * w;
-            norm += w;
-        }
+        vec2 sp = clamp(p, vec2(0.0), vec2(1.0));
+        float sky = skyVisibilityAt(sp);
+
+        // Sky contributes light; geometry contributes extinction. Accumulate
+        // the lit part *through* the transmittance already lost closer to the
+        // camera, so partial occluders soften the shaft instead of clipping it.
+        accumulated += sky * transmittance * decay;
+        norm += decay;
+
+        transmittance *= exp(-(1.0 - sky) * extinction);
+
         p += stepUv;
-        decay *= 0.935;
+        decay *= decayRate;
+
+        // Once the path is essentially blocked there is nothing left to gather.
+        if (transmittance < 0.004)
+            break;
     }
 
     float integrated = accumulated / max(norm, 0.0001);
@@ -249,12 +278,16 @@ vec3 computeGodRays(vec2 uv)
     float shaft = clamp(integrated - localSky * 0.42, 0.0, 1.0);
     shaft = pow(shaft, 1.35);
 
-    float sunFalloff = pow(clamp(1.0 - radial / 1.28, 0.0, 1.0), 1.75);
+    // Attenuation. The radial term is now exponential rather than a plain
+    // power curve, which keeps the near-sun region bright while letting distant
+    // shafts fade out smoothly instead of ending on a visible ring.
+    float sunFalloff = exp(-radial * 2.15) * pow(clamp(1.0 - radial / 1.28, 0.0, 1.0), 0.85);
     float coreGlow = pow(clamp(1.0 - radial / 0.22, 0.0, 1.0), 5.0) * 0.10;
 
-    float sunLuma = dot(max(sunColor, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
-    if (sunLuma < 0.015)
-        return vec3(0.0);
+    // Fade as the sun approaches (and leaves) the screen edge. Without this the
+    // whole shaft field switches off in one frame when sunVisible flips.
+    vec2 edge = min(sunScreenPosition, vec2(1.0) - sunScreenPosition);
+    float edgeFade = smoothstep(-0.22, 0.06, min(edge.x, edge.y));
 
     vec3 warmSun = mix(max(sunColor, vec3(0.0)),
         vec3(1.0, 0.76, 0.48) * min(1.0, sunLuma + 0.20), 0.20);
@@ -262,7 +295,7 @@ vec3 computeGodRays(vec2 uv)
     // core follows partial disc coverage strongly; the shaft field mostly
     // responds to the local radial samples above. Full occlusion still fades
     // both terms to zero.
-    float intensity = (shaft * 0.92 * shaftSource + coreGlow * coreSource) * sunFalloff;
+    float intensity = (shaft * 1.05 * shaftSource + coreGlow * coreSource) * sunFalloff * edgeFade;
     return warmSun * intensity * max(godRaysStrength, 0.0) * 0.70;
 }
 

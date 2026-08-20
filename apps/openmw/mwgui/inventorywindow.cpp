@@ -72,6 +72,28 @@ namespace
             && item.mBase.getClass().isKey(item.mBase);
     }
 
+    // Items worth revealing the paper doll for: gear you can wear, and the
+    // classic Morrowind "use" categories (drink/read/apply). Deliberately
+    // excludes plain Miscellaneous junk (and gold), which has nothing to
+    // preview on the doll.
+    bool isDollPreviewWorthy(const MWWorld::Ptr& base)
+    {
+        if (base.isEmpty())
+            return false;
+        const std::string type = base.getTypeName();
+        return type == typeid(ESM::Weapon).name()
+            || type == typeid(ESM::Armor).name()
+            || type == typeid(ESM::Clothing).name()
+            || type == typeid(ESM::Book).name()
+            || type == typeid(ESM::Potion).name()
+            || type == typeid(ESM::Ingredient).name()
+            || type == typeid(ESM::Repair).name()
+            || type == typeid(ESM::Lockpick).name()
+            || type == typeid(ESM::Probe).name()
+            || type == typeid(ESM::Apparatus).name()
+            || type == typeid(ESM::Light).name();
+    }
+
 }
 
 namespace MWGui
@@ -244,7 +266,7 @@ namespace MWGui
         int rightLeft = 4;
 
         const bool paperDollAvailable = (mGuiMode == GM_Inventory);
-        const bool showPaperDoll = paperDollAvailable && mPaperDollVisible;
+        const bool showPaperDoll = paperDollAvailable && paperDollShown();
 
         if (showPaperDoll)
         {
@@ -337,6 +359,7 @@ namespace MWGui
         mTradeModel = nullptr;
         mSortModel = nullptr;
         mItemView->setModel(nullptr);
+        mPaperDollAutoRevealed = false;
         if (mKeyRingList)
             refreshKeyRingPopupRows();
         if (mKeyRingPanel)
@@ -372,6 +395,11 @@ namespace MWGui
 
     void InventoryWindow::setGuiMode(GuiMode mode)
     {
+        // The automatic reveal is scoped to one inventory session: leaving the
+        // inventory (or entering barter/container mode) drops back to whatever
+        // the player actually pinned via the toggle.
+        if (mode != mGuiMode)
+            mPaperDollAutoRevealed = false;
         mGuiMode = mode;
         if (mItemView)
             mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container || mode == GM_Companion);
@@ -472,6 +500,10 @@ namespace MWGui
             return;
         }
 
+        // Selecting something wearable/usable while the doll is hidden brings
+        // the doll back, so the result of equipping is immediately visible.
+        revealPaperDollFor(mSortModel->getItem(index).mBase);
+
         onItemSelectedFromSourceModel(mSortModel->mapToSource(index));
     }
 
@@ -512,6 +544,34 @@ namespace MWGui
                 return;
             }
             mDragAndDrop->startBarterDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+            return;
+        }
+
+        // Two-pane container/companion transfer keeps its existing instant,
+        // dialog-free drag (see the matching branch in
+        // onItemSelectedFromSourceModel, which handles the click path with
+        // the same intent): the whole stack moves immediately, Ctrl for one.
+        if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
+        {
+            ensureSelectedItemUnequipped(count);
+            mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+            notifyContentChanged();
+            return;
+        }
+
+        // Picking a stack up to carry it (list-mode drag) now asks how many
+        // to take, the same way a grid-mode click already does through
+        // onItemSelectedFromSourceModel. Shift+drag still grabs the whole
+        // stack without asking and Ctrl+drag still grabs exactly one,
+        // mirroring the click path's shortcuts.
+        bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        if (count > 1 && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            std::string name = item.mBase.getClass().getName(item.mBase) + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sTake}", count);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::dragItem);
             return;
         }
 
@@ -565,6 +625,10 @@ namespace MWGui
         // Class::use() path as dropping it on the vanilla character preview.
         const ItemStack item = mTradeModel->getItem(sourceIndex);
         MWWorld::Ptr object = item.mBase;
+
+        // Same reveal as the single-click path: show the doll so the equip /
+        // unequip result is visible rather than silently applied off-screen.
+        revealPaperDollFor(object);
 
         if (item.mType == ItemStack::Type_Equipped)
         {
@@ -870,7 +934,7 @@ namespace MWGui
 
     void InventoryWindow::updatePreviewSize()
     {
-        if (!mPaperDollVisible || !mLeftPane->getVisible())
+        if (!paperDollShown() || !mLeftPane->getVisible())
             return;
 
         MyGUI::IntSize size = mAvatarImage->getSize();
@@ -920,7 +984,7 @@ namespace MWGui
         if (!mPaperDollButton || !mPaperDollIcon)
             return;
 
-        mPaperDollIcon->setImageTexture(mPaperDollVisible
+        mPaperDollIcon->setImageTexture(paperDollShown()
             ? "textures/ui/arenamw/paper_doll_visible.png"
             : "textures/ui/arenamw/paper_doll_hidden.png");
         mPaperDollIcon->setColour(MyGUI::Colour::White);
@@ -928,7 +992,7 @@ namespace MWGui
         mPaperDollButton->setUserString("ToolTipType", "Layout");
         mPaperDollButton->setUserString("ToolTipLayout", "TextToolTipOneLine");
         mPaperDollButton->setUserString("Caption_TextOneLine",
-            arenaText(mPaperDollVisible ? "inventory.paper_doll_hide" : "inventory.paper_doll_show"));
+            arenaText(paperDollShown() ? "inventory.paper_doll_hide" : "inventory.paper_doll_show"));
     }
 
     void InventoryWindow::refreshWriterButtonVisual()
@@ -940,13 +1004,43 @@ namespace MWGui
         mWriterButton->setUserString("Caption_TextOneLine", arenaText("writer.tooltip_open"));
     }
 
+    void InventoryWindow::revealPaperDollFor(const MWWorld::Ptr& item)
+    {
+        // Only meaningful in the player's own inventory, and only when the
+        // doll isn't already showing for one reason or another.
+        if (mGuiMode != GM_Inventory || mPaperDollVisible || mPaperDollAutoRevealed)
+            return;
+        if (!isDollPreviewWorthy(item))
+            return;
+
+        mPaperDollAutoRevealed = true;
+        refreshPaperDollToggleVisual();
+        adjustPanes();
+        updatePreviewSize();
+        dirtyPreview();
+
+        if (mItemView)
+        {
+            mItemView->relayout();
+            mItemView->update();
+        }
+    }
+
     void InventoryWindow::onPaperDollClicked(MyGUI::Widget*)
     {
         if (mGuiMode != GM_Inventory)
             return;
 
-        mPaperDollVisible = !mPaperDollVisible;
+        // Toggle relative to what is actually on screen. If the doll was
+        // auto-revealed by an item selection, a click must hide it rather than
+        // flip the (still false) pinned flag to true and appear to do nothing.
+        const bool pinVisible = !paperDollShown();
+        mPaperDollVisible = pinVisible;
         Settings::Manager::setBool("inventory paper doll", "GUI", mPaperDollVisible);
+        // An explicit click always wins over the automatic reveal, in either
+        // direction: hiding manually should hide it even if it was auto-shown,
+        // and showing manually shouldn't leave a stale auto-reveal behind.
+        mPaperDollAutoRevealed = false;
         refreshPaperDollToggleVisual();
 
         adjustPanes();
@@ -1158,7 +1252,7 @@ namespace MWGui
         // The paper-doll toggle deliberately occupies the old key-ring button
         // position at the lower-left edge of the inventory pane.
         const bool paperDollAvailable = (mGuiMode == GM_Inventory);
-        const bool showPaperDoll = paperDollAvailable && mPaperDollVisible;
+        const bool showPaperDoll = paperDollAvailable && paperDollShown();
         if (mPaperDollButton)
         {
             mPaperDollButton->setVisible(paperDollAvailable);
@@ -1416,7 +1510,7 @@ namespace MWGui
 
     void InventoryWindow::dirtyPreview()
     {
-        if (!mPaperDollVisible)
+        if (!paperDollShown())
             return;
 
         mPreview->update();

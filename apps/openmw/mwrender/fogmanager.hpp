@@ -24,6 +24,14 @@ namespace MWRender
         float getFogEnd(bool isUnderwater) const;
 
     private:
+        // Underwater fog has to saturate before the far plane clips geometry,
+        // otherwise terrain just ends mid-water and the cut edge is visible.
+        // These compress the configured envelope against the *current* view
+        // distance without disturbing the stable configured values.
+        float underwaterFogStart() const;
+        float underwaterFogEnd() const;
+
+        float mViewDistance;
         float mLandFogStart;
         float mLandFogEnd;
         float mUnderwaterFogStart;
