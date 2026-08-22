@@ -174,9 +174,9 @@ namespace MWGui
                 dropped = world->dropObjectOnGround(world->getPlayerPtr(), item.mBase, count);
             dropped.getCellRef().setOwner("");
 
-            
 
-            
+
+
 
             return dropped;
         }
@@ -1409,7 +1409,7 @@ namespace MWGui
         mCrosshairBaseVisible = visible;
         mCrosshair->setVisible(visible && Settings::Manager::getBool("crosshair", "HUD"));
     }
-    
+
     void HUD::setCrosshairOwned(bool owned)
     {
         const int size = owned ? 32 : 64;
@@ -1422,7 +1422,7 @@ namespace MWGui
             (mMainWidget->getHeight() - size) / 2,
             size, size);
     }
-    
+
     void HUD::setHmsVisible(bool visible)
     {
         mHmsBaseVisible = visible;

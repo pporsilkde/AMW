@@ -864,9 +864,9 @@ void ItemView::onListItemReleased(MyGUI::Widget* sender, int left, int top, MyGU
         const bool sameItem = index == mListPressedIndex;
         mListPressedIndex = -1;
 
-        // Barter/container windows explicitly opt into modern one-click
-        // transfer. Regular inventory list rows still wait for double-click,
-        // preserving equip/use behaviour outside two-pane transfer modes.
+        // Hosts that opt in get the same first-click action as the classic
+        // icon grid. In the player inventory this picks the item up; in
+        // barter/container/companion it completes the configured transfer.
         if (mSingleClickActionEnabled && sameItem)
             eventItemClicked(index);
         return;

@@ -50,8 +50,8 @@ namespace MWGui
         ViewMode getViewMode() const { return mViewMode; }
 
         /// In extended list mode, emit eventItemClicked on a normal mouse
-        /// release. Disabled by default so the regular inventory keeps its
-        /// focus/double-click behaviour; two-pane transfer windows opt in.
+        /// release. Host windows opt in when list rows should behave like the
+        /// classic icon grid (pick up/transfer on the first click).
         void setSingleClickActionEnabled(bool enabled) { mSingleClickActionEnabled = enabled; }
 
         /// Hide the built-in table/grid toggle when a host window provides its

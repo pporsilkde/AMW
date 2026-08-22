@@ -48,6 +48,10 @@ namespace MWGui
 
         MyGUI::Button* mCreateButton;
         MyGUI::Button* mCancelButton;
+        MyGUI::Button* mPotionModeButton;
+        MyGUI::Button* mPoisonModeButton;
+        MyGUI::TextBox* mLastBrewText;
+        MyGUI::Button* mRepeatLastButton;
 
         MyGUI::Widget* mEffectsBox;
 
@@ -60,6 +64,8 @@ namespace MWGui
 
         void onCancelButtonClicked(MyGUI::Widget* _sender);
         void onCreateButtonClicked(MyGUI::Widget* _sender);
+        void onModeButtonClicked(MyGUI::Widget* _sender);
+        void onRepeatLastClicked(MyGUI::Widget* _sender);
         void onIngredientSelected(MyGUI::Widget* _sender);
         void onAccept(MyGUI::EditBox*);
         void onIncreaseButtonPressed(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);

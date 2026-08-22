@@ -2,6 +2,8 @@
 
 #include <components/esm/objectstate.hpp>
 
+#include <algorithm>
+
 #include "customdata.hpp"
 #include "cellstore.hpp"
 
@@ -31,6 +33,8 @@ namespace MWWorld
         mChanged = refData.mChanged;
         mDeletedByContentFile = refData.mDeletedByContentFile;
         mFlags = refData.mFlags;
+        mPoisonId = refData.mPoisonId;
+        mPoisonCharges = refData.mPoisonCharges;
 
         mAnimationState = refData.mAnimationState;
 
@@ -44,7 +48,7 @@ namespace MWWorld
     }
 
     RefData::RefData()
-    : mBaseNode(nullptr), mDeletedByContentFile(false), mEnabled (true), mCount (1), mCustomData (nullptr), mChanged(false), mFlags(0)
+    : mBaseNode(nullptr), mDeletedByContentFile(false), mEnabled (true), mCount (1), mPoisonCharges(0), mCustomData (nullptr), mChanged(false), mFlags(0)
     {
         for (int i=0; i<3; ++i)
         {
@@ -55,7 +59,7 @@ namespace MWWorld
 
     RefData::RefData (const ESM::CellRef& cellRef)
     : mBaseNode(nullptr), mDeletedByContentFile(false), mEnabled (true),
-      mCount (1), mPosition (cellRef.mPos),
+      mCount (1), mPosition (cellRef.mPos), mPoisonCharges(0),
       mCustomData (nullptr),
       mChanged(false), mFlags(0) // Loading from ESM/ESP files -> assume unchanged
     {
@@ -67,6 +71,7 @@ namespace MWWorld
       mCount (objectState.mCount),
       mPosition (objectState.mPosition),
       mAnimationState(objectState.mAnimationState),
+      mPoisonId(objectState.mPoisonId), mPoisonCharges(objectState.mPoisonCharges),
       mCustomData (nullptr),
       mChanged(true), mFlags(objectState.mFlags) // Loading from a savegame -> assume changed
     {
@@ -101,6 +106,8 @@ namespace MWWorld
         objectState.mFlags = mFlags;
 
         objectState.mAnimationState = mAnimationState;
+        objectState.mPoisonId = mPoisonId;
+        objectState.mPoisonCharges = mPoisonCharges;
     }
 
     RefData& RefData::operator= (const RefData& refData)
@@ -278,6 +285,49 @@ namespace MWWorld
     ESM::AnimationState& RefData::getAnimationState()
     {
         return mAnimationState;
+    }
+
+    bool RefData::hasPoison() const
+    {
+        return !mPoisonId.empty() && mPoisonCharges > 0;
+    }
+
+    const std::string& RefData::getPoisonId() const
+    {
+        return mPoisonId;
+    }
+
+    int RefData::getPoisonCharges() const
+    {
+        return mPoisonCharges;
+    }
+
+    void RefData::setPoison(const std::string& potionId, int charges)
+    {
+        mPoisonId = charges > 0 ? potionId : std::string();
+        mPoisonCharges = std::max(0, charges);
+        mChanged = true;
+    }
+
+    void RefData::clearPoison()
+    {
+        if (hasPoison())
+            mChanged = true;
+        mPoisonId.clear();
+        mPoisonCharges = 0;
+    }
+
+    void RefData::consumePoisonCharge()
+    {
+        if (!hasPoison())
+            return;
+        --mPoisonCharges;
+        mChanged = true;
+        if (mPoisonCharges <= 0)
+        {
+            mPoisonId.clear();
+            mPoisonCharges = 0;
+        }
     }
 
 }

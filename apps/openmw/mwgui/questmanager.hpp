@@ -18,6 +18,7 @@ namespace MyGUI
     class ListBox;
     class TabControl;
     class TextBox;
+    class Window;
 }
 
 namespace MWGui
@@ -32,6 +33,7 @@ namespace MWGui
         void onOpen() override;
         bool exit() override;
         void clear() override;
+        void onResChange(int width, int height) override;
 
     private:
         struct EntryData
@@ -101,6 +103,14 @@ namespace MWGui
         void updateTopicDetail();
         void updateRecordDetail();
         void updateQuestButtons();
+        void updateCounters();
+        void refreshQuestRelatedTopics();
+        void refreshTopicRelatedTopics();
+        void selectTopic(std::size_t topicIndex);
+        std::vector<std::size_t> relatedTopics(const std::vector<EntryData>& entries, const std::string& excludeId) const;
+        void restoreWindowGeometry();
+        void applyResponsiveLayout();
+        void saveWindowGeometry();
 
         void notifyClose(MyGUI::Widget* sender);
         void notifyTabChanged(MyGUI::TabControl* sender, std::size_t index);
@@ -112,6 +122,9 @@ namespace MWGui
         void notifyRecordSelected(MyGUI::ListBox* sender, std::size_t index);
         void notifyPin(MyGUI::Widget* sender);
         void notifyHide(MyGUI::Widget* sender);
+        void notifyQuestRelatedSelected(MyGUI::ListBox* sender, std::size_t index);
+        void notifyTopicRelatedSelected(MyGUI::ListBox* sender, std::size_t index);
+        void notifyWindowChanged(MyGUI::Window* sender);
 
         static Metadata classifyQuest(const std::string& id);
         static std::string lower(const std::string& value);
@@ -126,6 +139,8 @@ namespace MWGui
         static std::string labelForAddon(const std::string& value);
         static std::string labelForCategory(const std::string& value);
         static std::string labelForFaction(const std::string& value);
+        static bool isGenericTopic(const std::string& value);
+        static bool isMainQuestFinal(const std::string& addon, const std::vector<std::string>& ids);
 
         std::function<void()> mReturnToJournal;
 
@@ -135,17 +150,24 @@ namespace MWGui
         MyGUI::ComboBox* mQuestFilter = nullptr;
         MyGUI::Button* mShowCompletedHidden = nullptr;
         MyGUI::ListBox* mQuestList = nullptr;
+        MyGUI::TextBox* mQuestCounter = nullptr;
         MyGUI::ImageBox* mQuestIcon = nullptr;
         MyGUI::TextBox* mQuestHeading = nullptr;
         MyGUI::EditBox* mQuestDetail = nullptr;
         MyGUI::Button* mPinButton = nullptr;
         MyGUI::Button* mHideButton = nullptr;
+        MyGUI::TextBox* mQuestRelatedLabel = nullptr;
+        MyGUI::ListBox* mQuestRelatedList = nullptr;
         MyGUI::EditBox* mTopicSearch = nullptr;
         MyGUI::ListBox* mTopicList = nullptr;
+        MyGUI::TextBox* mTopicCounter = nullptr;
         MyGUI::TextBox* mTopicHeading = nullptr;
         MyGUI::EditBox* mTopicDetail = nullptr;
+        MyGUI::TextBox* mTopicRelatedLabel = nullptr;
+        MyGUI::ListBox* mTopicRelatedList = nullptr;
         MyGUI::EditBox* mRecordSearch = nullptr;
         MyGUI::ListBox* mRecordList = nullptr;
+        MyGUI::TextBox* mRecordCounter = nullptr;
         MyGUI::TextBox* mRecordHeading = nullptr;
         MyGUI::EditBox* mRecordDetail = nullptr;
         MyGUI::EditBox* mStatsDetail = nullptr;
@@ -160,11 +182,15 @@ namespace MWGui
         std::vector<std::size_t> mVisibleQuests;
         std::vector<std::size_t> mVisibleTopics;
         std::vector<std::size_t> mVisibleRecords;
+        std::vector<std::size_t> mQuestRelatedTopics;
+        std::vector<std::size_t> mTopicRelatedTopics;
         std::set<std::string> mPinned;
         std::set<std::string> mHidden;
         bool mShowCompletedHiddenState = false;
         std::string mLastQuestId;
         std::string mLastTopicId;
+        std::string mLastRecordTopic;
+        bool mRestoringGeometry = false;
     };
 }
 

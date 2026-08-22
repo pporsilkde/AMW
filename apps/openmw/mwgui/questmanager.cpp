@@ -17,9 +17,12 @@
 #include <MyGUI_TabControl.h>
 #include <MyGUI_TabItem.h>
 #include <MyGUI_TextBox.h>
+#include <MyGUI_Window.h>
+#include <MyGUI_RenderManager.h>
 
 #include <components/esm/loaddial.hpp>
 #include <components/esm/loadinfo.hpp>
+#include <components/esm/loadfact.hpp>
 #include <components/esm/loadnpc.hpp>
 #include <components/misc/stringops.hpp>
 #include <components/settings/settings.hpp>
@@ -30,6 +33,8 @@
 #include "../mwbase/world.hpp"
 #include "../mwdialogue/quest.hpp"
 #include "../mwdialogue/topic.hpp"
+#include "../mwmechanics/npcstats.hpp"
+#include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
 
 namespace
@@ -121,17 +126,24 @@ namespace MWGui
         getWidget(mQuestFilter, "QuestFilter");
         getWidget(mShowCompletedHidden, "ShowCompletedHidden");
         getWidget(mQuestList, "QuestList");
+        getWidget(mQuestCounter, "QuestCounter");
         getWidget(mQuestIcon, "QuestIcon");
         getWidget(mQuestHeading, "QuestHeading");
         getWidget(mQuestDetail, "QuestDetail");
         getWidget(mPinButton, "PinButton");
         getWidget(mHideButton, "HideButton");
+        getWidget(mQuestRelatedLabel, "QuestRelatedLabel");
+        getWidget(mQuestRelatedList, "QuestRelatedList");
         getWidget(mTopicSearch, "TopicSearch");
         getWidget(mTopicList, "TopicList");
+        getWidget(mTopicCounter, "TopicCounter");
         getWidget(mTopicHeading, "TopicHeading");
         getWidget(mTopicDetail, "TopicDetail");
+        getWidget(mTopicRelatedLabel, "TopicRelatedLabel");
+        getWidget(mTopicRelatedList, "TopicRelatedList");
         getWidget(mRecordSearch, "RecordSearch");
         getWidget(mRecordList, "RecordList");
+        getWidget(mRecordCounter, "RecordCounter");
         getWidget(mRecordHeading, "RecordHeading");
         getWidget(mRecordDetail, "RecordDetail");
         getWidget(mStatsDetail, "StatsDetail");
@@ -146,6 +158,8 @@ namespace MWGui
         mTopicSearch->setCaption("");
         mRecordSearch->setCaption("");
         mShowCompletedHidden->setCaption(tr("questman.show_completed_hidden"));
+        mQuestRelatedLabel->setCaption(tr("questman.related_topics"));
+        mTopicRelatedLabel->setCaption(tr("questman.related_topics"));
         mCloseButton->setCaption(tr("questman.close"));
 
         mQuestDetail->setEditStatic(true);
@@ -177,6 +191,9 @@ namespace MWGui
         mRecordList->eventListChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyRecordSelected);
         mPinButton->eventMouseButtonClick += MyGUI::newDelegate(this, &QuestManagerWindow::notifyPin);
         mHideButton->eventMouseButtonClick += MyGUI::newDelegate(this, &QuestManagerWindow::notifyHide);
+        mQuestRelatedList->eventListChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyQuestRelatedSelected);
+        mTopicRelatedList->eventListChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyTopicRelatedSelected);
+        mMainWidget->castType<MyGUI::Window>()->eventWindowChangeCoord += MyGUI::newDelegate(this, &QuestManagerWindow::notifyWindowChanged);
 
         center();
     }
@@ -184,8 +201,15 @@ namespace MWGui
     void QuestManagerWindow::onOpen()
     {
         WindowModal::onOpen();
-        center();
+        restoreWindowGeometry();
         rebuildData();
+
+        int tab = 0;
+        try { tab = Settings::Manager::getInt("last tab", "Questman"); }
+        catch (...) {}
+        tab = std::max(0, std::min(tab, 3));
+        mTabs->setIndexSelected(static_cast<std::size_t>(tab));
+        applyResponsiveLayout();
         refreshCurrentTab();
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCloseButton);
     }
@@ -206,6 +230,128 @@ namespace MWGui
         mVisibleQuests.clear();
         mVisibleTopics.clear();
         mVisibleRecords.clear();
+        mQuestRelatedTopics.clear();
+        mTopicRelatedTopics.clear();
+    }
+
+    void QuestManagerWindow::onResChange(int, int)
+    {
+        applyResponsiveLayout();
+    }
+
+    void QuestManagerWindow::restoreWindowGeometry()
+    {
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+        int w = std::min(920, std::max(700, view.width - 30));
+        int h = std::min(620, std::max(480, view.height - 30));
+        int x = std::max(0, (view.width - w) / 2);
+        int y = std::max(0, (view.height - h) / 2);
+
+        try
+        {
+            const float sw = Settings::Manager::getFloat("window w", "Questman");
+            const float sh = Settings::Manager::getFloat("window h", "Questman");
+            const float sx = Settings::Manager::getFloat("window x", "Questman");
+            const float sy = Settings::Manager::getFloat("window y", "Questman");
+            if (sw > 0.f && sh > 0.f)
+            {
+                w = std::max(700, std::min(static_cast<int>(sw * view.width), view.width));
+                h = std::max(480, std::min(static_cast<int>(sh * view.height), view.height));
+                x = std::max(0, std::min(static_cast<int>(sx * view.width), view.width - w));
+                y = std::max(0, std::min(static_cast<int>(sy * view.height), view.height - h));
+            }
+        }
+        catch (...) {}
+
+        mRestoringGeometry = true;
+        mMainWidget->setCoord(MyGUI::IntCoord(x, y, w, h));
+        mRestoringGeometry = false;
+    }
+
+    void QuestManagerWindow::saveWindowGeometry()
+    {
+        if (mRestoringGeometry)
+            return;
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+        if (view.width <= 0 || view.height <= 0)
+            return;
+        const MyGUI::IntCoord c = mMainWidget->getCoord();
+        Settings::Manager::setFloat("window x", "Questman", c.left / static_cast<float>(view.width));
+        Settings::Manager::setFloat("window y", "Questman", c.top / static_cast<float>(view.height));
+        Settings::Manager::setFloat("window w", "Questman", c.width / static_cast<float>(view.width));
+        Settings::Manager::setFloat("window h", "Questman", c.height / static_cast<float>(view.height));
+    }
+
+    void QuestManagerWindow::applyResponsiveLayout()
+    {
+        const int w = std::max(700, mMainWidget->getSize().width);
+        const int h = std::max(480, mMainWidget->getSize().height);
+        mTitle->setCoord(MyGUI::IntCoord(14, 10, std::max(100, w - 28), 24));
+        mTabs->setCoord(MyGUI::IntCoord(10, 38, std::max(620, w - 20), std::max(386, h - 94)));
+        mCloseButton->setCoord(MyGUI::IntCoord(std::max(10, w - 130), std::max(40, h - 46), 116, 30));
+
+        const int paneW = std::max(612, mTabs->getSize().width - 8);
+        const int paneH = std::max(350, mTabs->getSize().height - 36);
+        const auto pct = [](const char* key, float fallback)
+        {
+            try { return std::max(20.f, std::min(60.f, Settings::Manager::getFloat(key, "Questman"))); }
+            catch (...) { return fallback; }
+        };
+        const auto leftWidth = [paneW](float percent)
+        {
+            return std::max(220, std::min(static_cast<int>(paneW * percent / 100.f), paneW - 320));
+        };
+
+        const int qLeft = leftWidth(pct("quest list width percent", 40.f));
+        const int qRightX = qLeft + 22;
+        const int qRightW = std::max(280, paneW - qRightX - 10);
+        const int qListH = std::max(180, paneH - 64);
+        mQuestSearch->setCoord(MyGUI::IntCoord(6, 6, qLeft, 24));
+        const int filterW = std::max(150, qRightW / 2);
+        mQuestFilter->setCoord(MyGUI::IntCoord(qRightX, 6, filterW, 24));
+        mShowCompletedHidden->setCoord(MyGUI::IntCoord(qRightX + filterW + 8, 6,
+            std::max(120, qRightW - filterW - 8), 24));
+        mQuestList->setCoord(MyGUI::IntCoord(6, 38, qLeft, qListH));
+        mQuestCounter->setCoord(MyGUI::IntCoord(6, 42 + qListH, qLeft, 20));
+        mQuestIcon->setCoord(MyGUI::IntCoord(qRightX, 40, 44, 44));
+        mQuestHeading->setCoord(MyGUI::IntCoord(qRightX + 54, 42, std::max(100, qRightW - 54), 40));
+        const int qDetailY = 92;
+        const int relatedListH = 66;
+        const int qDetailH = std::max(105, paneH - qDetailY - 138);
+        mQuestDetail->setCoord(MyGUI::IntCoord(qRightX, qDetailY, qRightW, qDetailH));
+        const int qButtonsY = qDetailY + qDetailH + 8;
+        mPinButton->setCoord(MyGUI::IntCoord(qRightX, qButtonsY, 120, 28));
+        mHideButton->setCoord(MyGUI::IntCoord(qRightX + 128, qButtonsY, 120, 28));
+        const int qRelatedY = qButtonsY + 36;
+        mQuestRelatedLabel->setCoord(MyGUI::IntCoord(qRightX, qRelatedY, qRightW, 20));
+        mQuestRelatedList->setCoord(MyGUI::IntCoord(qRightX, qRelatedY + 24, qRightW, relatedListH));
+
+        const int tLeft = leftWidth(pct("topic list width percent", 30.f));
+        const int tRightX = tLeft + 22;
+        const int tRightW = std::max(280, paneW - tRightX - 10);
+        const int tListH = std::max(180, paneH - 64);
+        mTopicSearch->setCoord(MyGUI::IntCoord(6, 6, tLeft, 24));
+        mTopicList->setCoord(MyGUI::IntCoord(6, 38, tLeft, tListH));
+        mTopicCounter->setCoord(MyGUI::IntCoord(6, 42 + tListH, tLeft, 20));
+        mTopicHeading->setCoord(MyGUI::IntCoord(tRightX, 8, tRightW, 26));
+        const int topicRelatedH = 70;
+        const int topicDetailH = std::max(150, paneH - 38 - topicRelatedH - 34);
+        mTopicDetail->setCoord(MyGUI::IntCoord(tRightX, 38, tRightW, topicDetailH));
+        const int topicRelatedY = 46 + topicDetailH;
+        mTopicRelatedLabel->setCoord(MyGUI::IntCoord(tRightX, topicRelatedY, tRightW, 20));
+        mTopicRelatedList->setCoord(MyGUI::IntCoord(tRightX, topicRelatedY + 24, tRightW, topicRelatedH));
+
+        const int rLeft = leftWidth(pct("record list width percent", 30.f));
+        const int rRightX = rLeft + 22;
+        const int rRightW = std::max(280, paneW - rRightX - 10);
+        const int rListH = std::max(180, paneH - 64);
+        mRecordSearch->setCoord(MyGUI::IntCoord(6, 6, rLeft, 24));
+        mRecordList->setCoord(MyGUI::IntCoord(6, 38, rLeft, rListH));
+        mRecordCounter->setCoord(MyGUI::IntCoord(6, 42 + rListH, rLeft, 20));
+        mRecordHeading->setCoord(MyGUI::IntCoord(rRightX, 8, rRightW, 26));
+        mRecordDetail->setCoord(MyGUI::IntCoord(rRightX, 38, rRightW, std::max(180, paneH - 46)));
+
+        mStatsDetail->setCoord(MyGUI::IntCoord(6, 6, std::max(300, paneW - 16), std::max(250, paneH - 16)));
     }
 
     std::string QuestManagerWindow::tr(const std::string& key)
@@ -294,6 +440,129 @@ namespace MWGui
         if (value.empty())
             return tr("questman.none");
         return tr("questman.faction." + value);
+    }
+
+    bool QuestManagerWindow::isGenericTopic(const std::string& value)
+    {
+        const std::string key = lower(trim(value));
+        static const std::set<std::string> generic = {
+            "background", "latest rumors", "my trade", "little advice", "little secret",
+            "someone in particular", "duties", "services", "specific place", "advancement", "orders",
+            "свежие сплетни", "небольшой совет", "маленький секрет", "мое занятие",
+            "кто-то особенный", "определенное место", "задания", "задание", "приказы",
+            "повышение", "услуги", "услуга", "биография", "работа", "дела", "пойти вместе",
+            "направление", "поговорить", "долг", "мудрость морроувинда", "крепость",
+            "некромантия", "загадка", "рабство", "вампиры"
+        };
+        return generic.count(key) != 0;
+    }
+
+    bool QuestManagerWindow::isMainQuestFinal(const std::string& addon, const std::vector<std::string>& ids)
+    {
+        std::set<std::string> finals;
+        if (addon == "morrowind") finals = { "c3_destroydagoth", "cx_backpath" };
+        else if (addon == "tribunal") finals = { "tr_sothasil" };
+        else if (addon == "bloodmoon") finals = { "bm_wildhunt" };
+        else if (addon == "tamriel_rebuilt") finals = { "tr_necmq_3", "tr_necmq_3tribunal" };
+        for (const std::string& id : ids)
+            if (finals.count(lower(id)) != 0)
+                return true;
+        return false;
+    }
+
+    std::vector<std::size_t> QuestManagerWindow::relatedTopics(
+        const std::vector<EntryData>& entries, const std::string& excludeId) const
+    {
+        std::set<std::string> explicitLinks;
+        std::string blob;
+        const std::regex marker("@([^#]+)#");
+        for (const EntryData& entry : entries)
+        {
+            if (!blob.empty()) blob += '\n';
+            blob += lower(sanitizeJournalText(entry.mText));
+            for (std::sregex_iterator it(entry.mText.begin(), entry.mText.end(), marker), end; it != end; ++it)
+                explicitLinks.insert(lower(trim((*it)[1].str())));
+        }
+
+        const std::string excluded = lower(excludeId);
+        std::vector<std::size_t> result;
+        for (std::size_t i = 0; i < mTopics.size(); ++i)
+        {
+            const TopicData& topic = mTopics[i];
+            if (lower(topic.mId) == excluded || isGenericTopic(topic.mId) || isGenericTopic(topic.mName))
+                continue;
+            const std::string id = lower(trim(topic.mId));
+            const std::string name = lower(trim(topic.mName));
+            bool match = explicitLinks.count(id) != 0 || explicitLinks.count(name) != 0;
+
+            // The English journal often relies on automatic keyword links and
+            // contains no @keyword# markup. Mirror that behaviour conservatively
+            // for Latin topic names, while Russian keeps using explicit markers
+            // to avoid false matches caused by grammatical declension.
+            if (!match && !name.empty() && static_cast<unsigned char>(name[0]) < 0x80)
+            {
+                std::size_t pos = blob.find(name);
+                while (pos != std::string::npos)
+                {
+                    const auto wordByte = [](unsigned char c)
+                    {
+                        return std::isalnum(c) != 0 || c >= 0x80;
+                    };
+                    const bool leftOk = pos == 0 || !wordByte(static_cast<unsigned char>(blob[pos - 1]));
+                    const std::size_t after = pos + name.size();
+                    const bool rightOk = after >= blob.size() || !wordByte(static_cast<unsigned char>(blob[after]));
+                    if (leftOk && rightOk) { match = true; break; }
+                    pos = blob.find(name, pos + 1);
+                }
+            }
+            if (match) result.push_back(i);
+        }
+        return result;
+    }
+
+    void QuestManagerWindow::refreshQuestRelatedTopics()
+    {
+        mQuestRelatedTopics.clear();
+        mQuestRelatedList->removeAllItems();
+        const std::size_t selected = mQuestList->getIndexSelected();
+        if (selected == MyGUI::ITEM_NONE || selected >= mVisibleQuests.size())
+            return;
+        const QuestData& quest = mQuests[mVisibleQuests[selected]];
+        mQuestRelatedTopics = relatedTopics(quest.mEntries, std::string());
+        for (std::size_t topicIndex : mQuestRelatedTopics)
+            mQuestRelatedList->addItem(mTopics[topicIndex].mName);
+    }
+
+    void QuestManagerWindow::refreshTopicRelatedTopics()
+    {
+        mTopicRelatedTopics.clear();
+        mTopicRelatedList->removeAllItems();
+        const std::size_t selected = mTopicList->getIndexSelected();
+        if (selected == MyGUI::ITEM_NONE || selected >= mVisibleTopics.size())
+            return;
+        const TopicData& topic = mTopics[mVisibleTopics[selected]];
+        mTopicRelatedTopics = relatedTopics(topic.mEntries, topic.mId);
+        for (std::size_t topicIndex : mTopicRelatedTopics)
+            mTopicRelatedList->addItem(mTopics[topicIndex].mName);
+    }
+
+    void QuestManagerWindow::selectTopic(std::size_t topicIndex)
+    {
+        if (topicIndex >= mTopics.size())
+            return;
+        mLastTopicId = lower(mTopics[topicIndex].mId);
+        Settings::Manager::setString("last topic", "Questman", mLastTopicId);
+        mTabs->setIndexSelected(1);
+        refreshTopics();
+        for (std::size_t row = 0; row < mVisibleTopics.size(); ++row)
+        {
+            if (mVisibleTopics[row] == topicIndex)
+            {
+                mTopicList->setIndexSelected(row);
+                updateTopicDetail();
+                break;
+            }
+        }
     }
 
     std::string QuestManagerWindow::questIconFor(const Metadata& meta)
@@ -552,6 +821,9 @@ namespace MWGui
         catch (...) { mLastQuestId.clear(); }
         try { mLastTopicId = lower(Settings::Manager::getString("last topic", "Questman")); }
         catch (...) { mLastTopicId.clear(); }
+        try { mLastRecordTopic = lower(Settings::Manager::getString("last record", "Questman")); }
+        catch (...) { mLastRecordTopic.clear(); }
+        mShowCompletedHidden->setStateSelected(mShowCompletedHiddenState);
         if (mQuestGivers.empty())
             rebuildQuestGivers();
 
@@ -696,34 +968,84 @@ namespace MWGui
         mFilters.push_back(all);
         mQuestFilter->addItem(all.mLabel);
 
-        std::set<std::string> addons, categories, factions;
+        std::map<std::string, int> addonCounts, categoryCounts, factionCounts;
         for (const QuestData& quest : mQuests)
         {
-            addons.insert(quest.mAddon);
-            categories.insert(quest.mCategory);
-            if (!quest.mFaction.empty()) factions.insert(quest.mFaction);
+            ++addonCounts[quest.mAddon];
+            ++categoryCounts[quest.mCategory];
+            if (!quest.mFaction.empty())
+                ++factionCounts[quest.mFaction];
         }
-        const auto addFilters = [this](const std::set<std::string>& values, FilterData::Axis axis,
-            const std::string& prefix)
+
+        std::vector<std::string> addons, categories, factions;
+        for (const auto& row : addonCounts) addons.push_back(row.first);
+        for (const auto& row : categoryCounts) categories.push_back(row.first);
+        for (const auto& row : factionCounts) factions.push_back(row.first);
+
+        // Match the original Questman ordering: vanilla add-ons first, Other
+        // last; Main Quest first and Miscellaneous last; factions alphabetical.
+        const auto addonRank = [](const std::string& value)
         {
-            for (const std::string& value : values)
-            {
-                FilterData filter;
-                filter.mAxis = axis;
-                filter.mValue = value;
-                std::string label;
-                if (axis == FilterData::Addon) label = labelForAddon(value);
-                else if (axis == FilterData::Category) label = labelForCategory(value);
-                else label = labelForFaction(value);
-                filter.mLabel = prefix + ": " + label;
-                mFilters.push_back(filter);
-                mQuestFilter->addItem(filter.mLabel);
-            }
+            if (value == "morrowind") return 0;
+            if (value == "tribunal") return 1;
+            if (value == "bloodmoon") return 2;
+            if (value == "unknown") return 1000;
+            return 10;
         };
-        addFilters(addons, FilterData::Addon, tr("questman.filter.addon"));
-        addFilters(categories, FilterData::Category, tr("questman.filter.category"));
-        addFilters(factions, FilterData::Faction, tr("questman.filter.faction"));
-        mQuestFilter->setIndexSelected(0);
+        std::sort(addons.begin(), addons.end(), [addonRank](const std::string& a, const std::string& b)
+        {
+            const int ra = addonRank(a), rb = addonRank(b);
+            if (ra != rb) return ra < rb;
+            return QuestManagerWindow::labelForAddon(a) < QuestManagerWindow::labelForAddon(b);
+        });
+        const auto categoryRank = [](const std::string& value)
+        {
+            if (value == "main") return 0;
+            if (value == "misc") return 1000;
+            if (value == "unknown") return 999;
+            return 10;
+        };
+        std::sort(categories.begin(), categories.end(), [categoryRank](const std::string& a, const std::string& b)
+        {
+            const int ra = categoryRank(a), rb = categoryRank(b);
+            if (ra != rb) return ra < rb;
+            return QuestManagerWindow::labelForCategory(a) < QuestManagerWindow::labelForCategory(b);
+        });
+        std::sort(factions.begin(), factions.end(), [](const std::string& a, const std::string& b)
+            { return QuestManagerWindow::labelForFaction(a) < QuestManagerWindow::labelForFaction(b); });
+
+        const auto addFilter = [this](FilterData::Axis axis, const std::string& value,
+            const std::string& prefix, int count)
+        {
+            FilterData filter;
+            filter.mAxis = axis;
+            filter.mValue = value;
+            std::string label;
+            if (axis == FilterData::Addon) label = labelForAddon(value);
+            else if (axis == FilterData::Category) label = labelForCategory(value);
+            else label = labelForFaction(value);
+            std::ostringstream caption;
+            caption << prefix << ": " << label << " (" << count << ")";
+            filter.mLabel = caption.str();
+            mFilters.push_back(filter);
+            mQuestFilter->addItem(filter.mLabel);
+        };
+        for (const std::string& value : addons)
+            addFilter(FilterData::Addon, value, tr("questman.filter.addon"), addonCounts[value]);
+        for (const std::string& value : categories)
+            addFilter(FilterData::Category, value, tr("questman.filter.category"), categoryCounts[value]);
+        for (const std::string& value : factions)
+            addFilter(FilterData::Faction, value, tr("questman.filter.faction"), factionCounts[value]);
+
+        int savedAxis = static_cast<int>(FilterData::All);
+        std::string savedValue;
+        try { savedAxis = Settings::Manager::getInt("last filter axis", "Questman"); } catch (...) {}
+        try { savedValue = Settings::Manager::getString("last filter value", "Questman"); } catch (...) {}
+        std::size_t selected = 0;
+        for (std::size_t i = 1; i < mFilters.size(); ++i)
+            if (static_cast<int>(mFilters[i].mAxis) == savedAxis && mFilters[i].mValue == savedValue)
+            { selected = i; break; }
+        mQuestFilter->setIndexSelected(selected);
     }
 
     void QuestManagerWindow::refreshCurrentTab()
@@ -748,7 +1070,7 @@ namespace MWGui
         for (std::size_t i = 0; i < mQuests.size(); ++i)
         {
             const QuestData& quest = mQuests[i];
-            if (!mShowCompletedHiddenState && (quest.mCompleted || quest.mHidden))
+            if (!mShowCompletedHiddenState && (quest.mHidden || (quest.mCompleted && !quest.mPinned)))
                 continue;
             if (filter && filter->mAxis != FilterData::All)
             {
@@ -789,6 +1111,7 @@ namespace MWGui
             }
             mQuestList->setIndexSelected(select);
         }
+        updateCounters();
         updateQuestDetail();
     }
 
@@ -817,6 +1140,7 @@ namespace MWGui
                     { select = row; break; }
             mTopicList->setIndexSelected(select);
         }
+        updateCounters();
         updateTopicDetail();
     }
 
@@ -837,38 +1161,199 @@ namespace MWGui
             mRecordList->addItem(label);
             mVisibleRecords.push_back(i);
         }
-        if (!mVisibleRecords.empty()) mRecordList->setIndexSelected(0);
+        if (!mVisibleRecords.empty())
+        {
+            std::size_t select = 0;
+            if (!mLastRecordTopic.empty())
+                for (std::size_t row = 0; row < mVisibleRecords.size(); ++row)
+                    if (lower(mRecords[mVisibleRecords[row]].mTopic) == mLastRecordTopic)
+                    { select = row; break; }
+            mRecordList->setIndexSelected(select);
+        }
+        updateCounters();
         updateRecordDetail();
+    }
+
+    void QuestManagerWindow::updateCounters()
+    {
+        int hidden = 0;
+        for (const QuestData& quest : mQuests) if (quest.mHidden) ++hidden;
+        std::ostringstream q;
+        q << tr("questman.counter.shown") << " " << mVisibleQuests.size() << " / " << mQuests.size();
+        if (hidden > 0) q << "   " << tr("questman.stats.hidden") << ": " << hidden;
+        mQuestCounter->setCaption(q.str());
+
+        std::ostringstream t;
+        t << tr("questman.counter.shown") << " " << mVisibleTopics.size() << " / " << mTopics.size();
+        mTopicCounter->setCaption(t.str());
+
+        std::ostringstream r;
+        r << tr("questman.counter.shown") << " " << mVisibleRecords.size() << " / " << mRecords.size();
+        mRecordCounter->setCaption(r.str());
     }
 
     void QuestManagerWindow::refreshStats()
     {
         int active = 0, completed = 0, hidden = 0, pinned = 0;
-        std::map<std::string, int> addons, categories, factions;
+        std::map<std::string, int> doneAddons, doneCategories, doneFactions;
+        std::set<std::string> touchedCategories, touchedFactions;
+        std::map<std::string, bool> mainDone;
         for (const QuestData& quest : mQuests)
         {
-            if (quest.mCompleted) ++completed; else ++active;
+            if (quest.mCompleted)
+            {
+                ++completed;
+                ++doneAddons[quest.mAddon];
+                ++doneCategories[quest.mCategory];
+                if (!quest.mFaction.empty()) ++doneFactions[quest.mFaction];
+                if (isMainQuestFinal(quest.mAddon, quest.mIds)) mainDone[quest.mAddon] = true;
+            }
+            else ++active;
             if (quest.mHidden) ++hidden;
             if (quest.mPinned) ++pinned;
-            ++addons[quest.mAddon];
-            ++categories[quest.mCategory];
-            if (!quest.mFaction.empty()) ++factions[quest.mFaction];
+            touchedCategories.insert(quest.mCategory);
+            if (!quest.mFaction.empty()) touchedFactions.insert(quest.mFaction);
         }
-        std::ostringstream text;
-        text << tr("questman.stats.active") << ": " << active << "\n";
-        text << tr("questman.stats.completed") << ": " << completed << "\n";
-        text << tr("questman.stats.pinned") << ": " << pinned << "\n";
-        text << tr("questman.stats.hidden") << ": " << hidden << "\n";
-        text << tr("questman.stats.topics") << ": " << mTopics.size() << "\n";
-        text << tr("questman.stats.records") << ": " << mRecords.size() << "\n\n";
-        text << tr("questman.filter.addon") << "\n";
-        for (const auto& value : addons) text << "  " << labelForAddon(value.first) << ": " << value.second << "\n";
-        text << "\n" << tr("questman.filter.category") << "\n";
-        for (const auto& value : categories) text << "  " << labelForCategory(value.first) << ": " << value.second << "\n";
-        if (!factions.empty())
+
+        // Original Questman compares completed quests against the entire loaded
+        // quest catalog, not only quests already touched by the player.
+        struct CatalogQuest { std::string addon, category, faction; };
+        std::map<std::string, CatalogQuest> catalog;
+        const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+        const MWWorld::Store<ESM::Dialogue>& dialogues = store.get<ESM::Dialogue>();
+        for (auto dial = dialogues.begin(); dial != dialogues.end(); ++dial)
         {
-            text << "\n" << tr("questman.filter.faction") << "\n";
-            for (const auto& value : factions) text << "  " << labelForFaction(value.first) << ": " << value.second << "\n";
+            if (dial->mType != ESM::Dialogue::Journal) continue;
+            std::string name;
+            for (const ESM::DialInfo& info : dial->mInfo)
+            {
+                if (info.mQuestStatus == ESM::DialInfo::QS_Name && !trim(info.mResponse).empty())
+                {
+                    name = trim(info.mResponse);
+                    break;
+                }
+            }
+            if (name.empty()) continue;
+            const std::string group = lower(name);
+            if (catalog.count(group)) continue;
+            const Metadata meta = classifyQuest(dial->mId);
+            catalog[group] = { meta.mAddon, meta.mCategory, meta.mFaction };
+        }
+
+        std::map<std::string, int> totalAddons, totalCategories, totalFactions;
+        for (const auto& row : catalog)
+        {
+            ++totalAddons[row.second.addon];
+            ++totalCategories[row.second.category];
+            if (!row.second.faction.empty()) ++totalFactions[row.second.faction];
+        }
+
+        const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        const MWMechanics::NpcStats& playerStats = player.getClass().getNpcStats(player);
+        const auto factionId = [](const std::string& slug) -> std::string
+        {
+            if (slug == "fighters") return "fighters guild";
+            if (slug == "mages") return "mages guild";
+            if (slug == "thieves") return "thieves guild";
+            if (slug == "morag_tong") return "morag tong";
+            if (slug == "imperial_legion") return "imperial legion";
+            if (slug == "imperial_cult") return "imperial cult";
+            if (slug == "temple") return "temple";
+            if (slug == "east_empire") return "east empire company";
+            if (slug == "hlaalu") return "hlaalu";
+            if (slug == "redoran") return "redoran";
+            if (slug == "telvanni") return "telvanni";
+            return std::string();
+        };
+        const auto topRankReached = [&store, &playerStats, &factionId](const std::string& slug)
+        {
+            const std::string id = factionId(slug);
+            if (id.empty()) return false;
+            const int rank = playerStats.getFactionRank(id);
+            const ESM::Faction* faction = store.get<ESM::Faction>().search(id);
+            if (!faction || rank < 0) return false;
+            int top = -1;
+            for (int i = 0; i < 10; ++i)
+                if (!faction->mRanks[i].empty()) top = i;
+            return top >= 0 && rank >= top;
+        };
+
+        std::string completedHouse;
+        for (const char* house : { "hlaalu", "redoran", "telvanni" })
+        {
+            if (topRankReached(house))
+            {
+                completedHouse = house;
+                break;
+            }
+        }
+
+        std::ostringstream text;
+        text << tr("questman.stats.overview") << "\n";
+        text << "  " << tr("questman.stats.active") << ": " << active << "\n";
+        text << "  " << tr("questman.stats.completed") << ": " << completed << " / " << catalog.size() << "\n";
+        text << "  " << tr("questman.stats.pinned") << ": " << pinned << "\n";
+        text << "  " << tr("questman.stats.hidden") << ": " << hidden << "\n";
+        text << "  " << tr("questman.stats.topics") << ": " << mTopics.size() << "\n";
+        text << "  " << tr("questman.stats.records") << ": " << mRecords.size() << "\n\n";
+
+        text << tr("questman.stats.by_addon") << "\n";
+        std::vector<std::string> addonKeys;
+        for (const auto& value : totalAddons) addonKeys.push_back(value.first);
+        const auto addonRank = [](const std::string& value)
+        {
+            if (value == "morrowind") return 0;
+            if (value == "tribunal") return 1;
+            if (value == "bloodmoon") return 2;
+            if (value == "unknown") return 1000;
+            return 10;
+        };
+        std::sort(addonKeys.begin(), addonKeys.end(), [addonRank](const std::string& a, const std::string& b)
+        {
+            const int ra = addonRank(a), rb = addonRank(b);
+            if (ra != rb) return ra < rb;
+            return QuestManagerWindow::labelForAddon(a) < QuestManagerWindow::labelForAddon(b);
+        });
+        for (const std::string& key : addonKeys)
+        {
+            text << "  " << labelForAddon(key) << ": " << doneAddons[key] << " / " << totalAddons[key];
+            if (mainDone[key]) text << "  [" << tr("questman.stats.main_done") << "]";
+            text << "\n";
+        }
+
+        text << "\n" << tr("questman.stats.by_category") << "\n";
+        std::vector<std::string> categoryKeys(touchedCategories.begin(), touchedCategories.end());
+        const auto categoryRank = [](const std::string& value)
+        {
+            if (value == "main") return 0;
+            if (value == "misc") return 1000;
+            if (value == "unknown") return 999;
+            return 10;
+        };
+        std::sort(categoryKeys.begin(), categoryKeys.end(), [categoryRank](const std::string& a, const std::string& b)
+        {
+            const int ra = categoryRank(a), rb = categoryRank(b);
+            if (ra != rb) return ra < rb;
+            return QuestManagerWindow::labelForCategory(a) < QuestManagerWindow::labelForCategory(b);
+        });
+        for (const std::string& key : categoryKeys)
+            text << "  " << labelForCategory(key) << ": " << doneCategories[key] << " / " << totalCategories[key] << "\n";
+
+        if (!touchedFactions.empty())
+        {
+            text << "\n" << tr("questman.stats.by_faction") << "\n";
+            std::vector<std::string> factionKeys(touchedFactions.begin(), touchedFactions.end());
+            std::sort(factionKeys.begin(), factionKeys.end(), [](const std::string& a, const std::string& b)
+                { return QuestManagerWindow::labelForFaction(a) < QuestManagerWindow::labelForFaction(b); });
+            for (const std::string& key : factionKeys)
+            {
+                text << "  " << labelForFaction(key) << ": " << doneFactions[key] << " / " << totalFactions[key];
+                if (topRankReached(key))
+                    text << "  [" << tr("questman.stats.top_rank") << "]";
+                else if (!completedHouse.empty() && inSet(key, { "hlaalu", "redoran", "telvanni" }))
+                    text << "  [" << tr("questman.stats.other_house") << ": " << labelForFaction(completedHouse) << "]";
+                text << "\n";
+            }
         }
         mStatsDetail->setCaption(text.str());
     }
@@ -883,6 +1368,8 @@ namespace MWGui
             mQuestIcon->setImageTexture("");
             mPinButton->setEnabled(false);
             mHideButton->setEnabled(false);
+            mQuestRelatedTopics.clear();
+            mQuestRelatedList->removeAllItems();
             return;
         }
         QuestData& quest = mQuests[mVisibleQuests[selected]];
@@ -910,6 +1397,7 @@ namespace MWGui
         }
         mQuestDetail->setCaption(text.str());
         updateQuestButtons();
+        refreshQuestRelatedTopics();
     }
 
     void QuestManagerWindow::updateQuestButtons()
@@ -930,6 +1418,8 @@ namespace MWGui
         {
             mTopicHeading->setCaption(tr("questman.no_selection"));
             mTopicDetail->setCaption("");
+            mTopicRelatedTopics.clear();
+            mTopicRelatedList->removeAllItems();
             return;
         }
         const TopicData& topic = mTopics[mVisibleTopics[selected]];
@@ -941,6 +1431,7 @@ namespace MWGui
             text << sanitizeJournalText(entry.mText) << "\n\n";
         }
         mTopicDetail->setCaption(text.str());
+        refreshTopicRelatedTopics();
     }
 
     void QuestManagerWindow::updateRecordDetail()
@@ -965,13 +1456,15 @@ namespace MWGui
 
     void QuestManagerWindow::notifyClose(MyGUI::Widget*)
     {
+        saveWindowGeometry();
         setVisible(false);
         if (mReturnToJournal)
             mReturnToJournal();
     }
 
-    void QuestManagerWindow::notifyTabChanged(MyGUI::TabControl*, std::size_t)
+    void QuestManagerWindow::notifyTabChanged(MyGUI::TabControl*, std::size_t index)
     {
+        Settings::Manager::setInt("last tab", "Questman", static_cast<int>(index));
         refreshCurrentTab();
     }
 
@@ -980,8 +1473,13 @@ namespace MWGui
         refreshCurrentTab();
     }
 
-    void QuestManagerWindow::notifyFilterChanged(MyGUI::ComboBox*, std::size_t)
+    void QuestManagerWindow::notifyFilterChanged(MyGUI::ComboBox*, std::size_t index)
     {
+        if (index < mFilters.size())
+        {
+            Settings::Manager::setInt("last filter axis", "Questman", static_cast<int>(mFilters[index].mAxis));
+            Settings::Manager::setString("last filter value", "Questman", mFilters[index].mValue);
+        }
         refreshQuests();
     }
 
@@ -1017,6 +1515,12 @@ namespace MWGui
 
     void QuestManagerWindow::notifyRecordSelected(MyGUI::ListBox*, std::size_t)
     {
+        const std::size_t selected = mRecordList->getIndexSelected();
+        if (selected != MyGUI::ITEM_NONE && selected < mVisibleRecords.size())
+        {
+            mLastRecordTopic = lower(mRecords[mVisibleRecords[selected]].mTopic);
+            Settings::Manager::setString("last record", "Questman", mLastRecordTopic);
+        }
         updateRecordDetail();
     }
 
@@ -1043,4 +1547,27 @@ namespace MWGui
         writeIdSet("hidden quests", mHidden);
         refreshQuests();
     }
+
+    void QuestManagerWindow::notifyQuestRelatedSelected(MyGUI::ListBox*, std::size_t index)
+    {
+        if (index == MyGUI::ITEM_NONE || index >= mQuestRelatedTopics.size())
+            return;
+        selectTopic(mQuestRelatedTopics[index]);
+    }
+
+    void QuestManagerWindow::notifyTopicRelatedSelected(MyGUI::ListBox*, std::size_t index)
+    {
+        if (index == MyGUI::ITEM_NONE || index >= mTopicRelatedTopics.size())
+            return;
+        selectTopic(mTopicRelatedTopics[index]);
+    }
+
+    void QuestManagerWindow::notifyWindowChanged(MyGUI::Window*)
+    {
+        if (mRestoringGeometry)
+            return;
+        applyResponsiveLayout();
+        saveWindowGeometry();
+    }
+
 }

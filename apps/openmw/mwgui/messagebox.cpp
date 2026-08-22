@@ -23,10 +23,13 @@
 
 namespace
 {
-    bool useBarterNotificationFrame()
+    bool useInventoryNotificationFrame()
     {
         MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
-        return windowManager && windowManager->containsMode(MWGui::GM_Barter);
+        return windowManager && (windowManager->containsMode(MWGui::GM_Barter)
+            || windowManager->containsMode(MWGui::GM_Inventory)
+            || windowManager->containsMode(MWGui::GM_Container)
+            || windowManager->containsMode(MWGui::GM_Companion));
     }
 }
 
@@ -99,7 +102,7 @@ namespace MWGui
         if(mInterMessageBoxe != nullptr && mInterMessageBoxe->mMarkedToDelete) {
             mLastButtonPressed = mInterMessageBoxe->readPressedButton();
 
-            
+
 
             mInterMessageBoxe->setVisible(false);
             delete mInterMessageBoxe;
@@ -158,7 +161,7 @@ namespace MWGui
         }
 
         mInterMessageBoxe = new InteractiveMessageBox(*this, message, buttons);
-        
+
         mLastButtonPressed = -1;
 
         return true;
@@ -197,12 +200,12 @@ namespace MWGui
 
 
     MessageBox::MessageBox(MessageBoxManager& parMessageBoxManager, const std::string& message)
-      : Layout(useBarterNotificationFrame() ? "openmw_messagebox_barter.layout" : "openmw_messagebox.layout")
+      : Layout(useInventoryNotificationFrame() ? "openmw_messagebox_barter.layout" : "openmw_messagebox.layout")
       , mCurrentTime(0)
       , mMaxTime(0)
       , mMessageBoxManager(parMessageBoxManager)
       , mMessage(message)
-      , mFramedForBarter(useBarterNotificationFrame())
+      , mFramedForInventoryMode(useInventoryNotificationFrame())
     {
         // defines
         mBottomPadding = 48;
@@ -212,11 +215,11 @@ namespace MWGui
 
         mMessageWidget->setCaptionWithReplacing(mMessage);
 
-        if (mFramedForBarter)
+        if (mFramedForInventoryMode)
         {
-            // Barter covers most of the screen, so transparent notifications
-            // disappear into the item lists. Size a dedicated opaque framed
-            // panel around the text while retaining the normal fade/timing.
+            // Inventory-style windows cover most of the screen, so transparent
+            // notifications disappear into the item lists. Size a dedicated
+            // opaque framed panel around the text while retaining normal fade.
             const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
             const int maxWidth = std::max(220, std::min(560, view.width - 40));
             const int minWidth = std::min(300, maxWidth);

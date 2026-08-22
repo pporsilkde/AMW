@@ -402,7 +402,13 @@ namespace MWGui
             mPaperDollAutoRevealed = false;
         mGuiMode = mode;
         if (mItemView)
-            mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container || mode == GM_Companion);
+            // Keep list view behaviour identical to the classic icon grid: a normal
+            // click picks the item up and starts the existing DragAndDrop path.
+            // Two-pane modes still complete the transfer immediately in
+            // onItemSelectedFromSourceModel(), while the player's inventory
+            // keeps the item on the cursor until it is dropped.
+            mItemView->setSingleClickActionEnabled(mode == GM_Inventory || mode == GM_Barter
+                || mode == GM_Container || mode == GM_Companion);
 
         std::string setting = getModeSetting();
         setPinButtonVisible(mode == GM_Inventory);
@@ -583,6 +589,13 @@ namespace MWGui
     void InventoryWindow::onItemDoubleClicked(int index)
     {
         if (!mSortModel || !mTradeModel)
+            return;
+
+        // In the player's inventory list a single click now mirrors grid mode
+        // and immediately picks the stack up. Ignore the follow-up MyGUI
+        // double-click notification while that drag is active, otherwise the
+        // same click sequence could both pick up and use/equip the item.
+        if (mDragAndDrop->mIsOnDragAndDrop)
             return;
 
         // Barter/container/companion list rows transfer on the first click. Do
@@ -1674,4 +1687,3 @@ namespace MWGui
         return MWBase::Environment::get().getWindowManager()->correctIconPath(gold->mIcon);
     }
 }
-

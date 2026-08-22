@@ -26,6 +26,7 @@
 #include "../mwworld/esmstore.hpp"
 
 #include "../mwmechanics/alchemy.hpp"
+#include "../mwmechanics/npcstats.hpp"
 
 namespace
 {
@@ -275,7 +276,7 @@ namespace MWGui
             if (!mEffectFilter.empty())
             {
                 MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
-                const auto alchemySkill = player.getClass().getSkill(player, ESM::Skill::Alchemy);
+                const auto alchemySkill = player.getClass().getNpcStats(player).getSkill(ESM::Skill::Alchemy).getBase();
 
                 const auto effects = MWMechanics::Alchemy::effectsDescription(base, alchemySkill);
 

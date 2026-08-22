@@ -107,6 +107,14 @@ namespace MWClass
         text += MWGui::ToolTips::getWeightString(ref->mBase->mData.mWeight, "#{sWeight}");
         text += MWGui::ToolTips::getValueString(ref->mBase->mData.mValue, "#{sValue}");
 
+        switch (ref->mBase->mData.mType)
+        {
+            case ESM::Apparatus::MortarPestle: text += "\n#{arenamp=alchemy.apparatus.mortar}"; break;
+            case ESM::Apparatus::Alembic: text += "\n#{arenamp=alchemy.apparatus.alembic}"; break;
+            case ESM::Apparatus::Calcinator: text += "\n#{arenamp=alchemy.apparatus.calcinator}"; break;
+            case ESM::Apparatus::Retort: text += "\n#{arenamp=alchemy.apparatus.retort}"; break;
+        }
+
         if (MWBase::Environment::get().getWindowManager()->getFullHelp()) {
             text += MWGui::ToolTips::getCellRefString(ptr.getCellRef());
             text += MWGui::ToolTips::getMiscString(ref->mBase->mScript, "Script");

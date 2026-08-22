@@ -160,6 +160,7 @@ enum RecNameInts
     REC_ENAB = FourCC<'E','N','A','B'>::value,
     REC_CAM_ = FourCC<'C','A','M','_'>::value,
     REC_STLN = FourCC<'S','T','L','N'>::value,
+    REC_AMAL = FourCC<'A','M','A','L'>::value, // ArenaMW Alchemy knowledge
     REC_INPU = FourCC<'I','N','P','U'>::value,
 
     // format 1

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-  <Widget type="Window" skin="MW_DialogNoTransp" layer="Windows" position="0 0 920 620" align="Center" name="_Main">
+  <Widget type="Window" skin="MW_Window" layer="Windows" position="0 0 920 620" name="_Main">
+    <Property key="MinSize" value="700 480"/>
     <Property key="Caption" value="#{arenamp=questman.title}"/>
     <Widget type="TextBox" skin="SandBrightText" position="14 10 892 24" name="QuestmanTitle">
       <Property key="TextAlign" value="Center"/>
@@ -17,28 +18,35 @@
         </Widget>
         <Widget type="ComboBox" skin="MW_ComboBox" position="300 6 290 24" name="QuestFilter"/>
         <Widget type="Button" skin="MW_Button" position="598 6 284 24" name="ShowCompletedHidden"/>
-        <Widget type="ListBox" skin="MW_List" position="6 38 352 412" name="QuestList"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 352 386" name="QuestList"/>
+        <Widget type="TextBox" skin="SandText" position="6 428 352 20" name="QuestCounter"/>
         <Widget type="ImageBox" skin="ImageBox" position="374 40 44 44" name="QuestIcon"/>
         <Widget type="TextBox" skin="SandBrightText" position="428 42 448 40" name="QuestHeading">
           <Property key="TextAlign" value="Left VCenter"/>
         </Widget>
-        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 92 502 322" name="QuestDetail"/>
-        <Widget type="Button" skin="MW_Button" position="374 422 120 28" name="PinButton"/>
-        <Widget type="Button" skin="MW_Button" position="502 422 120 28" name="HideButton"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 92 502 230" name="QuestDetail"/>
+        <Widget type="Button" skin="MW_Button" position="374 330 120 28" name="PinButton"/>
+        <Widget type="Button" skin="MW_Button" position="502 330 120 28" name="HideButton"/>
+        <Widget type="TextBox" skin="SandBrightText" position="374 366 502 20" name="QuestRelatedLabel"/>
+        <Widget type="ListBox" skin="MW_List" position="374 390 502 60" name="QuestRelatedList"/>
       </Widget>
 
       <Widget type="TabItem" skin="" position="4 32 892 490">
         <Property key="Caption" value="#{arenamp=questman.tab.topics}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 352 24" name="TopicSearch"/>
-        <Widget type="ListBox" skin="MW_List" position="6 38 352 412" name="TopicList"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 352 386" name="TopicList"/>
+        <Widget type="TextBox" skin="SandText" position="6 428 352 20" name="TopicCounter"/>
         <Widget type="TextBox" skin="SandBrightText" position="374 8 502 26" name="TopicHeading"/>
-        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 38 502 412" name="TopicDetail"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 38 502 314" name="TopicDetail"/>
+        <Widget type="TextBox" skin="SandBrightText" position="374 360 502 20" name="TopicRelatedLabel"/>
+        <Widget type="ListBox" skin="MW_List" position="374 384 502 66" name="TopicRelatedList"/>
       </Widget>
 
       <Widget type="TabItem" skin="" position="4 32 892 490">
         <Property key="Caption" value="#{arenamp=questman.tab.records}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 352 24" name="RecordSearch"/>
-        <Widget type="ListBox" skin="MW_List" position="6 38 352 412" name="RecordList"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 352 386" name="RecordList"/>
+        <Widget type="TextBox" skin="SandText" position="6 428 352 20" name="RecordCounter"/>
         <Widget type="TextBox" skin="SandBrightText" position="374 8 502 26" name="RecordHeading"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 38 502 412" name="RecordDetail"/>
       </Widget>

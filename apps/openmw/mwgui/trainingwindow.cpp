@@ -16,8 +16,6 @@
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 
-#include <components/settings/settings.hpp>
-
 #include "tooltips.hpp"
 
 namespace
@@ -44,7 +42,6 @@ namespace MWGui
     TrainingWindow::TrainingWindow()
         : WindowBase("openmw_trainingwindow.layout")
         , mTimeAdvancer(0.05f)
-        , mTrainingSkillBasedOnBaseSkill(Settings::Manager::getBool("trainers training skills based on base skill", "Game"))
     {
         getWidget(mTrainingOptions, "TrainingOptions");
         getWidget(mCancelButton, "CancelButton");
@@ -156,7 +153,7 @@ namespace MWGui
 
             price = std::max(1, price);
 
-            price = MWBase::Environment::get().getMechanicsManager()->getBarterOffer(mPtr, price, true);
+            price = MWBase::Environment::get().getMechanicsManager()->getBarterOffer(mPtr, price, true, true);
 
             MyGUI::Button* button = mTrainingOptions->createWidget<MyGUI::Button>(price <= playerGold ? "SandTextButton" : "SandTextButtonDisabled", // can't use setEnabled since that removes tooltip
                 MyGUI::IntCoord(5, 5+i*18, mTrainingOptions->getWidth()-10, 18), MyGUI::Align::Default);
@@ -245,12 +242,12 @@ namespace MWGui
 
         price += priceaddition;
 
-        
+
         price *= store.get<ESM::GameSetting>().find("iTrainingMod")->mValue.getInteger();
-     
 
 
-        price = MWBase::Environment::get().getMechanicsManager()->getBarterOffer(mPtr,price,true);
+
+        price = MWBase::Environment::get().getMechanicsManager()->getBarterOffer(mPtr, price, true, true);
 
         if (price > player.getClass().getContainerStore(player).count(MWWorld::ContainerStore::sGoldId))
             return;
@@ -312,9 +309,10 @@ namespace MWGui
 
     float TrainingWindow::getSkillForTraining(const MWMechanics::NpcStats& stats, int skillId) const
     {
-        if (mTrainingSkillBasedOnBaseSkill)
-            return stats.getSkill(skillId).getBase();
-        return stats.getSkill(skillId).getModified();
+        // Anti-exploit rule: trainer skill selection and the maximum trainable level are
+        // determined only by the permanent/base value. Drain/Fortify Skill must not make
+        // training cheaper, expose a different top-three list, or change trainer capacity.
+        return stats.getSkill(skillId).getBase();
     }
 
     void TrainingWindow::onFrame(float dt)

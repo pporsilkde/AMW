@@ -800,7 +800,7 @@ namespace MWGui
             mCharGen->spawnDialog(mode);
             break;
         default:
-            
+
             break;
         }
     }
@@ -891,12 +891,14 @@ namespace MWGui
 
     void WindowManager::messageBox (const std::string& message, enum MWGui::ShowInDialogueMode showInDialogueMode)
     {
-        // Barter is opened from dialogue, so the dialogue actor remains set
-        // while the dialogue window itself is hidden behind the two barter
-        // panes. Do not route ordinary barter notifications into that hidden
-        // history: show them immediately in the barter-only framed message box.
-        // Explicit dialogue-only script notifications keep their old routing.
-        if (containsMode(GM_Barter) && showInDialogueMode != MWGui::ShowInDialogueMode_Only)
+        // Inventory-style windows can cover the dialogue and normal transient
+        // text. Keep ordinary inventory/barter/container/companion feedback in
+        // its own framed notification box instead of sending it to a hidden
+        // dialogue history. Explicit dialogue-only script notifications keep
+        // their old routing.
+        const bool inventoryStyleMode = containsMode(GM_Barter) || containsMode(GM_Inventory)
+            || containsMode(GM_Container) || containsMode(GM_Companion);
+        if (inventoryStyleMode && showInDialogueMode != MWGui::ShowInDialogueMode_Only)
         {
             mMessageBoxManager->createMessageBox(message);
             return;
@@ -1120,7 +1122,7 @@ namespace MWGui
         }
     }
 
-    
+
 
     void WindowManager::setActiveMap(int x, int y, bool interior)
     {
@@ -1229,7 +1231,7 @@ namespace MWGui
         MWBase::Environment::get().getInputManager()->setDragDrop(dragDrop);
     }
 
-    
+
 
     void WindowManager::setCursorVisible(bool visible)
     {
@@ -1244,7 +1246,7 @@ namespace MWGui
     void WindowManager::onRetrieveTag(const MyGUI::UString& _tag, MyGUI::UString& _result)
     {
         std::string tag(_tag);
-        
+
         std::string MyGuiPrefix = "setting=";
         size_t MyGuiPrefixLength = MyGuiPrefix.length();
 
@@ -1264,8 +1266,8 @@ namespace MWGui
             size_t comma_pos = tag.find(',');
             std::string settingSection = tag.substr(0, comma_pos);
             std::string settingTag = tag.substr(comma_pos+1, tag.length());
-            
-            _result = Settings::Manager::getString(settingTag, settingSection);            
+
+            _result = Settings::Manager::getString(settingTag, settingSection);
         }
         else if (tag.compare(0, tokenLength, tokenToFind) == 0)
         {
@@ -1632,7 +1634,7 @@ namespace MWGui
         mConsole->executeFile (path);
     }
 
-    
+
 
     MWGui::InventoryWindow* WindowManager::getInventoryWindow() { return mInventoryWindow; }
     MWGui::CountDialog* WindowManager::getCountDialog() { return mCountDialog; }
@@ -1640,9 +1642,9 @@ namespace MWGui
     MWGui::TradeWindow* WindowManager::getTradeWindow() { return mTradeWindow; }
     MWGui::DialogueWindow* WindowManager::getDialogueWindow() { return mDialogueWindow; }
 
-    
 
-    
+
+
 
     void WindowManager::useItem(const MWWorld::Ptr &item, bool bypassBeastRestrictions)
     {
@@ -1786,7 +1788,7 @@ namespace MWGui
         mQuickKeysMenu->activateQuickKey(index);
     }
 
-    
+
 
     bool WindowManager::getSubtitlesEnabled ()
     {
@@ -2342,9 +2344,9 @@ namespace MWGui
         mConsole->setSelectedObject(object);
     }
 
-    
 
-    
+
+
 
     std::string WindowManager::correctIconPath(const std::string& path)
     {

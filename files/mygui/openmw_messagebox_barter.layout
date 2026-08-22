@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <MyGUI type="Layout">
-    <!-- Barter-only transient notification: opaque black client + Morrowind
-         dialog frame so errors/price messages remain visible over both panes. -->
+    <!-- Inventory-style transient notification: opaque black client +
+         Morrowind dialog frame so feedback remains readable over item panes. -->
     <Widget type="Window" skin="MW_DialogNoTransp" layer="MessageBox" position="0 0 520 54" name="_Main">
         <Property key="NeedMouse" value="false"/>
         <Widget type="EditBox" skin="MW_TextEditClient" position="12 8 496 38" name="message" align="Stretch">

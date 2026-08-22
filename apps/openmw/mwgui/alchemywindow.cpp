@@ -13,6 +13,8 @@
 
 #include "../mwmechanics/magiceffects.hpp"
 #include "../mwmechanics/alchemy.hpp"
+#include "../mwmechanics/npcstats.hpp"
+#include "../mwmechanics/alchemyknowledge.hpp"
 #include "../mwmechanics/actorutil.hpp"
 
 #include "../mwworld/class.hpp"
@@ -20,6 +22,7 @@
 
 #include <MyGUI_Macros.h>
 #include <components/esm/records.hpp>
+#include <components/misc/stringops.hpp>
 
 #include "inventoryitemmodel.hpp"
 #include "sortfilteritemmodel.hpp"
@@ -40,6 +43,10 @@ namespace MWGui
     {
         getWidget(mCreateButton, "CreateButton");
         getWidget(mCancelButton, "CancelButton");
+        getWidget(mPotionModeButton, "PotionMode");
+        getWidget(mPoisonModeButton, "PoisonMode");
+        getWidget(mLastBrewText, "LastBrew");
+        getWidget(mRepeatLastButton, "RepeatLast");
         getWidget(mIngredients[0], "Ingredient1");
         getWidget(mIngredients[1], "Ingredient2");
         getWidget(mIngredients[2], "Ingredient3");
@@ -76,6 +83,9 @@ namespace MWGui
 
         mCreateButton->eventMouseButtonClick += MyGUI::newDelegate(this, &AlchemyWindow::onCreateButtonClicked);
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &AlchemyWindow::onCancelButtonClicked);
+        mPotionModeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &AlchemyWindow::onModeButtonClicked);
+        mPoisonModeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &AlchemyWindow::onModeButtonClicked);
+        mRepeatLastButton->eventMouseButtonClick += MyGUI::newDelegate(this, &AlchemyWindow::onRepeatLastClicked);
 
         mNameEdit->eventEditSelectAccept += MyGUI::newDelegate(this, &AlchemyWindow::onAccept);
         mFilterValue->eventComboChangePosition += MyGUI::newDelegate(this, &AlchemyWindow::onFilterChanged);
@@ -96,6 +106,41 @@ namespace MWGui
     void AlchemyWindow::onCancelButtonClicked(MyGUI::Widget* _sender)
     {
         MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Alchemy);
+    }
+
+    void AlchemyWindow::onModeButtonClicked(MyGUI::Widget* sender)
+    {
+        mAlchemy->setMode(sender == mPoisonModeButton
+            ? MWMechanics::Alchemy::Mode_Poison : MWMechanics::Alchemy::Mode_Potion);
+        update();
+    }
+
+    void AlchemyWindow::onRepeatLastClicked(MyGUI::Widget*)
+    {
+        const std::vector<std::string>& recipe = MWMechanics::AlchemyKnowledge::getLastRecipe();
+        if (recipe.empty())
+            return;
+
+        for (int i = 0; i < 4; ++i)
+            mAlchemy->removeIngredient(i);
+
+        mAlchemy->setMode(MWMechanics::AlchemyKnowledge::getLastMode() == static_cast<int>(MWMechanics::Alchemy::Mode_Poison)
+            ? MWMechanics::Alchemy::Mode_Poison : MWMechanics::Alchemy::Mode_Potion);
+
+        for (const std::string& id : recipe)
+        {
+            for (std::size_t i = 0; i < mModel->getItemCount(); ++i)
+            {
+                MWWorld::Ptr item = mModel->getItem(i).mBase;
+                if (item.getTypeName() == typeid(ESM::Ingredient).name()
+                    && Misc::StringUtils::ciEqual(item.getCellRef().getRefId(), id))
+                {
+                    mAlchemy->addIngredient(item);
+                    break;
+                }
+            }
+        }
+        update();
     }
 
     void AlchemyWindow::onCreateButtonClicked(MyGUI::Widget* _sender)
@@ -200,7 +245,7 @@ namespace MWGui
             itemNames.insert(item.getClass().getName(item));
 
             MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
-            auto const alchemySkill = player.getClass().getSkill(player, ESM::Skill::Alchemy);
+            auto const alchemySkill = player.getClass().getNpcStats(player).getSkill(ESM::Skill::Alchemy).getBase();
 
             auto const effects = MWMechanics::Alchemy::effectsDescription(item, alchemySkill);
             itemEffects.insert(effects.begin(), effects.end());
@@ -246,6 +291,7 @@ namespace MWGui
     {
         mAlchemy->clear();
         mAlchemy->setAlchemist (MWMechanics::getPlayer());
+        mAlchemy->setMode(MWMechanics::Alchemy::Mode_Potion);
 
         mModel = new InventoryItemModel(MWMechanics::getPlayer());
         mSortModel = new SortFilterItemModel(mModel);
@@ -337,26 +383,43 @@ namespace MWGui
 
         mItemView->update();
 
-        std::set<MWMechanics::EffectKey> effectIds = mAlchemy->listEffects();
+        mPotionModeButton->setStateSelected(mAlchemy->getMode() == MWMechanics::Alchemy::Mode_Potion);
+        mPoisonModeButton->setStateSelected(mAlchemy->getMode() == MWMechanics::Alchemy::Mode_Poison);
+
+        // countPotionsToBrew() validates the current name as well as the ingredients.
+        // Keep the mechanics-side name synchronized with the edit box so the live
+        // batch limit remains correct before the Create button is pressed.
+        mAlchemy->setPotionName(mNameEdit->getCaption());
+        const int maxBrew = mAlchemy->countPotionsToBrew();
+        mBrewCountEdit->setMaxValue(std::max(1, maxBrew));
+        if (maxBrew > 0 && mBrewCountEdit->getValue() > maxBrew)
+            mBrewCountEdit->setValue(maxBrew);
+
+        const std::string& lastBrew = MWMechanics::AlchemyKnowledge::getLastBrew();
+        mLastBrewText->setCaptionWithReplacing("#{arenamp=alchemy.last_brew}: "
+            + (lastBrew.empty() ? std::string("-") : lastBrew));
+        mRepeatLastButton->setEnabled(!MWMechanics::AlchemyKnowledge::getLastRecipe().empty());
+
         Widgets::SpellEffectList list;
-        unsigned int effectIndex=0;
-        for (const MWMechanics::EffectKey& effectKey : effectIds)
+        for (const ESM::ENAMstruct& effect : mAlchemy->getEffects())
         {
             Widgets::SpellEffectParams params;
-            params.mEffectID = effectKey.mId;
-            const ESM::MagicEffect* magicEffect = MWBase::Environment::get().getWorld()->getStore().get<ESM::MagicEffect>().find(effectKey.mId);
-            if (magicEffect->mData.mFlags & ESM::MagicEffect::TargetSkill)
-                params.mSkill = effectKey.mArg;
-            else if (magicEffect->mData.mFlags & ESM::MagicEffect::TargetAttribute)
-                params.mAttribute = effectKey.mArg;
-            params.mIsConstant = true;
+            params.mEffectID = effect.mEffectID;
+            params.mSkill = effect.mSkill;
+            params.mAttribute = effect.mAttribute;
+            params.mMagnMin = effect.mMagnMin;
+            params.mMagnMax = effect.mMagnMax;
+            params.mDuration = effect.mDuration;
+            params.mRange = effect.mRange;
+            params.mArea = effect.mArea;
             params.mNoTarget = true;
-            params.mNoMagnitude = true;
+            params.mKnown = true;
 
-            params.mKnown = mAlchemy->knownEffect(effectIndex, MWBase::Environment::get().getWorld()->getPlayerPtr());
-
+            const ESM::MagicEffect* magicEffect = MWBase::Environment::get().getWorld()->getStore()
+                .get<ESM::MagicEffect>().find(effect.mEffectID);
+            params.mNoMagnitude = (magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude) != 0;
+            params.mIsConstant = (magicEffect->mData.mFlags & ESM::MagicEffect::NoDuration) != 0;
             list.push_back(params);
-            ++effectIndex;
         }
 
         while (mEffectsBox->getChildCount())

@@ -24,6 +24,7 @@
 #include "actorutil.hpp"
 #include "aifollow.hpp"
 #include "creaturestats.hpp"
+#include "npcstats.hpp"
 #include "linkedeffects.hpp"
 #include "spellabsorption.hpp"
 #include "spellresistance.hpp"
@@ -128,7 +129,7 @@ namespace MWMechanics
             targetSpells = target.getClass().getCreatureStats(target).getActiveSpells();
 
         bool canCastAnEffect = false;    // For bound equipment.If this remains false
-                                         // throughout the iteration of this spell's 
+                                         // throughout the iteration of this spell's
                                          // effects, we display a "can't re-cast" message
 
         int absorbChance = getAbsorbChance(caster, target);
@@ -183,7 +184,7 @@ namespace MWMechanics
             if (!reflected && reflectEffect(*effectIt, magicEffect, caster, target, reflectedEffects))
                 continue;
 
-            
+
 
             // Try resisting.
             float magnitudeMult = getEffectMultiplier(effectIt->mEffectID, target, caster, spell, &targetEffects);
@@ -433,7 +434,7 @@ namespace MWMechanics
                         effectTick(target.getClass().getCreatureStats(target), target, EffectKey(*effectIt), effect.mMagnitude);
                         bool isDead = target.getClass().getCreatureStats(target).isDead();
 
-                        
+
 
                         if (!wasDead && isDead)
                             MWBase::Environment::get().getMechanicsManager()->actorKilled(target, caster);
@@ -496,7 +497,7 @@ namespace MWMechanics
                     else
                         sndMgr->playSound3D(target, schools[magicEffect->mData.mSchool]+" hit", 1.0f, 1.0f);
 
-                    
+
 
                     // Add VFX
                     const ESM::Static* castStatic;
@@ -527,8 +528,9 @@ namespace MWMechanics
                 int casterActorId = -1;
                 if (!caster.isEmpty() && caster.getClass().isActor())
                     casterActorId = caster.getClass().getCreatureStats(caster).getActorId();
+                const bool alchemyDurationStack = mSourceType == SourceType::Potion || mSourceType == SourceType::Ingredient;
                 target.getClass().getCreatureStats(target).getActiveSpells().addSpell(mId, mStack, appliedLastingEffects,
-                        mSourceName, casterActorId);
+                        mSourceName, casterActorId, alchemyDurationStack);
             }
         }
     }
@@ -625,7 +627,7 @@ namespace MWMechanics
                     MWBase::Environment::get().getWindowManager()->messageBox("#{sTeleportDisabled}");
                 }
 
-                
+
 
                 return true;
             }
@@ -694,7 +696,7 @@ namespace MWMechanics
         const ESM::Enchantment* enchantment = MWBase::Environment::get().getWorld()->getStore().get<ESM::Enchantment>().find(enchantmentName);
 
         // EncoreMP 1 line addition
-        mEnchantmentType = enchantment->mData.mType;    
+        mEnchantmentType = enchantment->mData.mType;
 
         mStack = false;
 
@@ -741,7 +743,7 @@ namespace MWMechanics
                     MWBase::SoundManager *sndMgr = MWBase::Environment::get().getSoundManager();
                     sndMgr->playSound3D(mCaster, "Spell Failure " + schools[school], 1.0f, 1.0f);
 
-                    
+
                 }
                 return false;
             }
@@ -832,7 +834,7 @@ namespace MWMechanics
                 const float normalizedEncumbrance = mCaster.getClass().getNormalizedEncumbrance(mCaster);
 
                 float fatigueLoss = spell->mData.mCost * (fFatigueSpellBase + normalizedEncumbrance * fFatigueSpellMult);
-                fatigue.setCurrent(fatigue.getCurrent() - fatigueLoss); 
+                fatigue.setCurrent(fatigue.getCurrent() - fatigueLoss);
                 stats.setFatigue(fatigue);
 
                 bool fail = false;
@@ -857,7 +859,7 @@ namespace MWMechanics
                     MWBase::SoundManager *sndMgr = MWBase::Environment::get().getSoundManager();
                     sndMgr->playSound3D(mCaster, "Spell Failure " + schools[school], 1.0f, 1.0f);
 
-                    
+
 
                     return false;
                 }
@@ -917,10 +919,16 @@ namespace MWMechanics
         const auto magicEffect = store.get<ESM::MagicEffect>().find(effect.mEffectID);
         const MWMechanics::CreatureStats& creatureStats = mCaster.getClass().getCreatureStats(mCaster);
 
-        float x = (mCaster.getClass().getSkill(mCaster, ESM::Skill::Alchemy) +
-                    0.2f * creatureStats.getAttribute (ESM::Attribute::Intelligence).getModified()
-                    + 0.1f * creatureStats.getAttribute (ESM::Attribute::Luck).getModified())
-                    * creatureStats.getFatigueTerm();
+        // Ingredient eating uses permanent stats for the same reason as potion
+        // brewing: temporary Fortify/Drain effects must not recursively improve
+        // the next alchemy action. Fatigue may still penalise an exhausted
+        // character, but values above the fully-rested term never grant a bonus.
+        const MWMechanics::NpcStats& npcStats = mCaster.getClass().getNpcStats(mCaster);
+        const float fatigueTerm = std::min(1.f, creatureStats.getFatigueTerm());
+        float x = (npcStats.getSkill(ESM::Skill::Alchemy).getBase()
+                    + 0.2f * creatureStats.getAttribute(ESM::Attribute::Intelligence).getBase()
+                    + 0.1f * creatureStats.getAttribute(ESM::Attribute::Luck).getBase())
+                    * fatigueTerm;
 
         int roll = Misc::Rng::roll0to99();
         if (roll > x)

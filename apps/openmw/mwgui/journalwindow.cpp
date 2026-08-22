@@ -137,7 +137,7 @@ namespace
 
             {
                 MWGui::BookPage::ClickCallback callback;
-                
+
                 callback = std::bind (&JournalWindowImpl::notifyTopicClicked, this, std::placeholders::_1);
 
                 getPage (LeftBookPage)->adviseLinkClicked (callback);
@@ -149,7 +149,7 @@ namespace
 
             {
                 MWGui::BookPage::ClickCallback callback;
-                
+
                 callback = std::bind(&JournalWindowImpl::notifyIndexLinkClicked, this, std::placeholders::_1);
 
                 getPage (LeftTopicIndex)->adviseLinkClicked (callback);

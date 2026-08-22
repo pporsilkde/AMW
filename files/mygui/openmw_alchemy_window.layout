@@ -11,7 +11,14 @@
             <Property key="TextAlign" value="Left"/>
         </Widget>
 
-        <Widget type="EditBox" skin="MW_TextEdit" position="70 8 492 30" align="Top Left HStretch" name="NameEdit">
+        <Widget type="EditBox" skin="MW_TextEdit" position="70 8 348 30" align="Top Left HStretch" name="NameEdit">
+        </Widget>
+
+        <Widget type="Button" skin="MW_Button" position="424 8 64 30" name="PotionMode">
+            <Property key="Caption" value="#{arenamp=alchemy.mode_potion}"/>
+        </Widget>
+        <Widget type="Button" skin="MW_Button" position="494 8 68 30" name="PoisonMode">
+            <Property key="Caption" value="#{arenamp=alchemy.mode_poison}"/>
         </Widget>
 
 
@@ -113,6 +120,14 @@
                 <Property key="Caption" value="#{sCancel}"/>
             </Widget>
 
+        </Widget>
+
+        <Widget type="TextBox" skin="SandText" position="10 408 410 24" name="LastBrew" align="Bottom HStretch">
+            <Property key="Caption" value="#{arenamp=alchemy.last_brew}: -"/>
+            <Property key="TextAlign" value="Left VCenter"/>
+        </Widget>
+        <Widget type="Button" skin="MW_Button" position="430 406 132 28" name="RepeatLast" align="Bottom Right">
+            <Property key="Caption" value="#{arenamp=alchemy.repeat_last}"/>
         </Widget>
 
     </Widget>

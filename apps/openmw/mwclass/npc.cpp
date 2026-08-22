@@ -26,6 +26,7 @@
 #include "../mwmechanics/spellcasting.hpp"
 #include "../mwmechanics/disease.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/poison.hpp"
 #include "../mwmechanics/autocalcspell.hpp"
 #include "../mwmechanics/difficultyscaling.hpp"
 #include "../mwmechanics/weapontype.hpp"
@@ -544,7 +545,7 @@ namespace MWClass
 
     void Npc::hit(const MWWorld::Ptr& ptr, float attackStrength, int type) const
     {
-        
+
 
         MWBase::World *world = MWBase::Environment::get().getWorld();
 
@@ -597,7 +598,7 @@ namespace MWClass
         if (ptr == MWBase::Environment::get().getWorld()->getPlayerPtr())
         {
             int weaponType;
-            
+
             MWWorld::Ptr actor;
             MWWorld::ContainerStoreIterator activeWeaponIt = MWMechanics::getActiveWeapon(ptr, &weaponType);
 
@@ -639,11 +640,11 @@ namespace MWClass
 
         // end of EncoreMP accuracy modifiers
 
-        
+
 
         if (Misc::Rng::roll0to99() >= hitchance)
         {
-            
+
 
             othercls.onHit(victim, 0.0f, false, weapon, ptr, osg::Vec3f(), false);
             MWMechanics::reduceWeaponCondition(0.f, false, weapon, ptr);
@@ -699,11 +700,21 @@ namespace MWClass
 
         MWMechanics::applyElementalShields(ptr, victim);
 
-        if (MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength))
+        const bool blocked = MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength);
+        if (blocked)
             damage = 0;
 
+        bool poisonHit = !blocked;
         if (victim == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState())
+        {
             damage = 0;
+            poisonHit = false;
+        }
+
+        // A confirmed, unblocked weapon hit can deliver poison even when normal
+        // weapon resistance reduces the physical component to zero.
+        if (!weapon.isEmpty() && poisonHit)
+            MWMechanics::applyWeaponPoison(ptr, victim, weapon, hitPosition, false);
 
         MWMechanics::diseaseContact(victim, ptr);
 
@@ -980,15 +991,15 @@ namespace MWClass
             MWBase::Environment::get().getMechanicsManager()->actorKilled(ptr, attacker);
         }
 
-        
+
     }
 
     std::shared_ptr<MWWorld::Action> Npc::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
-        
 
-        
+
+
 
         // player got activated by another NPC
         if(ptr == MWMechanics::getPlayer())

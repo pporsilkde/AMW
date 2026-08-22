@@ -1464,8 +1464,8 @@ namespace MWGui
         const std::string sServiceTrainingTitle = gameSettingString("sServiceTrainingTitle", "Training");
         const std::string sRepair = gameSettingString("sRepair", "Repair");
 
-        if (topic != sPersuasion && topic != sCompanionShare && topic != sBarter 
-         && topic != sSpells && topic != sTravel && topic != sSpellMakingMenuTitle 
+        if (topic != sPersuasion && topic != sCompanionShare && topic != sBarter
+         && topic != sSpells && topic != sTravel && topic != sSpellMakingMenuTitle
          && topic != sEnchanting && topic != sServiceTrainingTitle && topic != sRepair)
         {
             onTopicActivated(topic);
@@ -1652,7 +1652,7 @@ namespace MWGui
 
             Topic* t = new Topic(keyword);
             t->eventTopicActivated += MyGUI::newDelegate(this, &DialogueWindow::onTopicActivated);
-            
+
             mTopicLinks[topicId] = t;
 
             mKeywordSearch.seed(topicId, intptr_t(t));

@@ -1,9 +1,13 @@
 #include "activespells.hpp"
 
+#include <cmath>
+
 #include <components/misc/rng.hpp>
 #include <components/misc/stringops.hpp>
 
 #include <components/esm/loadmgef.hpp>
+#include <components/esm/loadalch.hpp>
+#include <components/esm/loadingr.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -141,15 +145,72 @@ namespace MWMechanics
     }
 
     void ActiveSpells::addSpell(const std::string &id, bool stack, std::vector<ActiveEffect> effects,
-                                const std::string &displayName, int casterActorId)
+                                const std::string &displayName, int casterActorId, bool stackAlchemyDuration)
     {
-        TContainer::iterator it(mSpells.find(id));
-
         ActiveSpellParams params;
         params.mEffects = effects;
         params.mDisplayName = displayName;
         params.mCasterActorId = casterActorId;
 
+        if (stackAlchemyDuration)
+        {
+            // ArenaMW alchemy stacking: drinking/eating another source with the
+            // same EffectKey extends its remaining duration instead of adding a
+            // second simultaneous magnitude. This closes the classic potion /
+            // ingredient magnitude-stack exploit while preserving the value of
+            // consuming multiple doses. Different effects still coexist.
+            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+            const auto isAlchemySource = [&store](const std::string& sourceId)
+            {
+                return store.get<ESM::Potion>().search(sourceId) != nullptr
+                    || store.get<ESM::Ingredient>().search(sourceId) != nullptr;
+            };
+
+            for (std::vector<ActiveEffect>::iterator incoming = params.mEffects.begin(); incoming != params.mEffects.end();)
+            {
+                ActiveEffect* destination = nullptr;
+                for (TContainer::iterator spell = mSpells.begin(); spell != mSpells.end() && !destination; ++spell)
+                {
+                    if (!isAlchemySource(spell->first))
+                        continue;
+                    for (ActiveEffect& active : spell->second.mEffects)
+                    {
+                        if (active.mTimeLeft > 0.f && active.mEffectId == incoming->mEffectId && active.mArg == incoming->mArg)
+                        {
+                            destination = &active;
+                            break;
+                        }
+                    }
+                }
+
+                if (!destination)
+                {
+                    ++incoming;
+                    continue;
+                }
+
+                // Sum time, not magnitude. If two different-quality potions have
+                // the same effect, use a duration-weighted magnitude. This keeps
+                // the total effect budget order-independent and prevents a weak
+                // potion from extending the strongest potion at full strength.
+                const float oldTime = std::max(0.f, destination->mTimeLeft);
+                const float newTime = std::max(0.f, incoming->mTimeLeft);
+                const float totalTime = oldTime + newTime;
+                if (totalTime > 0.f)
+                    destination->mMagnitude = (destination->mMagnitude * oldTime
+                        + incoming->mMagnitude * newTime) / totalTime;
+                destination->mTimeLeft = totalTime;
+                destination->mDuration = std::max(destination->mDuration, totalTime);
+                incoming = params.mEffects.erase(incoming);
+            }
+
+            if (!params.mEffects.empty())
+                mSpells.insert(std::make_pair(id, params));
+            mSpellsChanged = true;
+            return;
+        }
+
+        TContainer::iterator it(mSpells.find(id));
         if (it == end() || stack)
         {
             mSpells.insert(std::make_pair(id, params));
@@ -158,7 +219,7 @@ namespace MWMechanics
         {
             // addSpell() is called with effects for a range.
             // but a spell may have effects with different ranges (e.g. Touch & Target)
-            // so, if we see new effects for same spell assume additional 
+            // so, if we see new effects for same spell assume additional
             // spell effects and add to existing effects of spell
             mergeEffects(params.mEffects, it->second.mEffects);
             it->second = params;

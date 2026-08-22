@@ -46,6 +46,9 @@ namespace MWWorld
 
             ESM::AnimationState mAnimationState;
 
+            std::string mPoisonId;
+            int mPoisonCharges;
+
             std::unique_ptr<CustomData> mCustomData;
 
             void copy (const RefData& refData);
@@ -141,6 +144,13 @@ namespace MWWorld
 
             const ESM::AnimationState& getAnimationState() const;
             ESM::AnimationState& getAnimationState();
+
+            bool hasPoison() const;
+            const std::string& getPoisonId() const;
+            int getPoisonCharges() const;
+            void setPoison(const std::string& potionId, int charges);
+            void clearPoison();
+            void consumePoisonCharge();
     };
 }
 

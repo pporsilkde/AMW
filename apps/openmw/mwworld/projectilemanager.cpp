@@ -103,18 +103,18 @@ namespace
                 sounds.emplace(schools[magicEffect->mData.mSchool] + " bolt");
             projectileEffects.mList.push_back(*iter);
         }
-        
+
         if (count != 0)
             speed /= count;
 
         // the particle texture is only used if there is only one projectile
-        if (projectileEffects.mList.size() == 1) 
+        if (projectileEffects.mList.size() == 1)
         {
             const ESM::MagicEffect *magicEffect = MWBase::Environment::get().getWorld()->getStore().get<ESM::MagicEffect>().find (
                 effects->mList.begin()->mEffectID);
             texture = magicEffect->mParticle;
         }
-        
+
         if (projectileEffects.mList.size() > 1) // insert a VFX_Multiple projectile if there are multiple projectile effects
         {
             const std::string ID = "VFX_Multiple" + std::to_string(effects->mList.size());
@@ -243,6 +243,10 @@ namespace
         try
         {
             MWWorld::Ptr stuck = world->placeObject(projectile, cell, pos);
+            if (!stuck.isEmpty() && projectile.getRefData().hasPoison())
+                stuck.getRefData().setPoison(projectile.getRefData().getPoisonId(),
+                    projectile.getRefData().getPoisonCharges());
+
             // Push the recovered projectile a few units into the hit surface so
             // its tip reads as embedded instead of floating on the contact plane.
             if (!stuck.isEmpty() && speed > 0.001f)
@@ -366,15 +370,15 @@ namespace MWWorld
             projectileLight->setLinearAttenuation(0.1f);
             projectileLight->setQuadraticAttenuation(0.f);
             projectileLight->setPosition(osg::Vec4(pos, 1.0));
-            
+
             SceneUtil::LightSource* projectileLightSource = new SceneUtil::LightSource;
             projectileLightSource->setNodeMask(MWRender::Mask_Lighting);
             projectileLightSource->setRadius(66.f);
-            
+
             state.mNode->addChild(projectileLightSource);
             projectileLightSource->setLight(projectileLight);
         }
-        
+
         SceneUtil::DisableFreezeOnCullVisitor disableFreezeOnCullVisitor;
         state.mNode->accept(disableFreezeOnCullVisitor);
 
@@ -466,6 +470,8 @@ namespace MWWorld
         ProjectileState state;
         state.mActorId = actor.getClass().getCreatureStats(actor).getActorId();
         state.mBowId = bow.getCellRef().getRefId();
+        state.mPoisonId = bow.getRefData().hasPoison() ? bow.getRefData().getPoisonId() : std::string();
+        state.mPoisonCharges = bow.getRefData().hasPoison() ? bow.getRefData().getPoisonCharges() : 0;
         state.mVelocity = orient * osg::Vec3f(0,1,0) * speed;
         state.mIdArrow = projectile.getCellRef().getRefId();
         state.mCasterHandle = actor;
@@ -648,12 +654,38 @@ namespace MWWorld
             // Try to get a Ptr to the bow that was used. It might no longer exist.
             MWWorld::ManualRef projectileRef(MWBase::Environment::get().getWorld()->getStore(), projectileState.mIdArrow);
             MWWorld::Ptr bow = projectileRef.getPtr();
+            if (projectileState.mIdArrow == projectileState.mBowId && !projectileState.mPoisonId.empty())
+            {
+                // Thrown weapons are their own projectile. Recreate the coating on
+                // the in-flight instance so a hit consumes one charge and a
+                // recoverable thrown weapon keeps whatever coating remains.
+                bow.getRefData().setPoison(projectileState.mPoisonId, std::max(1, projectileState.mPoisonCharges));
+            }
             if (!caster.isEmpty() && projectileState.mIdArrow != projectileState.mBowId)
             {
                 MWWorld::InventoryStore& inv = caster.getClass().getInventoryStore(caster);
                 MWWorld::ContainerStoreIterator invIt = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
-                if (invIt != inv.end() && Misc::StringUtils::ciEqual(invIt->getCellRef().getRefId(), projectileState.mBowId))
+                if (invIt != inv.end() && Misc::StringUtils::ciEqual(invIt->getCellRef().getRefId(), projectileState.mBowId)
+                    && (projectileState.mPoisonId.empty()
+                        || Misc::StringUtils::ciEqual(invIt->getRefData().getPoisonId(), projectileState.mPoisonId)))
                     bow = *invIt;
+                else
+                {
+                    // The player may swap weapons while an arrow is in flight. Resolve the
+                    // original coated bow anywhere in inventory so a confirmed hit can still
+                    // consume the coating instead of silently losing it.
+                    for (MWWorld::ContainerStoreIterator it = inv.begin(MWWorld::ContainerStore::Type_Weapon);
+                         it != inv.end(); ++it)
+                    {
+                        if (!Misc::StringUtils::ciEqual(it->getCellRef().getRefId(), projectileState.mBowId))
+                            continue;
+                        if (!projectileState.mPoisonId.empty()
+                            && !Misc::StringUtils::ciEqual(it->getRefData().getPoisonId(), projectileState.mPoisonId))
+                            continue;
+                        bow = *it;
+                        break;
+                    }
+                }
             }
             const bool hitWater = projectile->getHitWater();
             if (hitWater)
@@ -678,7 +710,13 @@ namespace MWWorld
                 && (projectileHasAoeEnchantment(projectileObject) || projectileHasAoeEnchantment(bow)))
                 stick = false;
             if (stick)
-                placeStuckProjectile(projectileObject, caster, target, pos, projectileState.mVelocity, projectileState.mThrown);
+            {
+                // For thrown weapons the weapon itself is the projectile. Use the
+                // reconstructed coated instance so Arrow Stick preserves any
+                // remaining poison charges when the weapon becomes a world object.
+                MWWorld::Ptr stuckSource = projectileState.mThrown ? bow : projectileObject;
+                placeStuckProjectile(stuckSource, caster, target, pos, projectileState.mVelocity, projectileState.mThrown);
+            }
 
             cleanupProjectile(projectileState);
         }
@@ -759,6 +797,8 @@ namespace MWWorld
             state.mActorId = it->mActorId;
 
             state.mBowId = it->mBowId;
+            state.mPoisonId = it->mPoisonId;
+            state.mPoisonCharges = it->mPoisonCharges;
             state.mVelocity = it->mVelocity;
             state.mAttackStrength = it->mAttackStrength;
 
@@ -796,6 +836,8 @@ namespace MWWorld
             ProjectileState state;
             state.mActorId = esm.mActorId;
             state.mBowId = esm.mBowId;
+            state.mPoisonId = esm.mPoisonId;
+            state.mPoisonCharges = esm.mPoisonCharges;
             state.mVelocity = esm.mVelocity;
             state.mIdArrow = esm.mId;
             state.mAttackStrength = esm.mAttackStrength;

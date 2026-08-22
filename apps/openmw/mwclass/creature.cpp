@@ -39,6 +39,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/poison.hpp"
 #include "../mwmechanics/actorutil.hpp"
 
 //EncoreMp addition
@@ -228,7 +229,7 @@ namespace MWClass
 
     void Creature::hit(const MWWorld::Ptr& ptr, float attackStrength, int type) const
     {
-        
+
 
         MWWorld::LiveCellRef<ESM::Creature> *ref =
             ptr.get<ESM::Creature>();
@@ -271,11 +272,11 @@ namespace MWClass
 
         float hitchance = MWMechanics::getHitChance(ptr, victim, ref->mBase->mData.mCombat);
 
-        
+
 
         if(Misc::Rng::roll0to99() >= hitchance)
         {
-            
+
 
             victim.getClass().onHit(victim, 0.0f, false, MWWorld::Ptr(), ptr, osg::Vec3f(), false);
             MWMechanics::reduceWeaponCondition(0.f, false, weapon, ptr);
@@ -330,8 +331,14 @@ namespace MWClass
 
         MWMechanics::applyElementalShields(ptr, victim);
 
-        if (MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength))
+        const bool blocked = MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength);
+        if (blocked)
             damage = 0;
+
+        const bool poisonHit = !blocked
+            && !(victim == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState());
+        if (!weapon.isEmpty() && poisonHit)
+            MWMechanics::applyWeaponPoison(ptr, victim, weapon, hitPosition, false);
 
         MWMechanics::diseaseContact(victim, ptr);
 
@@ -342,13 +349,13 @@ namespace MWClass
     {
         MWMechanics::CreatureStats& stats = getCreatureStats(ptr);
 
-        // NOTE: 'object' and/or 'attacker' may be empty.        
+        // NOTE: 'object' and/or 'attacker' may be empty.
         if (!attacker.isEmpty() && attacker.getClass().isActor() && !stats.getAiSequence().isInCombat(attacker))
             stats.setAttacked(true);
 
         // Self defense
         bool setOnPcHitMe = true; // Note OnPcHitMe is not set for friendly hits.
-        
+
         // No retaliation for totally static creatures (they have no movement or attacks anyway)
         if (isMobile(ptr) && !attacker.isEmpty())
             setOnPcHitMe = MWBase::Environment::get().getMechanicsManager()->actorAttacked(ptr, attacker);
@@ -478,7 +485,7 @@ namespace MWClass
                                 damage *= allyDamageMult;
                             }
                         }
-                        
+
                     }
                 }
                 MWMechanics::DynamicStat<float> fatigue(stats.getFatigue());
@@ -487,7 +494,7 @@ namespace MWClass
             }
         }
 
-        
+
     }
 
     std::shared_ptr<MWWorld::Action> Creature::activate (const MWWorld::Ptr& ptr,

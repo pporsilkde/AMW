@@ -1361,7 +1361,7 @@ namespace MWMechanics
                 if (!isPlayerFollowerOrEscorter)
                     aggressive = MWBase::Environment::get().getMechanicsManager()->isAggressive(actor1, actor2);
             }
-            
+
         }
 
         // Keep the original OpenMW rule: guards automatically engage hostile creatures,
@@ -1826,7 +1826,7 @@ namespace MWMechanics
 
                     if (isDamageEffect)
                     {
-                        
+
 
                         if (caster == player || playerFollowers.find(caster) != playerFollowers.end())
                         {
@@ -2192,7 +2192,7 @@ namespace MWMechanics
                     // Update witness crime id
                     npcStats.setCrimeId(-1);
                 }
-                
+
             }
         }
     }
@@ -3247,7 +3247,7 @@ namespace MWMechanics
                 if (observer == player || observer.getClass().getCreatureStats(observer).isDead())
                     continue;
 
-                
+
 
                 if (world->getLOS(player, observer))
                 {
@@ -3306,7 +3306,7 @@ namespace MWMechanics
         return 0;
     }
 
-    
+
 
     void Actors::forceStateUpdate(const MWWorld::Ptr & ptr)
     {
@@ -3384,7 +3384,7 @@ namespace MWMechanics
             if (stats.isDead())
                 continue;
 
-            
+
 
             // An actor counts as siding with this actor if Follow or Escort is the current AI package, or there are only Combat and Wander packages before the Follow/Escort package
             // Actors that are targeted by this actor's Follow or Escort packages also side with them
@@ -3616,7 +3616,7 @@ namespace MWMechanics
         return ctrl->isAttackingOrSpell();
     }
 
-    
+
 
     int Actors::getGreetingTimer(const MWWorld::Ptr& ptr) const
     {

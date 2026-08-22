@@ -51,6 +51,17 @@ void ESM::ObjectState::load (ESMReader &esm)
 
     mAnimationState.load(esm);
 
+    // ArenaMW native poison coating. Optional subrecords preserve old-save compatibility.
+    mPoisonId.clear();
+    mPoisonCharges = 0;
+    if (esm.isNextSub("APOI"))
+    {
+        mPoisonId = esm.getHString();
+        esm.getHNOT(mPoisonCharges, "APCH");
+        if (mPoisonCharges <= 0)
+            mPoisonId.clear();
+    }
+
     // FIXME: assuming "false" as default would make more sense, but also break compatibility with older save files
     mHasCustomState = true;
     esm.getHNOT (mHasCustomState, "HCUS");
@@ -80,6 +91,12 @@ void ESM::ObjectState::save (ESMWriter &esm, bool inInventory) const
 
     mAnimationState.save(esm);
 
+    if (!mPoisonId.empty() && mPoisonCharges > 0)
+    {
+        esm.writeHNString("APOI", mPoisonId);
+        esm.writeHNT("APCH", mPoisonCharges);
+    }
+
     if (!mHasCustomState)
         esm.writeHNT ("HCUS", false);
 }
@@ -97,6 +114,8 @@ void ESM::ObjectState::blank()
     }
     mFlags = 0;
     mHasCustomState = true;
+    mPoisonId.clear();
+    mPoisonCharges = 0;
 }
 
 const ESM::NpcState& ESM::ObjectState::asNpcState() const

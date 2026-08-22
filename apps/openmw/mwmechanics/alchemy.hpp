@@ -33,6 +33,12 @@ namespace MWMechanics
             typedef std::vector<ESM::ENAMstruct> TEffectsContainer;
             typedef TEffectsContainer::const_iterator TEffectsIterator;
 
+            enum Mode
+            {
+                Mode_Potion,
+                Mode_Poison
+            };
+
             enum Result
             {
                 Result_Success,
@@ -52,10 +58,13 @@ namespace MWMechanics
             TEffectsContainer mEffects;
             int mValue;
             std::string mPotionName;
+            Mode mMode;
 
             void applyTools (int flags, float& value) const;
 
             void updateEffects();
+            bool injectFailureSideEffect();
+            void learnSelectedIngredients() const;
 
             Result getReadyStatus() const;
 
@@ -86,6 +95,10 @@ namespace MWMechanics
             TEffectsIterator endEffects() const;
 
         public:
+            void setMode(Mode mode);
+            Mode getMode() const { return mMode; }
+            const TEffectsContainer& getEffects() const { return mEffects; }
+
             int countPotionsToBrew() const;
             ///< calculates maximum amount of potions, which you can make from selected ingredients
 
@@ -137,4 +150,3 @@ namespace MWMechanics
 }
 
 #endif
-

@@ -46,7 +46,7 @@ namespace MWClass
     {
         // TODO: add option somewhere to enable collision for placeable objects
 
-        
+
     }
 
     std::string Armor::getModel(const MWWorld::ConstPtr &ptr) const
@@ -226,7 +226,7 @@ namespace MWClass
             typeText = "";
         else
         {
-            int armorType = getEquipmentSkill(ptr);       
+            int armorType = getEquipmentSkill(ptr);
             if (armorType == ESM::Skill::LightArmor)
                 typeText = "#{sLight}";
             else if (armorType == ESM::Skill::MediumArmor)
@@ -282,7 +282,7 @@ namespace MWClass
         newItem.mData.mEnchant=enchCharge;
         newItem.mEnchant=enchId;
 
-        
+
 
         const ESM::Armor *record = MWBase::Environment::get().getWorld()->createRecord (newItem);
         return record->mId;

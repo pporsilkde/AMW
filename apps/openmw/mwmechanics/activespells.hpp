@@ -75,7 +75,7 @@ namespace MWMechanics
             /// \param displayName Name for display in magic menu.
             ///
             void addSpell (const std::string& id, bool stack, std::vector<ActiveEffect> effects,
-                           const std::string& displayName, int casterActorId);
+                           const std::string& displayName, int casterActorId, bool stackAlchemyDuration = false);
 
             /// Removes the active effects from this spell/potion/.. with \a id
             void removeEffects (const std::string& id);

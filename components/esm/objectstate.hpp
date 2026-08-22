@@ -39,9 +39,13 @@ namespace ESM
 
         ESM::AnimationState mAnimationState;
 
+        // ArenaMW: poison coating attached to this exact object instance.
+        std::string mPoisonId;
+        int mPoisonCharges;
+
         ObjectState()
         : mHasLocals(0), mEnabled(0), mCount(0)
-        , mFlags(0), mHasCustomState(true), mVersion(0)
+        , mFlags(0), mHasCustomState(true), mVersion(0), mPoisonCharges(0)
         {}
 
         /// @note Does not load the CellRef ID, it should already be loaded before calling this method

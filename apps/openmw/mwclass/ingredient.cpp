@@ -1,6 +1,7 @@
 #include "ingredient.hpp"
 
 #include <components/esm/loadingr.hpp>
+#include <components/esm/loadskil.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -17,6 +18,9 @@
 
 #include "../mwrender/objects.hpp"
 #include "../mwrender/renderinginterface.hpp"
+
+#include "../mwmechanics/alchemyknowledge.hpp"
+#include "../mwmechanics/npcstats.hpp"
 
 namespace MWClass
 {
@@ -125,10 +129,11 @@ namespace MWClass
         }
 
         MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
-        float alchemySkill = player.getClass().getSkill(player, ESM::Skill::Alchemy);
-
-        static const float fWortChanceValue =
-                MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fWortChanceValue")->mValue.getFloat();
+        // Permanent ingredient knowledge is progression. Use only the base
+        // Alchemy skill so temporary Fortify/Drain Alchemy cannot reveal slots.
+        const float alchemySkill = player.getClass().getNpcStats(player)
+            .getSkill(ESM::Skill::Alchemy).getBase();
+        MWMechanics::AlchemyKnowledge::revealBySkill(ptr, alchemySkill);
 
         MWGui::Widgets::SpellEffectList list;
         for (int i=0; i<4; ++i)
@@ -140,10 +145,7 @@ namespace MWClass
             params.mAttribute = ref->mBase->mData.mAttributes[i];
             params.mSkill = ref->mBase->mData.mSkills[i];
 
-            params.mKnown = ( (i == 0 && alchemySkill >= fWortChanceValue)
-                 || (i == 1 && alchemySkill >= fWortChanceValue*2)
-                 || (i == 2 && alchemySkill >= fWortChanceValue*3)
-                 || (i == 3 && alchemySkill >= fWortChanceValue*4));
+            params.mKnown = MWMechanics::AlchemyKnowledge::isKnown(ref->mBase->mId, i);
 
             list.push_back(params);
         }

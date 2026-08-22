@@ -8,6 +8,7 @@
 #include <map>
 
 #include <components/misc/rng.hpp>
+#include <components/settings/settings.hpp>
 
 #include <components/esm/loadskil.hpp>
 #include <components/esm/loadappa.hpp>
@@ -26,10 +27,54 @@
 
 #include "magiceffects.hpp"
 #include "creaturestats.hpp"
+#include "npcstats.hpp"
+#include "alchemyknowledge.hpp"
+
+namespace
+{
+    float getAlchemyIngredientValueCap()
+    {
+        try
+        {
+            return std::max(0.f, Settings::Manager::getFloat("ingredient value power cap", "Alchemy"));
+        }
+        catch (...)
+        {
+            return 500.f;
+        }
+    }
+
+    bool arenaAlchemySynergyPair(int a, int b)
+    {
+        if (a > b)
+            std::swap(a, b);
+
+        const std::pair<int, int> pairs[] = {
+            {ESM::MagicEffect::FireShield, ESM::MagicEffect::ResistFire},
+            {ESM::MagicEffect::LightningShield, ESM::MagicEffect::ResistShock},
+            {ESM::MagicEffect::FrostShield, ESM::MagicEffect::ResistFrost},
+            {ESM::MagicEffect::RestoreHealth, ESM::MagicEffect::FortifyHealth},
+            {ESM::MagicEffect::RestoreMagicka, ESM::MagicEffect::FortifyMagicka},
+            {ESM::MagicEffect::RestoreFatigue, ESM::MagicEffect::FortifyFatigue},
+            {ESM::MagicEffect::FireDamage, ESM::MagicEffect::WeaknessToFire},
+            {ESM::MagicEffect::FrostDamage, ESM::MagicEffect::WeaknessToFrost},
+            {ESM::MagicEffect::ShockDamage, ESM::MagicEffect::WeaknessToShock},
+            {ESM::MagicEffect::Poison, ESM::MagicEffect::WeaknessToPoison}
+        };
+
+        for (const auto& pair : pairs)
+            if (pair.first == a && pair.second == b)
+                return true;
+        return false;
+    }
+}
+    }
+}
 
 MWMechanics::Alchemy::Alchemy()
     : mValue(0)
     , mPotionName("")
+    , mMode(Mode_Potion)
 {
 }
 
@@ -69,52 +114,29 @@ std::set<MWMechanics::EffectKey> MWMechanics::Alchemy::listEffects() const
 
 void MWMechanics::Alchemy::applyTools(int flags, float& value) const
 {
-    //bool magnitude = !(flags & ESM::MagicEffect::NoMagnitude);
-    //bool duration = !(flags & ESM::MagicEffect::NoDuration);
-    bool negative = (flags & ESM::MagicEffect::Harmful) != 0;
+    const bool harmful = (flags & ESM::MagicEffect::Harmful) != 0;
 
     if (!mTools[ESM::Apparatus::Calcinator].isEmpty())
     {
-        float calcinatorQuality = mTools[ESM::Apparatus::Calcinator].get<ESM::Apparatus>()->mBase->mData.mQuality;
-        if (negative == true)
-        {
-            calcinatorQuality /= (10.0f / 3.0f);
-            calcinatorQuality += 1.0f;
-            value *= calcinatorQuality;
-        }
-        else
-        {
-            calcinatorQuality /= 10.0f;
-            calcinatorQuality += 1.0f;
-            value *= calcinatorQuality;
-        }
+        const float quality = mTools[ESM::Apparatus::Calcinator].get<ESM::Apparatus>()->mBase->mData.mQuality;
+        const float divisor = harmful ? (10.0f / 3.0f) : 10.0f;
+        value *= 1.0f + quality / divisor;
     }
 
-    if (!mTools[ESM::Apparatus::Alembic].isEmpty())
+    if (!mTools[ESM::Apparatus::Alembic].isEmpty() && harmful)
     {
-        if (negative == true)
-        {
-            float alembicQuality = mTools[ESM::Apparatus::Alembic].get<ESM::Apparatus>()->mBase->mData.mQuality;
-            float alembicMod = (0.4f * alembicQuality);
-            alembicMod = (1.0f - alembicMod);
-            alembicMod = std::max(0.1f, alembicMod);
-            value *= alembicMod;
-        }
+        const float quality = mTools[ESM::Apparatus::Alembic].get<ESM::Apparatus>()->mBase->mData.mQuality;
+        if (mMode == Mode_Poison)
+            value *= 1.0f + 0.4f * quality; // poison mode concentrates harmful compounds
+        else
+            value *= std::max(0.1f, 1.0f - 0.4f * quality); // potion mode purifies them
     }
 
     if (!mTools[ESM::Apparatus::Retort].isEmpty())
     {
-        if (negative == true)
-        {
-            value = value;
-        }
-        else
-        {
-            float retortQuality = mTools[ESM::Apparatus::Retort].get<ESM::Apparatus>()->mBase->mData.mQuality;
-            retortQuality /= 10.0f;
-            retortQuality += 1.0f;
-            value *= retortQuality;
-        }
+        const float quality = mTools[ESM::Apparatus::Retort].get<ESM::Apparatus>()->mBase->mData.mQuality;
+        if (!harmful || mMode == Mode_Poison)
+            value *= 1.0f + quality / 10.0f;
     }
 }
 
@@ -157,33 +179,58 @@ void MWMechanics::Alchemy::updateEffects()
     // find effects
     std::set<EffectKey> effects (listEffects());
 
+    std::map<EffectKey, int> contributors;
+    for (TIngredientsIterator ingredientIt = mIngredients.begin(); ingredientIt != mIngredients.end(); ++ingredientIt)
+    {
+        if (ingredientIt->isEmpty())
+            continue;
+        const auto* ingredient = ingredientIt->get<ESM::Ingredient>();
+        std::set<EffectKey> seen;
+        for (int i = 0; i < 4; ++i)
+        {
+            if (ingredient->mBase->mData.mEffectID[i] < 0)
+                continue;
+            EffectKey key(ingredient->mBase->mData.mEffectID[i],
+                ingredient->mBase->mData.mSkills[i] != -1 ? ingredient->mBase->mData.mSkills[i]
+                                                        : ingredient->mBase->mData.mAttributes[i]);
+            if (seen.insert(key).second)
+                ++contributors[key];
+        }
+    }
+
     // general alchemy factor
     float x = getAlchemyFactor();
 
     float averageIngredientValue = 0.0f;
     float priceMod = 0.0f;
     float multMod = 1.0f;
-    
-    // average the ingredient values with guarding against 0s
-    // then work out benefit from tiers and apply, EncoreMP
+
+    // Average ingredient value affects quality, but cap the value used for
+    // power/success calculations. Otherwise a single modded ingredient with an
+    // extreme merchant value can act as an unbounded alchemy multiplier. The
+    // real ingredient value is still used for the crafted potion's sell-value
+    // cap below, so this changes power scaling rather than the economy record.
+    float effectiveIngredientValue = 0.f;
     if ((sumIngredientValue > 0) && (numberIngredients > 0))
     {
-        averageIngredientValue = (sumIngredientValue / numberIngredients);
+        averageIngredientValue = static_cast<float>(sumIngredientValue) / static_cast<float>(numberIngredients);
+        const float valueCap = getAlchemyIngredientValueCap();
+        effectiveIngredientValue = valueCap > 0.f ? std::min(averageIngredientValue, valueCap) : averageIngredientValue;
 
-        if (averageIngredientValue < 5.0f)
+        if (effectiveIngredientValue < 5.0f)
         {
             multMod = 0.7f;
-            if (averageIngredientValue > 0.1f)
+            if (effectiveIngredientValue > 0.1f)
             {
-                multMod += (averageIngredientValue * 0.06f);
+                multMod += (effectiveIngredientValue * 0.06f);
             }
         }
-        else if ((averageIngredientValue >= 5.0f) && (averageIngredientValue < 200.0f))
+        else if ((effectiveIngredientValue >= 5.0f) && (effectiveIngredientValue < 200.0f))
         {
             // y = (1057 + (-1119 / (1 + (x / 81302080000)^0.1137))
             // where y is skill boost, and x is ingredient value
 
-            float yf = 1057.0f + (-1119.0f / (1.0f + std::pow(averageIngredientValue / 81302080000.0f, 0.1137f)));
+            float yf = 1057.0f + (-1119.0f / (1.0f + std::pow(effectiveIngredientValue / 81302080000.0f, 0.1137f)));
             priceMod += yf;
 
             // handle the multmod for normal range, 5-200gp average value ingredients
@@ -193,20 +240,20 @@ void MWMechanics::Alchemy::updateEffects()
             // y = 22.87 + ((-47.5)/(1 + ((x/0.00000007014))^0.00415))
             // where y is % modifier addition, and x is ingredient value
 
-            addToMod = 22.87f + (-47.5f / (1.0f + std::pow(averageIngredientValue / 0.00000007014f, 0.00415f)));;
+            addToMod = 22.87f + (-47.5f / (1.0f + std::pow(effectiveIngredientValue / 0.00000007014f, 0.00415f)));;
 
             multMod += addToMod;
 
         }
-        else if (averageIngredientValue >= 200.0f)
+        else if (effectiveIngredientValue >= 200.0f)
         {
             priceMod = 45.0f;
-            float highValueHolder = (averageIngredientValue - 200.0f);
+            float highValueHolder = (effectiveIngredientValue - 200.0f);
             highValueHolder /= 10.0f;
             priceMod += highValueHolder;
         }
 
-        if (averageIngredientValue >= 200.0f)
+        if (effectiveIngredientValue >= 200.0f)
         {
             multMod = 1.25f;
         }
@@ -271,6 +318,29 @@ void MWMechanics::Alchemy::updateEffects()
             throw std::runtime_error (os);
         }
 
+        const bool harmful = (magicEffect->mData.mFlags & ESM::MagicEffect::Harmful) != 0;
+        if ((mMode == Mode_Potion && harmful) || (mMode == Mode_Poison && !harmful))
+            continue;
+
+        float refinedMultiplier = 1.0f;
+        if (Settings::Manager::getBool("ingredient bonus", "ArenaMW Alchemy"))
+        {
+            const auto found = contributors.find(*iter);
+            if (found != contributors.end() && found->second >= 3)
+                refinedMultiplier += 0.10f * static_cast<float>(found->second - 2);
+        }
+        if (Settings::Manager::getBool("synergy", "ArenaMW Alchemy"))
+        {
+            for (const EffectKey& other : effects)
+            {
+                if (other.mId != iter->mId && arenaAlchemySynergyPair(iter->mId, other.mId))
+                {
+                    refinedMultiplier += 0.10f;
+                    break;
+                }
+            }
+        }
+
         float fPotionT1MagMul =
             MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find ("fPotionT1MagMult")->mValue.getFloat();
 
@@ -318,6 +388,8 @@ void MWMechanics::Alchemy::updateEffects()
         if (!(magicEffect->mData.mFlags & ESM::MagicEffect::NoDuration))
             applyTools (magicEffect->mData.mFlags, duration);
 
+        duration *= refinedMultiplier;
+        magnitude *= refinedMultiplier;
         duration *= fPotionT1DurMult;
         magnitude *= fPotionT1MagMul;
 
@@ -406,7 +478,7 @@ void MWMechanics::Alchemy::removeIngredients()
         {
             iter->getContainerStore()->remove(*iter, 1, mAlchemist);
 
-            
+
 
             if (iter->getRefData().getCount()<1)
                 *iter = MWWorld::Ptr();
@@ -436,7 +508,7 @@ void MWMechanics::Alchemy::addPotion (const std::string& name)
         weightHolder = std::max(weightHolder, 0.1f);
         newRecord.mData.mWeight = weightHolder;
     }
-    // new weight logic end  
+    // new weight logic end
 
     newRecord.mData.mValue = mValue;
     newRecord.mData.mAutoCalc = 0;
@@ -468,12 +540,16 @@ void MWMechanics::Alchemy::increaseSkill()
 
 float MWMechanics::Alchemy::getAlchemyFactor() const
 {
-    const CreatureStats& creatureStats = mAlchemist.getClass().getCreatureStats (mAlchemist);
+    // Anti-exploit: potion quality is derived from permanent character
+    // progression only. Temporary Fortify/Drain Alchemy, Intelligence or Luck
+    // must not feed back into the next potion and create the classic
+    // exponential Fortify Intelligence/Alchemy loop.
+    const NpcStats& npcStats = mAlchemist.getClass().getNpcStats(mAlchemist);
+    const CreatureStats& creatureStats = mAlchemist.getClass().getCreatureStats(mAlchemist);
 
-    return
-        (mAlchemist.getClass().getSkill(mAlchemist, ESM::Skill::Alchemy) +
-        0.1f * creatureStats.getAttribute (ESM::Attribute::Intelligence).getModified()
-        + 0.1f * creatureStats.getAttribute (ESM::Attribute::Luck).getModified());
+    return npcStats.getSkill(ESM::Skill::Alchemy).getBase()
+        + 0.1f * creatureStats.getAttribute(ESM::Attribute::Intelligence).getBase()
+        + 0.1f * creatureStats.getAttribute(ESM::Attribute::Luck).getBase();
 }
 
 int MWMechanics::Alchemy::countIngredients() const
@@ -485,6 +561,14 @@ int MWMechanics::Alchemy::countIngredients() const
             ++ingredients;
 
     return ingredients;
+}
+
+void MWMechanics::Alchemy::setMode(Mode mode)
+{
+    if (mMode == mode)
+        return;
+    mMode = mode;
+    updateEffects();
 }
 
 int MWMechanics::Alchemy::countPotionsToBrew() const
@@ -538,6 +622,9 @@ void MWMechanics::Alchemy::setAlchemist (const MWWorld::Ptr& npc)
 
         mTools[type] = *iter;
     }
+
+    AlchemyKnowledge::revealInventoryBySkill(npc);
+    updateEffects();
 }
 
 MWMechanics::Alchemy::TToolsIterator MWMechanics::Alchemy::beginTools() const
@@ -622,7 +709,10 @@ MWMechanics::Alchemy::TEffectsIterator MWMechanics::Alchemy::endEffects() const
 
 bool MWMechanics::Alchemy::knownEffect(unsigned int potionEffectIndex, const MWWorld::Ptr &npc)
 {
-    float alchemySkill = npc.getClass().getSkill (npc, ESM::Skill::Alchemy);
+    // Knowledge of ingredient effects is progression, not a temporary magic
+    // buff. Using the base value also prevents Fortify Alchemy from revealing
+    // every ingredient property for free.
+    float alchemySkill = npc.getClass().getNpcStats(npc).getSkill(ESM::Skill::Alchemy).getBase();
     static const float fWortChanceValue =
             MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fWortChanceValue")->mValue.getFloat();
     return (potionEffectIndex <= 1 && alchemySkill >= fWortChanceValue)
@@ -642,7 +732,7 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::getReadyStatus() const
     if (mPotionName.empty())
         return Result_NoName;
 
-    if (listEffects().empty())
+    if (mEffects.empty())
         return Result_NoEffects;
 
     return Result_Success;
@@ -650,7 +740,7 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::getReadyStatus() const
 
 MWMechanics::Alchemy::Result MWMechanics::Alchemy::create (const std::string& name, int& count)
 {
-    
+
 
     setPotionName(name);
     Result readyStatus = getReadyStatus();
@@ -675,6 +765,69 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::create (const std::string& na
     count = brewedCount;
 
     return result;
+}
+
+bool MWMechanics::Alchemy::injectFailureSideEffect()
+{
+    std::vector<EffectKey> candidates;
+    std::set<EffectKey> existing;
+    for (const ESM::ENAMstruct& effect : mEffects)
+        existing.insert(EffectKey(effect.mEffectID, effect.mSkill != -1 ? effect.mSkill : effect.mAttribute));
+
+    for (TIngredientsIterator it = beginIngredients(); it != endIngredients(); ++it)
+    {
+        if (it->isEmpty())
+            continue;
+        const auto* ingredient = it->get<ESM::Ingredient>();
+        for (int i = 0; i < 4; ++i)
+        {
+            const short effectId = ingredient->mBase->mData.mEffectID[i];
+            if (effectId < 0)
+                continue;
+            const ESM::MagicEffect* magic = MWBase::Environment::get().getWorld()->getStore()
+                .get<ESM::MagicEffect>().find(effectId);
+            if ((magic->mData.mFlags & ESM::MagicEffect::Harmful) == 0)
+                continue;
+            EffectKey key(effectId, ingredient->mBase->mData.mSkills[i] != -1
+                ? ingredient->mBase->mData.mSkills[i] : ingredient->mBase->mData.mAttributes[i]);
+            if (existing.find(key) == existing.end())
+                candidates.push_back(key);
+        }
+    }
+
+    if (candidates.empty())
+        return false;
+
+    const EffectKey key = candidates[Misc::Rng::rollDice(static_cast<int>(candidates.size()))];
+    const ESM::MagicEffect* magic = MWBase::Environment::get().getWorld()->getStore()
+        .get<ESM::MagicEffect>().find(key.mId);
+
+    ESM::ENAMstruct effect;
+    effect.mEffectID = key.mId;
+    effect.mSkill = (magic->mData.mFlags & ESM::MagicEffect::TargetSkill) ? key.mArg : -1;
+    effect.mAttribute = (magic->mData.mFlags & ESM::MagicEffect::TargetAttribute) ? key.mArg : -1;
+    effect.mRange = 0;
+    effect.mArea = 0;
+    effect.mMagnMin = effect.mMagnMax = (magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
+        ? 1 : std::max(1, static_cast<int>(std::round(getAlchemyFactor() / 20.f)));
+    effect.mDuration = (magic->mData.mFlags & ESM::MagicEffect::NoDuration)
+        ? 1 : std::max(1, static_cast<int>(std::round(getAlchemyFactor() / 8.f)));
+    mEffects.push_back(effect);
+    return true;
+}
+
+void MWMechanics::Alchemy::learnSelectedIngredients() const
+{
+    std::vector<std::string> recipe;
+    for (TIngredientsIterator ingredient = beginIngredients(); ingredient != endIngredients(); ++ingredient)
+    {
+        if (ingredient->isEmpty())
+            continue;
+        recipe.push_back(ingredient->getCellRef().getRefId());
+        for (const ESM::ENAMstruct& effect : mEffects)
+            AlchemyKnowledge::learnFromBrewing(*ingredient, effect.mEffectID, effect.mSkill, effect.mAttribute);
+    }
+    AlchemyKnowledge::setLastRecipe(recipe, static_cast<int>(mMode));
 }
 
 MWMechanics::Alchemy::Result MWMechanics::Alchemy::createSingle ()
@@ -702,6 +855,9 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::createSingle ()
     {
         averageIngredientValue = static_cast<float>(sumIngredientValue) / static_cast<float>(numberIngredients);
     }
+    const float valueCap = getAlchemyIngredientValueCap();
+    const float effectiveIngredientValue = valueCap > 0.f
+        ? std::min(averageIngredientValue, valueCap) : averageIngredientValue;
 
     // EncoreMP sum value end
 
@@ -719,39 +875,47 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::createSingle ()
     // EncoreMP, ingredients add to success chance
     float itemSuccessAddition = 0.0f;
 
-    if (averageIngredientValue >= 10.0f)
+    if (effectiveIngredientValue >= 10.0f)
     {
-        itemSuccessAddition = (0.158f * averageIngredientValue);
+        itemSuccessAddition = (0.158f * effectiveIngredientValue);
         itemSuccessAddition += 8.42f;
     }
 
     successChance += itemSuccessAddition;
 
+    if (Settings::Manager::getBool("fatigue affects success", "ArenaMW Alchemy"))
+        successChance *= mAlchemist.getClass().getCreatureStats(mAlchemist).getFatigueTerm();
 
     if (successChance < Misc::Rng::roll0to99())
     {
-        removeIngredients();
-        return Result_RandomFailure;
+        const int failureMode = Settings::Manager::getInt("failure mode", "ArenaMW Alchemy");
+        if (failureMode != 0 && (mMode == Mode_Poison || failureMode >= 2 || !injectFailureSideEffect()))
+        {
+            removeIngredients();
+            return Result_RandomFailure;
+        }
     }
 
+    learnSelectedIngredients();
     addPotion(mPotionName);
+    AlchemyKnowledge::setLastBrew(mPotionName);
 
     removeIngredients();
 
     //added the content of increaseskill here so it has access to the above variables, and commented out the call
 
 
-    float alchemySkill = mAlchemist.getClass().getSkill(mAlchemist, ESM::Skill::Alchemy);
+    float alchemySkill = mAlchemist.getClass().getNpcStats(mAlchemist).getSkill(ESM::Skill::Alchemy).getBase();
 
     float alchXpMod = 1.0f;
 
     //reduction in XP from potions with avg ingredient values less than 5gp
     //to reduce the 1gp ingredient spamming
     //above 5gp the XP gained increases to 4x at 200gp+
-    if (averageIngredientValue < 5.0f)
+    if (effectiveIngredientValue < 5.0f)
     {
         alchXpMod = 0.5f;
-        alchXpMod += (averageIngredientValue * 0.1f);
+        alchXpMod += (effectiveIngredientValue * 0.1f);
 
         if (alchemySkill > 30.0f)
         {
@@ -768,9 +932,9 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::createSingle ()
             alchXpMod /= 2.0f;
         }
     }
-    else if (averageIngredientValue <= 200.0f)
+    else if (effectiveIngredientValue <= 200.0f)
     {
-        alchXpMod += (0.01 * averageIngredientValue);
+        alchXpMod += (0.01 * effectiveIngredientValue);
     }
     else
     {
@@ -785,13 +949,15 @@ MWMechanics::Alchemy::Result MWMechanics::Alchemy::createSingle ()
 
 std::string MWMechanics::Alchemy::suggestPotionName()
 {
-    std::set<MWMechanics::EffectKey> effects = listEffects();
-    if (effects.empty())
+    if (mEffects.empty())
         return "";
 
-    int effectId = effects.begin()->mId;
-    return MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find(
-                ESM::MagicEffect::effectIdToString(effectId))->mValue.getString();
+    const int effectId = mEffects.front().mEffectID;
+    const std::string effect = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find(
+        ESM::MagicEffect::effectIdToString(effectId))->mValue.getString();
+    // The selected Potion/Poison mode is already explicit in the UI. Keeping the
+    // generated name to the localized magic-effect name avoids hard-coded English.
+    return effect;
 }
 
 std::vector<std::string> MWMechanics::Alchemy::effectsDescription (const MWWorld::ConstPtr &ptr, const int alchemySkill)
@@ -800,17 +966,17 @@ std::vector<std::string> MWMechanics::Alchemy::effectsDescription (const MWWorld
 
     const auto& item = ptr.get<ESM::Ingredient>()->mBase;
     const auto& gmst = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
-    const static auto fWortChanceValue = gmst.find("fWortChanceValue")->mValue.getFloat();
     const auto& data = item->mData;
 
+    AlchemyKnowledge::revealBySkill(ptr, static_cast<float>(alchemySkill));
     for (auto i = 0; i < 4; ++i)
     {
         const auto effectID = data.mEffectID[i];
         const auto skillID = data.mSkills[i];
         const auto attributeID = data.mAttributes[i];
 
-        if (alchemySkill < fWortChanceValue * (i + 1))
-            break;
+        if (!AlchemyKnowledge::isKnown(item->mId, i))
+            continue;
 
         if (effectID != -1)
         {

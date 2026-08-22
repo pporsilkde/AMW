@@ -21,6 +21,7 @@
 #include "movement.hpp"
 #include "spellcasting.hpp"
 #include "spellresistance.hpp"
+#include "poison.hpp"
 #include "difficultyscaling.hpp"
 #include "actorutil.hpp"
 #include "pathfinding.hpp"
@@ -222,7 +223,7 @@ namespace MWMechanics
     void projectileHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, MWWorld::Ptr weapon, const MWWorld::Ptr& projectile,
                        const osg::Vec3f& hitPosition, float attackStrength)
     {
-        
+
 
         MWBase::World *world = MWBase::Environment::get().getWorld();
         const MWWorld::Store<ESM::GameSetting> &gmst = world->getStore().get<ESM::GameSetting>();
@@ -241,7 +242,7 @@ namespace MWMechanics
 
             int skillValue = attacker.getClass().getSkill(attacker, weapon.getClass().getEquipmentSkill(weapon));
 
-            
+
 
             // start of EncoreMP ranged attack accuracy changes
 
@@ -255,7 +256,7 @@ namespace MWMechanics
 
             if (Misc::Rng::roll0to99() >= hitchanceholder)
             {
-                
+
 
                 victim.getClass().onHit(victim, damage, false, projectile, attacker, osg::Vec3f(), false);
                 MWMechanics::reduceWeaponCondition(damage, false, weapon, attacker);
@@ -297,7 +298,11 @@ namespace MWMechanics
         // Apply "On hit" effect of the projectile
         bool appliedEnchantment = applyOnStrikeEnchantment(attacker, victim, projectile, hitPosition, true);
 
-        
+        // ArenaMW poison belongs to the wielded bow/crossbow (or the thrown weapon).
+        // Misses returned above, so charges are consumed only on a confirmed actor hit.
+        if (validVictim
+            && !(victim == getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState()))
+            applyWeaponPoison(attacker, victim, weapon, hitPosition, true);
 
         if (validVictim)
         {
@@ -305,7 +310,7 @@ namespace MWMechanics
             // start of EncoreMP arrow recovery changes
 
             int getmarksman = attacker.getClass().getSkill(attacker, weapon.getClass().getEquipmentSkill(weapon));
-            
+
             // Non-enchanted arrows shot at enemies have a chance to turn up in their inventory
             // EncoreMP makes it so that enchanted arrows can too
 
@@ -357,7 +362,7 @@ namespace MWMechanics
 
             victim.getClass().onHit(victim, damage, true, projectile, attacker, hitPosition, true);
         }
-        
+
     }
 
     float getHitChance(const MWWorld::Ptr &attacker, const MWWorld::Ptr &victim, int skillValue)
@@ -608,9 +613,9 @@ namespace MWMechanics
                         ///and now actually apply the desired formula using weapon skill
                         damage *= fDamageStrengthBase +
                             (((attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified() + releventskill) / 2) * fDamageStrengthMult * 0.1f);
-                    
+
                         ///add the stat bonus for long blades, agility by default unless toggled off
-                        
+
                         bool useAgility = Settings::Manager::getBool("long blades use agility for damage scaling", "Game");
 
                         releventattribute = attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Agility).getModified();
@@ -662,7 +667,7 @@ namespace MWMechanics
                             exceeds50by = (releventattribute - 50);
                             damage *= (1 + (exceeds50by / 200));
                         }
-                    
+
                     }
 
                     if (weaponType == ESM::Weapon::AxeOneHand || weaponType == ESM::Weapon::AxeTwoHand)
@@ -675,7 +680,7 @@ namespace MWMechanics
                         ///and now actually apply the desired formula using weapon skill
                         damage *= fDamageStrengthBase +
                             (((attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified() + releventskill) / 2) * fDamageStrengthMult * 0.1f);
-                    
+
                         ///add the strength bonux for axe V0.81
 
                         releventattribute = attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified();
@@ -685,7 +690,7 @@ namespace MWMechanics
                             exceeds50by = (releventattribute - 50);
                             damage *= (1 + (exceeds50by / 200));
                         }
-                    
+
                     }
 
                     if (weaponType == ESM::Weapon::MarksmanBow || weaponType == ESM::Weapon::MarksmanCrossbow)

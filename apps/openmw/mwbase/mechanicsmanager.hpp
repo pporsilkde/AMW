@@ -97,11 +97,14 @@ namespace MWBase
             virtual int getHoursToRest() const = 0;
             ///< Calculate how many hours the player needs to rest in order to be fully healed
 
-            virtual int getBarterOffer(const MWWorld::Ptr& ptr,int basePrice, bool buying) = 0;
-            ///< This is used by every service to determine the price of objects given the trading skills of the player and NPC.
+            virtual int getBarterOffer(const MWWorld::Ptr& ptr, int basePrice, bool buying, bool useBaseStats = false) = 0;
+            ///< Determine a service/item price. If useBaseStats is true, temporary skill/attribute/fatigue
+            ///  modifiers are ignored; this is used for exploit-safe training quotes.
 
-            virtual int getDerivedDisposition(const MWWorld::Ptr& ptr, bool addTemporaryDispositionChange = true) = 0;
-            ///< Calculate the diposition of an NPC toward the player.
+            virtual int getDerivedDisposition(const MWWorld::Ptr& ptr, bool addTemporaryDispositionChange = true,
+                bool useBaseStats = false) = 0;
+            ///< Calculate the disposition of an NPC toward the player. useBaseStats ignores temporary
+            ///  Personality/Charm modifiers while preserving permanent social state.
 
             virtual int countDeaths (const std::string& id) const = 0;
             ///< Return the number of deaths for actors with the given ID.

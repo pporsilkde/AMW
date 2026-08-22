@@ -5,6 +5,7 @@
 #include "../mwworld/containerstore.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/alchemyknowledge.hpp"
 
 #include "class.hpp"
 
@@ -12,6 +13,9 @@ namespace MWWorld
 {
     void ActionEat::executeImp (const Ptr& actor)
     {
+        if (actor == MWMechanics::getPlayer())
+            MWMechanics::AlchemyKnowledge::learnFromEating(getTarget());
+
         // remove used item (assume the item is present in inventory)
         getTarget().getContainerStore()->remove(getTarget(), 1, actor);
 

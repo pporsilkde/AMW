@@ -19,6 +19,7 @@
 #include "../mwrender/renderinginterface.hpp"
 
 #include "../mwmechanics/alchemy.hpp"
+#include "../mwmechanics/poison.hpp"
 
 namespace MWClass
 {
@@ -121,6 +122,9 @@ namespace MWClass
 
         info.isPotion = true;
 
+        if (MWMechanics::isPurePoison(ptr))
+            text += "\n#{arenamp=alchemy.weapon_poison}";
+
         if (MWBase::Environment::get().getWindowManager()->getFullHelp()) {
             text += MWGui::ToolTips::getCellRefString(ptr.getCellRef());
             text += MWGui::ToolTips::getMiscString(ref->mBase->mScript, "Script");
@@ -135,6 +139,12 @@ namespace MWClass
     {
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
+
+        // Pure harmful mixtures are weapon poisons on normal inventory use.
+        // Forced use (scripts / engine commands) deliberately keeps the vanilla
+        // drink/apply path so existing content does not change semantics.
+        if (!force && MWMechanics::isPurePoison(ptr))
+            return std::shared_ptr<MWWorld::Action>(new MWWorld::ActionApplyPoison(ptr));
 
         std::shared_ptr<MWWorld::Action> action (
             new MWWorld::ActionApply (ptr, ref->mBase->mId));

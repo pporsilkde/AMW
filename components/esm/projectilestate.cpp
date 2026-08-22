@@ -68,6 +68,11 @@ namespace ESM
         esm.writeHNString ("BOW_", mBowId);
         esm.writeHNT ("VEL_", mVelocity);
         esm.writeHNT ("STR_", mAttackStrength);
+        if (!mPoisonId.empty() && mPoisonCharges > 0)
+        {
+            esm.writeHNString("APOI", mPoisonId);
+            esm.writeHNT("APCH", mPoisonCharges);
+        }
     }
 
     void ProjectileState::load(ESMReader &esm)
@@ -79,6 +84,15 @@ namespace ESM
 
         mAttackStrength = 1.f;
         esm.getHNOT(mAttackStrength, "STR_");
+        mPoisonId.clear();
+        mPoisonCharges = 0;
+        if (esm.isNextSub("APOI"))
+        {
+            mPoisonId = esm.getHString();
+            esm.getHNOT(mPoisonCharges, "APCH");
+            if (mPoisonCharges <= 0)
+                mPoisonId.clear();
+        }
         if (esm.isNextSub("WIND"))
             esm.skipHSub();
     }

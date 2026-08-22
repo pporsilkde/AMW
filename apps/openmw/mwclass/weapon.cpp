@@ -19,6 +19,7 @@
 
 #include "../mwmechanics/weapontype.hpp"
 #include "../mwmechanics/equipmentrequirements.hpp"
+#include "../mwmechanics/poison.hpp"
 
 #include "../mwgui/tooltips.hpp"
 
@@ -247,6 +248,10 @@ namespace MWClass
 
         text += MWGui::ToolTips::getWeightString(ref->mBase->mData.mWeight, "#{sWeight}");
         text += MWGui::ToolTips::getValueString(ref->mBase->mData.mValue, "#{sValue}");
+
+        const std::string poison = MWMechanics::describeWeaponPoison(ptr);
+        if (!poison.empty())
+            text += "\n#{arenamp=alchemy.poison_coating}: " + poison;
 
         info.enchant = ref->mBase->mEnchant;
 
