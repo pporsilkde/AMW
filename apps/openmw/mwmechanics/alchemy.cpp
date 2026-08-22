@@ -68,8 +68,6 @@ namespace
         return false;
     }
 }
-    }
-}
 
 MWMechanics::Alchemy::Alchemy()
     : mValue(0)
