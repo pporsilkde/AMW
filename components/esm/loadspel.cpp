@@ -33,9 +33,13 @@ namespace ESM
                     hasData = true;
                     break;
                 case ESM::FourCC<'E','N','A','M'>::value:
-                    ENAMstruct s;
-                    esm.getHT(s, 24);
-                    mEffects.mList.push_back(s);
+                    // OpenMW save format 36+ stores only the five numeric effect
+                    // parameters in ENAM (20 bytes) and writes the effect/skill/
+                    // attribute as typed RefIds in ENID/ENSK/ENAT. EffectList::add
+                    // already handles both that representation and the legacy
+                    // 24-byte ENAM used by ArenaMW/OpenMW 0.47. Using it here is
+                    // essential for dynamic/custom spells saved by OpenMW 0.51.
+                    mEffects.add(esm);
                     break;
                 case ESM::SREC_DELE:
                     esm.skipHSub();

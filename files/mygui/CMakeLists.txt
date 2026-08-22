@@ -42,6 +42,7 @@ set(MYGUI_FILES
     openmw_interactive_messagebox_notransp.layout
     openmw_inventory_window.layout
     openmw_journal.layout
+    openmw_questmanager.layout
     openmw_journal.skin.xml
     openmw_layers.xml
     openmw_list.skin.xml

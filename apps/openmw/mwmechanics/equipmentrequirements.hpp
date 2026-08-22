@@ -11,7 +11,9 @@ namespace MWMechanics
     {
         bool mApplicable = false;
         bool mAllowed = true;
+        bool mAutomatic = false;
         int mTier = 1;
+        int mRating = -1;
         int mSkill = -1;
         int mAttribute = -1;
         int mSkillValue = 0;
@@ -24,6 +26,9 @@ namespace MWMechanics
     };
 
     /// Native ArenaMW interpretation of Armor Requirements / Weapon Requirements.
+    /// By default ArenaMW derives a continuous rating from base damage/protection,
+    /// maximum durability, weight, value and weapon handling stats. The legacy
+    /// imported tier tables remain available through settings as a fallback.
     /// Only player equipment is gated by ActionEquip; this helper is also used by item tooltips.
     EquipmentRequirementResult getEquipmentRequirement(const MWWorld::ConstPtr& item,
         const MWWorld::Ptr& actor);

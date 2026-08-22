@@ -36,6 +36,12 @@ namespace
         catch (...) { return fallback; }
     }
 
+    float getFloat(const char* key, float fallback)
+    {
+        try { return Settings::Manager::getFloat(key, "Equipment Requirements"); }
+        catch (...) { return fallback; }
+    }
+
     bool startsWithCi(const std::string& value, const std::string& prefix)
     {
         const std::string lhs = Misc::StringUtils::lowerCaseUtf8(value);
@@ -110,7 +116,185 @@ namespace
             && out.mAttributeValue >= out.mAttributeRequired;
     }
 
-    MWMechanics::EquipmentRequirementResult armorRequirement(const MWWorld::ConstPtr& item,
+    float clamp01(float value)
+    {
+        return std::clamp(value, 0.f, 1.f);
+    }
+
+    float exponentialScore(float value, float scale)
+    {
+        if (value <= 0.f)
+            return 0.f;
+        return clamp01(1.f - std::exp(-value / std::max(scale, 0.001f)));
+    }
+
+    float logarithmicScore(float value, float reference)
+    {
+        if (value <= 0.f)
+            return 0.f;
+        const float safeReference = std::max(reference, 1.f);
+        return clamp01(std::log1p(value) / std::log1p(safeReference));
+    }
+
+    float weightedScore(const std::array<float, 6>& values, const std::array<float, 6>& weights)
+    {
+        float total = 0.f;
+        float weightTotal = 0.f;
+        for (std::size_t i = 0; i < values.size(); ++i)
+        {
+            const float weight = std::max(weights[i], 0.f);
+            total += clamp01(values[i]) * weight;
+            weightTotal += weight;
+        }
+        return weightTotal > 0.0001f ? clamp01(total / weightTotal) : 0.f;
+    }
+
+    int quantizeRequirement(float value)
+    {
+        const int step = std::clamp(getInt("automatic requirement step", 5), 1, 20);
+        const int rounded = static_cast<int>(std::floor(value / static_cast<float>(step) + 0.5f)) * step;
+        return std::clamp(rounded, 0, 100);
+    }
+
+    int requirementFromScore(float score, bool attribute)
+    {
+        const char* minKey = attribute ? "automatic minimum attribute" : "automatic minimum skill";
+        const char* maxKey = attribute ? "automatic maximum attribute" : "automatic maximum skill";
+        const int fallbackMin = attribute ? 10 : 10;
+        const int fallbackMax = attribute ? 80 : 90;
+        const int minimum = std::clamp(getInt(minKey, fallbackMin), 0, 100);
+        const int maximum = std::clamp(getInt(maxKey, fallbackMax), minimum, 100);
+        return quantizeRequirement(static_cast<float>(minimum) + clamp01(score) * (maximum - minimum));
+    }
+
+    int tierFromRequirements(int skill, int attribute)
+    {
+        const int requirement = std::max(skill, attribute);
+        if (requirement <= 20) return 1;
+        if (requirement <= 35) return 2;
+        if (requirement <= 50) return 3;
+        if (requirement <= 65) return 4;
+        if (requirement <= 80) return 5;
+        return 6;
+    }
+
+    float armorSlotImportance(int type)
+    {
+        using A = ESM::Armor;
+        switch (type)
+        {
+            case A::Cuirass: return 1.00f;
+            case A::Shield: return 0.85f;
+            case A::Greaves: return 0.75f;
+            case A::Helmet: return 0.55f;
+            case A::Boots: return 0.55f;
+            case A::LPauldron:
+            case A::RPauldron: return 0.42f;
+            case A::LGauntlet:
+            case A::RGauntlet:
+            case A::LBracer:
+            case A::RBracer: return 0.32f;
+            default: return 0.50f;
+        }
+    }
+
+    float armorClassWeightReference(int skill)
+    {
+        if (skill == ESM::Skill::LightArmor)
+            return getFloat("automatic light armor weight reference", 8.f);
+        if (skill == ESM::Skill::MediumArmor)
+            return getFloat("automatic medium armor weight reference", 18.f);
+        return getFloat("automatic heavy armor weight reference", 38.f);
+    }
+
+    MWMechanics::EquipmentRequirementResult automaticArmorRequirement(const MWWorld::ConstPtr& item,
+        const MWWorld::Ptr& actor)
+    {
+        MWMechanics::EquipmentRequirementResult out;
+        const auto* ref = item.get<ESM::Armor>();
+        if (!ref || !ref->mBase || !getBool("armor enabled", true))
+            return out;
+
+        const std::string id = Misc::StringUtils::lowerCase(item.getCellRef().getRefId());
+        if (id == "wraithguard" || id == "wraithguard_jury_rig")
+            return out;
+
+        const bool bound = startsWithCi(id, "bound_") || startsWithCi(ref->mBase->mName, "bound ");
+        if (bound && !getBool("bound armor requirements", true))
+            return out;
+
+        const int skill = item.getClass().getEquipmentSkill(item);
+        int attribute = -1;
+        if (skill == ESM::Skill::HeavyArmor)
+        {
+            if (!getBool("heavy armor enabled", true)) return out;
+            attribute = ESM::Attribute::Endurance;
+        }
+        else if (skill == ESM::Skill::MediumArmor)
+        {
+            if (!getBool("medium armor enabled", true)) return out;
+            attribute = ESM::Attribute::Endurance;
+        }
+        else if (skill == ESM::Skill::LightArmor)
+        {
+            if (!getBool("light armor enabled", true)) return out;
+            attribute = ESM::Attribute::Agility;
+        }
+        else
+            return out;
+
+        // Requirements are intentionally based on the record's undamaged/base
+        // statistics. A worn cuirass must not become easier to equip and then
+        // suddenly become harder again after repair. "Durability" therefore
+        // means the item's maximum condition, not its current remaining health.
+        const float protection = exponentialScore(static_cast<float>(std::max(ref->mBase->mData.mArmor, 0)),
+            getFloat("automatic armor protection scale", 55.f));
+        const float durability = logarithmicScore(static_cast<float>(std::max(ref->mBase->mData.mHealth, 0)),
+            getFloat("automatic armor durability reference", 6000.f));
+        const float value = logarithmicScore(static_cast<float>(std::max(ref->mBase->mData.mValue, 0)),
+            getFloat("automatic armor value reference", 100000.f));
+        const float slot = armorSlotImportance(ref->mBase->mData.mType);
+        const float slotWeightScale = std::max(0.20f, slot);
+        const float weight = exponentialScore(std::max(ref->mBase->mData.mWeight, 0.f),
+            armorClassWeightReference(skill) * slotWeightScale);
+
+        const std::array<float, 6> components = { protection, durability, value, weight, slot, 0.f };
+        const std::array<float, 6> weights = {
+            getFloat("automatic armor protection influence", 0.58f),
+            getFloat("automatic armor durability influence", 0.17f),
+            getFloat("automatic armor value influence", 0.12f),
+            getFloat("automatic armor weight influence", 0.13f),
+            0.f,
+            0.f
+        };
+        const float power = weightedScore(components, weights);
+
+        const std::array<float, 6> burdenComponents = { power, weight, slot, 0.f, 0.f, 0.f };
+        const std::array<float, 6> burdenWeights = {
+            getFloat("automatic armor attribute power influence", 0.28f),
+            getFloat("automatic armor attribute weight influence", 0.60f),
+            getFloat("automatic armor attribute slot influence", 0.12f),
+            0.f, 0.f, 0.f
+        };
+        const float burden = weightedScore(burdenComponents, burdenWeights);
+
+        const float skillCurve = std::max(getFloat("automatic skill curve", 1.35f), 0.1f);
+        const float attributeCurve = std::max(getFloat("automatic attribute curve", 1.50f), 0.1f);
+
+        out.mSkillRequired = requirementFromScore(std::pow(power, skillCurve), false);
+        out.mAttributeRequired = requirementFromScore(std::pow(burden, attributeCurve), true);
+        out.mTier = tierFromRequirements(out.mSkillRequired, out.mAttributeRequired);
+        out.mRating = static_cast<int>(std::floor(power * 100.f + 0.5f));
+        out.mApplicable = true;
+        out.mAutomatic = true;
+        out.mSkill = skill;
+        out.mAttribute = attribute;
+        out.mItemName = ref->mBase->mName.empty() ? item.getCellRef().getRefId() : ref->mBase->mName;
+        fillActorValues(out, actor);
+        return out;
+    }
+
+    MWMechanics::EquipmentRequirementResult legacyArmorRequirement(const MWWorld::ConstPtr& item,
         const MWWorld::Ptr& actor)
     {
         MWMechanics::EquipmentRequirementResult out;
@@ -205,7 +389,108 @@ namespace
         return (static_cast<float>(pair[0]) + static_cast<float>(pair[1])) * 0.5f;
     }
 
-    MWMechanics::EquipmentRequirementResult weaponRequirement(const MWWorld::ConstPtr& item,
+    float weaponHandlingWeightReference(int type)
+    {
+        using W = ESM::Weapon;
+        switch (type)
+        {
+            case W::ShortBladeOneHand: return 8.f;
+            case W::LongBladeOneHand: return 20.f;
+            case W::LongBladeTwoHand: return 35.f;
+            case W::BluntOneHand: return 25.f;
+            case W::BluntTwoClose: return 45.f;
+            case W::BluntTwoWide: return 15.f;
+            case W::SpearTwoWide: return 15.f;
+            case W::AxeOneHand: return 25.f;
+            case W::AxeTwoHand: return 40.f;
+            case W::MarksmanBow: return 12.f;
+            case W::MarksmanCrossbow: return 20.f;
+            case W::MarksmanThrown: return 3.f;
+            default: return 20.f;
+        }
+    }
+
+    MWMechanics::EquipmentRequirementResult automaticWeaponRequirement(const MWWorld::ConstPtr& item,
+        const MWWorld::Ptr& actor)
+    {
+        MWMechanics::EquipmentRequirementResult out;
+        const auto* ref = item.get<ESM::Weapon>();
+        if (!ref || !ref->mBase || !getBool("weapon enabled", true))
+            return out;
+
+        const std::string id = Misc::StringUtils::lowerCase(item.getCellRef().getRefId());
+        if (id == "sunder" || id == "keening")
+            return out;
+        if (ref->mBase->mData.mType == ESM::Weapon::Arrow || ref->mBase->mData.mType == ESM::Weapon::Bolt)
+            return out;
+
+        const bool bound = startsWithCi(id, "bound_") || startsWithCi(ref->mBase->mName, "bound ");
+        if (bound && !getBool("bound weapon requirements", true))
+            return out;
+
+        WeaponRule rule;
+        if (!weaponRule(ref->mBase->mData.mType, rule))
+            return out;
+
+        const float chop = avgPair(ref->mBase->mData.mChop);
+        const float slash = avgPair(ref->mBase->mData.mSlash);
+        const float thrust = avgPair(ref->mBase->mData.mThrust);
+        const float maxAttack = std::max({ chop, slash, thrust });
+        const float meanAttack = (chop + slash + thrust) / 3.f;
+        const float representativeDamage = maxAttack * 0.72f + meanAttack * 0.28f;
+        const float speed = std::max(ref->mBase->mData.mSpeed, 0.05f);
+
+        const float damage = exponentialScore(representativeDamage,
+            getFloat("automatic weapon damage scale", 28.f));
+        const float dps = exponentialScore(representativeDamage * speed,
+            getFloat("automatic weapon dps scale", 35.f));
+        const float reach = clamp01((ref->mBase->mData.mReach - 0.65f)
+            / std::max(getFloat("automatic weapon reach range", 1.25f), 0.01f));
+        const float durability = logarithmicScore(static_cast<float>(ref->mBase->mData.mHealth),
+            getFloat("automatic weapon durability reference", 6000.f));
+        const float value = logarithmicScore(static_cast<float>(std::max(ref->mBase->mData.mValue, 0)),
+            getFloat("automatic weapon value reference", 100000.f));
+        const float weight = exponentialScore(std::max(ref->mBase->mData.mWeight, 0.f),
+            weaponHandlingWeightReference(ref->mBase->mData.mType)
+                * std::max(getFloat("automatic weapon weight scale", 1.f), 0.05f));
+
+        const std::array<float, 6> components = { damage, dps, reach, durability, value, weight };
+        const std::array<float, 6> weights = {
+            getFloat("automatic weapon damage influence", 0.42f),
+            getFloat("automatic weapon dps influence", 0.18f),
+            getFloat("automatic weapon reach influence", 0.10f),
+            getFloat("automatic weapon durability influence", 0.12f),
+            getFloat("automatic weapon value influence", 0.10f),
+            getFloat("automatic weapon weight influence", 0.08f)
+        };
+        const float power = weightedScore(components, weights);
+
+        const std::array<float, 6> burdenComponents = { power, weight, reach, 0.f, 0.f, 0.f };
+        const std::array<float, 6> burdenWeights = {
+            getFloat("automatic weapon attribute power influence", 0.45f),
+            getFloat("automatic weapon attribute weight influence", 0.45f),
+            getFloat("automatic weapon attribute reach influence", 0.10f),
+            0.f, 0.f, 0.f
+        };
+        const float burden = weightedScore(burdenComponents, burdenWeights);
+
+        const float skillCurve = std::max(getFloat("automatic skill curve", 1.35f), 0.1f);
+        const float attributeCurve = std::max(getFloat("automatic attribute curve", 1.50f), 0.1f);
+
+        out.mSkillRequired = requirementFromScore(std::pow(power, skillCurve), false);
+        out.mAttributeRequired = requirementFromScore(std::pow(burden, attributeCurve), true);
+        out.mTier = tierFromRequirements(out.mSkillRequired, out.mAttributeRequired);
+        out.mRating = static_cast<int>(std::floor(power * 100.f + 0.5f));
+        out.mApplicable = true;
+        out.mAutomatic = true;
+        out.mSkill = rule.skill;
+        out.mAttribute = rule.attr;
+        out.mItemName = ref->mBase->mName.empty() ? item.getCellRef().getRefId() : ref->mBase->mName;
+        fillActorValues(out, actor);
+        return out;
+    }
+
+    MWMechanics::EquipmentRequirementResult legacyWeaponRequirement(const MWWorld::ConstPtr& item,
         const MWWorld::Ptr& actor)
     {
         MWMechanics::EquipmentRequirementResult out;
@@ -256,6 +541,22 @@ namespace
         fillActorValues(out, actor);
         return out;
     }
+
+    MWMechanics::EquipmentRequirementResult armorRequirement(const MWWorld::ConstPtr& item,
+        const MWWorld::Ptr& actor)
+    {
+        if (getBool("automatic calculation", true))
+            return automaticArmorRequirement(item, actor);
+        return legacyArmorRequirement(item, actor);
+    }
+
+    MWMechanics::EquipmentRequirementResult weaponRequirement(const MWWorld::ConstPtr& item,
+        const MWWorld::Ptr& actor)
+    {
+        if (getBool("automatic calculation", true))
+            return automaticWeaponRequirement(item, actor);
+        return legacyWeaponRequirement(item, actor);
+    }
 }
 
 namespace MWMechanics
@@ -297,6 +598,8 @@ namespace MWMechanics
             return {};
         std::string text = "\n\n#{fontcolourhtml=header}" + tr("requirements.title")
             + " #{fontcolourhtml=normal}" + tr("requirements.tier") + " " + std::to_string(r.mTier);
+        if (r.mAutomatic && r.mRating >= 0)
+            text += "  " + tr("requirements.rating") + " " + std::to_string(r.mRating) + "/100";
         const char* ok = "#{fontcolourhtml=normal}";
         const char* bad = "#{fontcolourhtml=negative}";
         text += "\n" + std::string(r.mSkillValue >= r.mSkillRequired ? ok : bad)

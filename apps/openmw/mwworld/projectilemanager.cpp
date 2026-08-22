@@ -16,6 +16,7 @@
 #include <components/misc/rng.hpp>
 #include <components/settings/settings.hpp>
 #include <components/esm/loadench.hpp>
+#include <components/esm/loadgmst.hpp>
 
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
@@ -132,8 +133,27 @@ namespace
 
     float arrowStickChance()
     {
-        try { return std::max(0.f, std::min(1.f, Settings::Manager::getFloat("stick chance", "Arrow Stick"))); }
+        float configured = 1.f;
+        try { configured = Settings::Manager::getFloat("stick chance", "Arrow Stick"); }
         catch (...) { return 1.f; }
+
+        // Match Arrow Stick's original setting semantics: a negative value uses
+        // Morrowind's projectile recovery GMST instead of forcing zero chance.
+        // This is useful for players who want the vanilla recovery probability
+        // while still using the native collision-based stuck projectile path.
+        if (configured < 0.f)
+        {
+            try
+            {
+                configured = MWBase::Environment::get().getWorld()->getStore()
+                    .get<ESM::GameSetting>().find("fProjectileThrownStoreChance")->mValue.getFloat() / 100.f;
+            }
+            catch (...)
+            {
+                configured = 0.25f;
+            }
+        }
+        return std::max(0.f, std::min(1.f, configured));
     }
 
     bool arrowStickUnderwater()
@@ -150,6 +170,8 @@ namespace
 
     bool projectileHasAoeEnchantment(const MWWorld::Ptr& projectile)
     {
+        if (projectile.isEmpty())
+            return false;
         const std::string enchantment = projectile.getClass().getEnchantment(projectile);
         if (enchantment.empty())
             return false;
@@ -164,7 +186,7 @@ namespace
     }
 
     void placeStuckProjectile(const MWWorld::Ptr& projectile, const MWWorld::Ptr& caster,
-        const MWWorld::Ptr& target, const osg::Vec3f& position, const osg::Vec3f& velocity)
+        const MWWorld::Ptr& target, const osg::Vec3f& position, const osg::Vec3f& velocity, bool thrown)
     {
         MWBase::World* world = MWBase::Environment::get().getWorld();
         MWWorld::CellStore* cell = nullptr;
@@ -190,12 +212,32 @@ namespace
         pos.rot[0] = pos.rot[1] = pos.rot[2] = 0.f;
 
         osg::Vec3f dir = velocity;
-        if (dir.normalize() > 0.f)
+        const float speed = dir.length();
+        if (speed > 0.001f)
         {
-            // Morrowind weapon models point along local +Y. Match the same
-            // pitch/yaw convention used by launched projectiles.
-            pos.rot[0] = -std::asin(std::max(-1.f, std::min(1.f, dir.z())));
-            pos.rot[2] = -std::atan2(dir.x(), dir.y());
+            dir /= speed;
+
+            // During flight ProjectileManager rotates arrows from local +Y to
+            // their velocity. World objects use the inverse-axis ESM rotation
+            // convention (Rz(-z) * Ry(-y) * Rx(-x)), so converting the flight
+            // direction back to ESM angles requires a *positive* yaw here.
+            // The old negative atan2 mirrored the horizontal direction: east-
+            // bound arrows could be placed pointing west and diagonals looked
+            // sideways after the projectile node was replaced by a world item.
+            const float horizontal = std::sqrt(dir.x() * dir.x() + dir.y() * dir.y());
+            pos.rot[0] = -std::atan2(dir.z(), horizontal);
+            pos.rot[2] = std::atan2(dir.x(), dir.y());
+
+            // Thrown weapon models use the opposite forward convention from
+            // arrows/bolts in the original Arrow Stick implementation. Keep
+            // knives, darts and stars from being embedded backwards.
+            if (thrown)
+            {
+                constexpr float Pi = 3.14159265358979323846f;
+                pos.rot[0] += Pi;
+                if (pos.rot[0] > Pi)
+                    pos.rot[0] -= Pi * 2.f;
+            }
         }
 
         try
@@ -203,7 +245,7 @@ namespace
             MWWorld::Ptr stuck = world->placeObject(projectile, cell, pos);
             // Push the recovered projectile a few units into the hit surface so
             // its tip reads as embedded instead of floating on the contact plane.
-            if (!stuck.isEmpty() && dir.length2() > 0.f)
+            if (!stuck.isEmpty() && speed > 0.001f)
                 world->moveObject(stuck, position.x() + dir.x() * 3.f,
                     position.y() + dir.y() * 3.f, position.z() + dir.z() * 3.f);
         }
@@ -628,10 +670,15 @@ namespace MWWorld
                 stick = false;
             if (hitWater && !arrowStickUnderwater())
                 stick = false;
-            if (!arrowStickAoeEnchantments() && projectileHasAoeEnchantment(projectileObject))
+            // The original mod checks the launched weapon for AOE enchantments.
+            // Native projectile collision also gives us the ammunition record, so
+            // protect both sides: an AOE bow/thrown weapon or AOE ammunition will
+            // not leave a recoverable world object unless explicitly enabled.
+            if (!arrowStickAoeEnchantments()
+                && (projectileHasAoeEnchantment(projectileObject) || projectileHasAoeEnchantment(bow)))
                 stick = false;
             if (stick)
-                placeStuckProjectile(projectileObject, caster, target, pos, projectileState.mVelocity);
+                placeStuckProjectile(projectileObject, caster, target, pos, projectileState.mVelocity, projectileState.mThrown);
 
             cleanupProjectile(projectileState);
         }
