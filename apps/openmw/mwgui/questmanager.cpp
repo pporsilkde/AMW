@@ -337,10 +337,12 @@ namespace MWGui
 
         // Fixed compact layout. MW_Window_NoCaption gives us the full client
         // area, so every child frame is now placed explicitly inside it. The
-        // footer is reserved for Exit and never overlaps the tab contents.
+        // footer is reserved for Exit inside the MW_Window_NoCaption client area;
+        // the skin reserves 28 px at the top and 8 px at the bottom, so child
+        // controls must not be positioned as if all 500 window pixels were client space.
         mTitle->setCoord(MyGUI::IntCoord(14, 6, 762, 24));
-        mCloseButton->setCoord(MyGUI::IntCoord(688, 464, 88, 26));
-        mTabs->setCoord(MyGUI::IntCoord(10, 36, 770, 420));
+        mCloseButton->setCoord(MyGUI::IntCoord(688, 430, 88, 26));
+        mTabs->setCoord(MyGUI::IntCoord(10, 36, 770, 388));
 
         // Quests tab. Keep the left list and the related-topics frame aligned
         // to the same lower baseline, close to the bottom of the tab frame.
@@ -356,7 +358,7 @@ namespace MWGui
         mPinButton->setCoord(MyGUI::IntCoord(304, 246, 120, 28));
         mHideButton->setCoord(MyGUI::IntCoord(432, 246, 120, 28));
         mQuestRelatedLabel->setCoord(MyGUI::IntCoord(304, 282, 440, 18));
-        mQuestRelatedList->setCoord(MyGUI::IntCoord(304, 304, 440, 62));
+        mQuestRelatedList->setCoord(MyGUI::IntCoord(304, 304, 440, 44));
 
         // Topics tab
         mTopicSearch->setCoord(MyGUI::IntCoord(6, 6, 220, 24));
@@ -365,17 +367,17 @@ namespace MWGui
         mTopicHeading->setCoord(MyGUI::IntCoord(242, 8, 502, 26));
         mTopicDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 238));
         mTopicRelatedLabel->setCoord(MyGUI::IntCoord(242, 284, 502, 18));
-        mTopicRelatedList->setCoord(MyGUI::IntCoord(242, 306, 502, 60));
+        mTopicRelatedList->setCoord(MyGUI::IntCoord(242, 306, 502, 42));
 
         // Records tab
         mRecordSearch->setCoord(MyGUI::IntCoord(6, 6, 220, 24));
         mRecordList->setCoord(MyGUI::IntCoord(6, 38, 220, 304));
         mRecordCounter->setCoord(MyGUI::IntCoord(6, 346, 220, 20));
         mRecordHeading->setCoord(MyGUI::IntCoord(242, 8, 502, 26));
-        mRecordDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 328));
+        mRecordDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 310));
 
         // Progress tab
-        mStatsDetail->setCoord(MyGUI::IntCoord(6, 6, 738, 360));
+        mStatsDetail->setCoord(MyGUI::IntCoord(6, 6, 738, 342));
     }
 
     std::string QuestManagerWindow::tr(const std::string& key)
