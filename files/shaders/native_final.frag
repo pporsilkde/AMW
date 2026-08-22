@@ -110,6 +110,22 @@ vec3 viewRayForUv(vec2 uv)
         + cameraUp * (ndc.y * cameraTanHalfFovY));
 }
 
+float atmosphericSkyVeil(vec3 ray, float strength)
+{
+    // Keep the horizon visibly denser, but avoid a hard ridge where one sky
+    // shaping term takes over from another. A weighted blend of broad-horizon,
+    // arched horizon and upper-haze terms is smoother than a max() switch and
+    // removes the noticeable boundary line in foggy skies.
+    float elevation = clamp(ray.z, -0.45, 0.98);
+    float broadHorizon = 1.0 - smoothstep(-0.16, 0.92, elevation);
+    float horizonArch = pow(clamp(1.0 - abs(ray.z) * 0.82, 0.0, 1.0), 1.85);
+    float upperHaze = 1.0 - smoothstep(0.58, 0.96, elevation);
+    float shape = clamp(broadHorizon * 0.56 + horizonArch * 0.32 + upperHaze * 0.12, 0.0, 1.0);
+    float skyDensity = mix(0.30, 0.98, shape);
+    float skyOptical = strength * skyDensity * 0.68;
+    return clamp(1.0 - exp(-skyOptical), 0.0, 0.29);
+}
+
 vec3 applyAtmosphericFog(vec3 color, vec2 uv, float rawDepth)
 {
     if (environmentExterior < 0.5 || environmentUnderwater > 0.5 || firstPersonForeground(uv))
@@ -120,16 +136,12 @@ vec3 applyAtmosphericFog(vec3 color, vec2 uv, float rawDepth)
     if (strength <= 0.0001)
         return color;
 
-    // Sky/horizon aerial perspective. The previous version returned early for
-    // depth=1, so in first person (where depth had been cleared) the effect was
-    // effectively invisible. A small horizon term also makes the fog read as
-    // atmospheric volume instead of only recolouring distant geometry.
+    // Reuse the same sky-veil model for both empty sky and very distant
+    // geometry so mountains/buildings and the neighbouring sky do not split on
+    // a visible seam. This especially helps the skyline in heavy fog.
+    float skyAmount = atmosphericSkyVeil(ray, strength);
     if (rawDepth >= 0.99997)
-    {
-        float horizon = pow(clamp(1.0 - abs(ray.z), 0.0, 1.0), 2.2);
-        float skyAmount = clamp(horizon * strength * 0.16, 0.0, 0.18);
         return mix(color, max(fogColor, vec3(0.0)), skyAmount);
-    }
 
     float d = linearDepth(rawDepth);
     float start = max(fogStart * 0.24, cameraNear * 3.0);
@@ -152,8 +164,10 @@ vec3 applyAtmosphericFog(vec3 color, vec2 uv, float rawDepth)
         aboveWater = smoothstep(environmentWaterHeight + 24.0,
             environmentWaterHeight + 220.0, worldPos.z);
 
-    // Dense near the ground / low valleys, thinner above the eye line.
-    float heightWeight = mix(1.32, 0.48, smoothstep(-420.0, 1650.0, relativeHeight));
+    // Dense near the ground / low valleys, thinner above the eye line. The
+    // transition is deliberately broad and retains a non-zero upper-air floor
+    // so tall geometry does not reveal a visible horizontal fog ceiling.
+    float heightWeight = mix(1.28, 0.62, smoothstep(-650.0, 2600.0, relativeHeight));
 
     // Two very low-frequency world-space noise octaves. The field is anchored
     // to the world, not the screen, so it drifts like fog instead of swimming
@@ -167,6 +181,15 @@ vec3 applyAtmosphericFog(vec3 color, vec2 uv, float rawDepth)
     // bounded and preserving the game's native distance fog underneath.
     float optical = distanceFog * strength * density * aboveWater * 0.72;
     float amount = clamp(1.0 - exp(-optical), 0.0, 0.52);
+
+    // As geometry approaches the far-fog limit, softly inherit part of the sky
+    // veil. This avoids a hard separation band between the tops of distant
+    // buildings/terrain and the fogged sky behind them.
+    float skylineBlend = smoothstep(end * 0.58, end * 0.96, d)
+        * smoothstep(-260.0, 900.0, relativeHeight + 120.0)
+        * aboveWater;
+    amount = max(amount, skyAmount * skylineBlend * 0.92);
+
     return mix(color, max(fogColor, vec3(0.0)), amount);
 }
 
