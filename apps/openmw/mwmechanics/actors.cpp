@@ -153,6 +153,13 @@ void faceDialogueActorToPlayer(const MWWorld::Ptr& actor, const MWWorld::Ptr& pl
     if (actor.isEmpty() || player.isEmpty() || !actor.getClass().isNpc())
         return;
 
+    // NPC records with an explicit model use an authored/custom animation
+    // skeleton. Rotating the actor root during dialogue can fight controllers
+    // baked into those animations and visibly twist or collapse the pose. Keep
+    // the authored facing intact; the cinematic camera may still move closer.
+    if (hasConstructionSetAnimation(actor))
+        return;
+
     const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
         - actor.getRefData().getPosition().asVec3();
     if (delta.x() * delta.x() + delta.y() * delta.y() <= 1.f)
@@ -2837,6 +2844,8 @@ namespace MWMechanics
                             movement.mRotation[0] = 0.f;
                             movement.mRotation[1] = 0.f;
                             movement.mRotation[2] = 0.f;
+                            if (hasConstructionSetAnimation(iter->first))
+                                iter->second->setTurningToPlayer(false);
                             if (Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
                                 faceDialogueActorToPlayer(iter->first, player);
                         }

@@ -69,6 +69,13 @@ namespace
     constexpr int sSafeDialoguePoseMask = MWRender::Animation::BlendMask_LeftArm
         | MWRender::Animation::BlendMask_RightArm;
 
+    // Below this actor-to-player distance the normal gameplay camera is already
+    // close enough for a conversation. Starting the cinematic camera here only
+    // produces an unnecessary push-in/jump. 128 units is intentionally well
+    // below the normal activation range, so medium-distance dialogue still gets
+    // the cinematic framing.
+    constexpr float sDialogueCinematicMinDistance = 128.f;
+
     float normalizeAngle(float angle)
     {
         while (angle > osg::PI)
@@ -559,6 +566,18 @@ namespace MWGui
         if (world->getGlobalInt("chargenstate") != -1)
             return;
 
+        // Do not force a cinematic push-in when the player is already standing
+        // very close to the dialogue actor. This keeps point-blank conversations
+        // stable while preserving the cinematic camera at normal talk ranges.
+        const MWWorld::Ptr player = world->getPlayerPtr();
+        if (!player.isEmpty())
+        {
+            const osg::Vec3f delta = mPtr.getRefData().getPosition().asVec3()
+                - player.getRefData().getPosition().asVec3();
+            if (delta.length2() < sDialogueCinematicMinDistance * sDialogueCinematicMinDistance)
+                return;
+        }
+
         world->setDialogueCameraTarget(mPtr);
         mDialogueCameraActive = true;
     }
@@ -612,8 +631,9 @@ namespace MWGui
         const MWWorld::LiveCellRef<ESM::NPC>* npc = mPtr.get<ESM::NPC>();
         if (npc && !npc->mBase->mModel.empty())
         {
-            // Preserve authored Animated-Morrowind-style controllers, while the
-            // dialogue facing code remains active for this actor.
+            // Preserve authored Animated-Morrowind-style controllers. Their
+            // actor-root facing is also left untouched during dialogue; only the
+            // cinematic camera is allowed to reframe them.
             mDynamicDialogueActorAnimationTimer = 2.f;
             return;
         }
@@ -958,7 +978,11 @@ namespace MWGui
             return;
         }
 
-        if (Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
+        const MWWorld::LiveCellRef<ESM::NPC>* dialogueNpc = mPtr.get<ESM::NPC>();
+        const bool preserveAuthoredSkeleton = dialogueNpc && !dialogueNpc->mBase->mModel.empty();
+
+        if (!preserveAuthoredSkeleton
+            && Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
         {
             const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
             if (!player.isEmpty())
