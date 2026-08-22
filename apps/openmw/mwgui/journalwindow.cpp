@@ -21,11 +21,13 @@
 #include "windowbase.hpp"
 #include "journalviewmodel.hpp"
 #include "journalbooks.hpp"
+#include "questmanager.hpp"
 
 namespace
 {
     static char const OptionsOverlay [] = "OptionsOverlay";
     static char const OptionsBTN [] = "OptionsBTN";
+    static char const QuestManagerBTN [] = "QuestManagerBTN";
     static char const PrevPageBTN [] = "PrevPageBTN";
     static char const NextPageBTN [] = "NextPageBTN";
     static char const CloseBTN [] = "CloseBTN";
@@ -61,6 +63,7 @@ namespace
         bool mOptionsMode;
         bool mTopicsMode;
         bool mAllQuests;
+        std::unique_ptr<MWGui::QuestManagerWindow> mQuestManager;
 
         template <typename T>
         T * getWidget (char const * name)
@@ -106,6 +109,7 @@ namespace
             center();
 
             adviseButtonClick (OptionsBTN,    &JournalWindowImpl::notifyOptions   );
+            adviseButtonClick (QuestManagerBTN, &JournalWindowImpl::notifyQuestManager);
             adviseButtonClick (PrevPageBTN,   &JournalWindowImpl::notifyPrevPage  );
             adviseButtonClick (NextPageBTN,   &JournalWindowImpl::notifyNextPage  );
             adviseButtonClick (CloseBTN,      &JournalWindowImpl::notifyClose     );
@@ -119,6 +123,7 @@ namespace
             adviseButtonClick (ShowActiveBTN, &JournalWindowImpl::notifyShowActive);
 
             adviseKeyPress (OptionsBTN, &JournalWindowImpl::notifyKeyPress);
+            adviseKeyPress (QuestManagerBTN, &JournalWindowImpl::notifyKeyPress);
             adviseKeyPress (PrevPageBTN, &JournalWindowImpl::notifyKeyPress);
             adviseKeyPress (NextPageBTN, &JournalWindowImpl::notifyKeyPress);
             adviseKeyPress (CloseBTN, &JournalWindowImpl::notifyKeyPress);
@@ -220,6 +225,15 @@ namespace
                 }
             }
 
+            mQuestManager.reset(new MWGui::QuestManagerWindow([this]()
+            {
+                // Do not reopen/reload the Journal model here: only restore its
+                // widget tree, preserving the exact page that launched Questman.
+                mMainWidget->setVisible(true);
+                MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(
+                    getWidget<MyGUI::Widget>(CloseBTN));
+            }));
+
             mQuestMode = false;
             mAllQuests = false;
             mOptionsMode = false;
@@ -259,6 +273,9 @@ namespace
 
         void onClose() override
         {
+            if (mQuestManager && mQuestManager->isVisible())
+                mQuestManager->setVisible(false);
+
             mModel->unload ();
 
             getPage (LeftBookPage)->showPage (Book (), 0);
@@ -272,6 +289,14 @@ namespace
 
         void setVisible (bool newValue) override
         {
+            // Questman temporarily hides the journal root without unloading the
+            // JournalViewModel. If the GUI mode itself is closed while Questman
+            // is on screen, restore the root first so WindowBase runs onClose().
+            if (!newValue && mQuestManager && mQuestManager->isVisible())
+            {
+                mQuestManager->setVisible(false);
+                mMainWidget->setVisible(true);
+            }
             WindowBase::setVisible (newValue);
         }
 
@@ -447,6 +472,17 @@ namespace
             mOptionsMode = false;
 
             MWBase::Environment::get().getWindowManager()->playSound("book page");
+        }
+
+        void notifyQuestManager(MyGUI::Widget*)
+        {
+            if (!mQuestManager)
+                return;
+
+            // Hide only the MyGUI tree. Calling JournalWindow::setVisible(false)
+            // here would unload the view model and lose the current book page.
+            mMainWidget->setVisible(false);
+            mQuestManager->setVisible(true);
         }
 
         void notifyOptions(MyGUI::Widget* _sender)

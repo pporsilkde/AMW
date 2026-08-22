@@ -13,6 +13,9 @@
 
 #include <components/misc/constants.hpp>
 #include <components/misc/convert.hpp>
+#include <components/misc/rng.hpp>
+#include <components/settings/settings.hpp>
+#include <components/esm/loadench.hpp>
 
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
@@ -25,6 +28,7 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/inventorystore.hpp"
+#include "../mwworld/cellstore.hpp"
 
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
@@ -118,6 +122,96 @@ namespace
             it = projectileIDs.insert(it, ID);
         }
         return projectileEffects;
+    }
+
+    bool arrowStickEnabled()
+    {
+        try { return Settings::Manager::getBool("enabled", "Arrow Stick"); }
+        catch (...) { return true; }
+    }
+
+    float arrowStickChance()
+    {
+        try { return std::max(0.f, std::min(1.f, Settings::Manager::getFloat("stick chance", "Arrow Stick"))); }
+        catch (...) { return 1.f; }
+    }
+
+    bool arrowStickUnderwater()
+    {
+        try { return Settings::Manager::getBool("stick underwater", "Arrow Stick"); }
+        catch (...) { return false; }
+    }
+
+    bool arrowStickAoeEnchantments()
+    {
+        try { return Settings::Manager::getBool("stick aoe enchantments", "Arrow Stick"); }
+        catch (...) { return false; }
+    }
+
+    bool projectileHasAoeEnchantment(const MWWorld::Ptr& projectile)
+    {
+        const std::string enchantment = projectile.getClass().getEnchantment(projectile);
+        if (enchantment.empty())
+            return false;
+        const ESM::Enchantment* ench = MWBase::Environment::get().getWorld()->getStore()
+            .get<ESM::Enchantment>().search(enchantment);
+        if (!ench)
+            return false;
+        for (const ESM::ENAMstruct& effect : ench->mEffects.mList)
+            if (effect.mArea > 0)
+                return true;
+        return false;
+    }
+
+    void placeStuckProjectile(const MWWorld::Ptr& projectile, const MWWorld::Ptr& caster,
+        const MWWorld::Ptr& target, const osg::Vec3f& position, const osg::Vec3f& velocity)
+    {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWWorld::CellStore* cell = nullptr;
+        if (!target.isEmpty() && target.isInCell())
+            cell = target.getCell();
+        else if (!caster.isEmpty() && caster.isInCell())
+        {
+            cell = caster.getCell();
+            if (cell->isExterior())
+            {
+                int x = 0, y = 0;
+                world->positionToIndex(position.x(), position.y(), x, y);
+                cell = world->getExterior(x, y);
+            }
+        }
+        if (!cell)
+            return;
+
+        ESM::Position pos;
+        pos.pos[0] = position.x();
+        pos.pos[1] = position.y();
+        pos.pos[2] = position.z();
+        pos.rot[0] = pos.rot[1] = pos.rot[2] = 0.f;
+
+        osg::Vec3f dir = velocity;
+        if (dir.normalize() > 0.f)
+        {
+            // Morrowind weapon models point along local +Y. Match the same
+            // pitch/yaw convention used by launched projectiles.
+            pos.rot[0] = -std::asin(std::max(-1.f, std::min(1.f, dir.z())));
+            pos.rot[2] = -std::atan2(dir.x(), dir.y());
+        }
+
+        try
+        {
+            MWWorld::Ptr stuck = world->placeObject(projectile, cell, pos);
+            // Push the recovered projectile a few units into the hit surface so
+            // its tip reads as embedded instead of floating on the contact plane.
+            if (!stuck.isEmpty() && dir.length2() > 0.f)
+                world->moveObject(stuck, position.x() + dir.x() * 3.f,
+                    position.y() + dir.y() * 3.f, position.z() + dir.z() * 3.f);
+        }
+        catch (const std::exception& e)
+        {
+            Log(Debug::Warning) << "Arrow Stick: failed to place projectile '"
+                << projectile.getCellRef().getRefId() << "': " << e.what();
+        }
     }
 
     osg::Vec4 getMagicBoltLightDiffuseColor(const ESM::EffectList& effects)
@@ -519,10 +613,26 @@ namespace MWWorld
                 if (invIt != inv.end() && Misc::StringUtils::ciEqual(invIt->getCellRef().getRefId(), projectileState.mBowId))
                     bow = *invIt;
             }
-            if (projectile->getHitWater())
+            const bool hitWater = projectile->getHitWater();
+            if (hitWater)
                 mRendering->emitWaterRipple(pos);
 
-            MWMechanics::projectileHit(caster, target, bow, projectileRef.getPtr(), pos, projectileState.mAttackStrength);
+            MWWorld::Ptr projectileObject = projectileRef.getPtr();
+            MWMechanics::projectileHit(caster, target, bow, projectileObject, pos, projectileState.mAttackStrength);
+
+            // Native Arrow Stick: use the actual projectile collision instead
+            // of a second camera raycast/timer. Actor hits are intentionally
+            // excluded; world/terrain/doors can retain a recoverable projectile.
+            bool stick = arrowStickEnabled() && Misc::Rng::rollProbability() <= arrowStickChance();
+            if (!target.isEmpty() && target.getClass().isActor())
+                stick = false;
+            if (hitWater && !arrowStickUnderwater())
+                stick = false;
+            if (!arrowStickAoeEnchantments() && projectileHasAoeEnchantment(projectileObject))
+                stick = false;
+            if (stick)
+                placeStuckProjectile(projectileObject, caster, target, pos, projectileState.mVelocity);
+
             cleanupProjectile(projectileState);
         }
         for (auto& magicBoltState : mMagicBolts)

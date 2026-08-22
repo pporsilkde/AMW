@@ -8,6 +8,7 @@
 
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/weapontype.hpp"
+#include "../mwmechanics/equipmentrequirements.hpp"
 
 #include <components/compiler/locals.hpp>
 #include <components/esm/loadweap.hpp>
@@ -93,6 +94,21 @@ namespace MWWorld
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sInventoryMessage1}");
 
             return;
+        }
+
+        // ArenaMW native Armor/Weapon Requirements. Do this before the normal
+        // equip transaction so rejected equipment never flashes on for a frame
+        // and scripted/quick-key inventory paths share the same rule.
+        if (actor == MWMechanics::getPlayer())
+        {
+            const MWMechanics::EquipmentRequirementResult requirement
+                = MWMechanics::getEquipmentRequirement(object, actor);
+            if (requirement.mApplicable && !requirement.mAllowed)
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox(
+                    MWMechanics::formatEquipmentRequirementMessage(requirement));
+                return;
+            }
         }
 
         if (!mForce)

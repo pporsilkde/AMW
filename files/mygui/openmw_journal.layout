@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 
 <MyGUI type="Layout">
 
@@ -11,6 +11,16 @@
 
       <Widget type="ImageButton" skin="ImageBox" position="40 350 64 32" name="OptionsBTN">
         <!-- Image set at runtime since it may not be available in all versions of the game -->
+      </Widget>
+
+      <!-- ArenaMW native Quest Manager. The black quill mirrors the writer/editor affordance. -->
+      <Widget type="ImageButton" skin="ImageBox" position="110 350 30 30" name="QuestManagerBTN">
+        <Property key="ImageNormal" value="textures/ui/arenamw/quill_black.png"/>
+        <Property key="ImageHighlighted" value="textures/ui/arenamw/quill_black.png"/>
+        <Property key="ImagePushed" value="textures/ui/arenamw/quill_black.png"/>
+        <UserString key="ToolTipType" value="Layout"/>
+        <UserString key="ToolTipLayout" value="TextToolTipOneLine"/>
+        <UserString key="Caption_TextOneLine" value="#{arenamp=questman.open}"/>
       </Widget>
 
       <Widget type="ImageButton" skin="ImageBox" position="205 350 48 32" name="PrevPageBTN">

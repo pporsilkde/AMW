@@ -22,6 +22,7 @@
 #include "../mwrender/objects.hpp"
 #include "../mwrender/renderinginterface.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/equipmentrequirements.hpp"
 #include "../mwmechanics/weapontype.hpp"
 
 #include "../mwgui/tooltips.hpp"
@@ -254,6 +255,10 @@ namespace MWClass
         info.enchant = ref->mBase->mEnchant;
         if (!info.enchant.empty())
             info.remainingEnchantCharge = static_cast<int>(ptr.getCellRef().getEnchantmentCharge());
+
+        const MWMechanics::EquipmentRequirementResult arenaRequirement
+            = MWMechanics::getEquipmentRequirement(ptr, MWMechanics::getPlayer());
+        text += MWMechanics::formatEquipmentRequirementTooltip(arenaRequirement);
 
         info.text = text;
 

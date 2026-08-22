@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MyGUI type="Layout" version="3.2.0">
+  <Widget type="Window" skin="MW_DialogNoTransp" layer="Windows" position="0 0 920 620" align="Center" name="_Main">
+    <Property key="Caption" value="#{arenamp=questman.title}"/>
+    <Widget type="TextBox" skin="SandBrightText" position="14 10 892 24" name="QuestmanTitle">
+      <Property key="TextAlign" value="Center"/>
+      <Property key="Caption" value="#{arenamp=questman.title}"/>
+    </Widget>
+
+    <Widget type="TabControl" skin="TabControl" position="10 38 900 526" name="QuestmanTabs">
+      <Property key="ButtonAutoWidth" value="true"/>
+
+      <Widget type="TabItem" skin="" position="4 32 892 490">
+        <Property key="Caption" value="#{arenamp=questman.tab.quests}"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 286 24" name="QuestSearch">
+          <UserString key="AcceptTab" value="true"/>
+        </Widget>
+        <Widget type="ComboBox" skin="MW_ComboBox" position="300 6 290 24" name="QuestFilter"/>
+        <Widget type="Button" skin="MW_Button" position="598 6 284 24" name="ShowCompletedHidden"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 352 412" name="QuestList"/>
+        <Widget type="ImageBox" skin="ImageBox" position="374 40 44 44" name="QuestIcon"/>
+        <Widget type="TextBox" skin="SandBrightText" position="428 42 448 40" name="QuestHeading">
+          <Property key="TextAlign" value="Left VCenter"/>
+        </Widget>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 92 502 322" name="QuestDetail"/>
+        <Widget type="Button" skin="MW_Button" position="374 422 120 28" name="PinButton"/>
+        <Widget type="Button" skin="MW_Button" position="502 422 120 28" name="HideButton"/>
+      </Widget>
+
+      <Widget type="TabItem" skin="" position="4 32 892 490">
+        <Property key="Caption" value="#{arenamp=questman.tab.topics}"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 352 24" name="TopicSearch"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 352 412" name="TopicList"/>
+        <Widget type="TextBox" skin="SandBrightText" position="374 8 502 26" name="TopicHeading"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 38 502 412" name="TopicDetail"/>
+      </Widget>
+
+      <Widget type="TabItem" skin="" position="4 32 892 490">
+        <Property key="Caption" value="#{arenamp=questman.tab.records}"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 352 24" name="RecordSearch"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 352 412" name="RecordList"/>
+        <Widget type="TextBox" skin="SandBrightText" position="374 8 502 26" name="RecordHeading"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="374 38 502 412" name="RecordDetail"/>
+      </Widget>
+
+      <Widget type="TabItem" skin="" position="4 32 892 490">
+        <Property key="Caption" value="#{arenamp=questman.tab.stats}"/>
+        <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 870 444" name="StatsDetail"/>
+      </Widget>
+    </Widget>
+
+    <Widget type="Button" skin="MW_Button" position="790 574 116 30" name="CloseButton">
+      <Property key="Caption" value="#{arenamp=questman.close}"/>
+    </Widget>
+  </Widget>
+</MyGUI>
