@@ -107,6 +107,7 @@ namespace MWGui
         void addItem(const std::string& text, MyGUI::IntCoord &coord1, MyGUI::IntCoord &coord2);
         void addItem(const ESM::Spell* spell, MyGUI::IntCoord &coord1, MyGUI::IntCoord &coord2);
         void updateSkillArea();
+        void createPreview();
 
         osg::Group* mParent;
         Resource::ResourceSystem* mResourceSystem;
@@ -120,6 +121,7 @@ namespace MWGui
         float mPreviewOffsetZ;
         int mPreviewDragX;
         int mPreviewDragY;
+        bool mPreviewInitPending;
 
         MyGUI::TextBox *mNameWidget, *mRaceWidget, *mClassWidget, *mBirthSignWidget;
         MyGUI::ScrollView* mSkillView;

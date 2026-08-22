@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <utility>
 
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_ImageBox.h>
@@ -10,6 +12,7 @@
 #include <osg/Texture2D>
 
 #include <components/myguiplatform/myguitexture.hpp>
+#include <components/debug/debuglog.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -34,6 +37,7 @@ namespace MWGui
         , mPreviewOffsetZ(-8.f)
         , mPreviewDragX(0)
         , mPreviewDragY(0)
+        , mPreviewInitPending(false)
         , mUpdateSkillArea(false)
     {
         // Centre dialog
@@ -126,23 +130,60 @@ namespace MWGui
         WindowModal::onOpen();
         mUpdateSkillArea = true;
 
-        if (!mPreview)
+        // The final sheet is heavier than the preceding appearance page: it
+        // rebuilds its dynamic skill/spell widgets and creates an animated RTT.
+        // Do not publish both to MyGUI/OSG from the same setVisible()/onOpen()
+        // call. Let the modal settle first, then create the preview from onFrame.
+        // This follows the deferred CharGen lifetime rule used for switching the
+        // preceding windows and keeps the live preview enabled.
+        if (mPreview)
         {
-            mPreview.reset(new MWRender::RaceSelectionPreview(mParent, mResourceSystem));
-            mPreview->rebuild();
-            mPreview->setUserScale(mPlayerScale);
-            mPreview->setAngle(mPreviewAngle);
-            mPreview->setViewZoom(mPreviewZoom);
-            mPreview->setViewOffset(mPreviewOffsetX, mPreviewOffsetZ);
-            mPreviewTexture.reset(new osgMyGUI::OSGTexture(mPreview->getTexture()));
             mPreviewImage->setRenderItemTexture(mPreviewTexture.get());
-            mPreviewImage->getSubWidgetMain()->_setUVSet(MyGUI::FloatRect(0.f, 0.f, 1.f, 1.f));
+            mPreview->redraw();
+        }
+        else
+            mPreviewInitPending = true;
+    }
+
+    void ReviewDialog::createPreview()
+    {
+        if (mPreview || !mPreviewImage)
+            return;
+
+        try
+        {
+            // Build into locals first. CharacterPreview::rebuild() now attaches
+            // its RTT camera only after NpcAnimation is completely initialized.
+            std::unique_ptr<MWRender::RaceSelectionPreview> preview(
+                new MWRender::RaceSelectionPreview(mParent, mResourceSystem));
+            preview->rebuild();
+            preview->setUserScale(mPlayerScale);
+            preview->setAngle(mPreviewAngle);
+            preview->setViewZoom(mPreviewZoom);
+            preview->setViewOffset(mPreviewOffsetX, mPreviewOffsetZ);
+
+            std::unique_ptr<MyGUI::ITexture> texture(
+                new osgMyGUI::OSGTexture(preview->getTexture()));
+
+            mPreview = std::move(preview);
+            mPreviewTexture = std::move(texture);
+            mPreviewImage->setRenderItemTexture(mPreviewTexture.get());
+            mPreviewImage->getSubWidgetMain()->_setUVSet(
+                MyGUI::FloatRect(0.f, 0.f, 1.f, 1.f));
+        }
+        catch (const std::exception& e)
+        {
+            // A missing/invalid modded body part must not take the whole final
+            // character sheet down with it. Keep the dialog usable and report
+            // the exact preview failure in openmw.log.
+            Log(Debug::Error) << "Error creating final chargen preview: " << e.what();
         }
     }
 
     void ReviewDialog::onClose()
     {
         WindowModal::onClose();
+        mPreviewInitPending = false;
         if (mPreviewImage)
             mPreviewImage->setRenderItemTexture(nullptr);
         mPreviewTexture.reset();
@@ -151,11 +192,23 @@ namespace MWGui
 
     void ReviewDialog::onFrame(float duration)
     {
+        // Build the scroll contents on its own frame first. Besides avoiding a
+        // large first-frame spike, this guarantees the Review layout is fully
+        // settled before an RTT camera is introduced into the OSG scene graph.
         if (mUpdateSkillArea)
         {
             updateSkillArea();
             mUpdateSkillArea = false;
+            return;
         }
+
+        if (mPreviewInitPending)
+        {
+            mPreviewInitPending = false;
+            createPreview();
+            return;
+        }
+
         if (mPreview)
             mPreview->update(duration);
     }

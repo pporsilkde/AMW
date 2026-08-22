@@ -211,7 +211,7 @@ namespace MWGui
         mPendingOpenMode = GM_Review;
     }
 
-    void CharacterCreation::onFrame(float duration)
+    void CharacterCreation::onFrame(float /*duration*/)
     {
         // Open the next GUI mode only on the frame AFTER the old modal was removed.
         // WindowManager::cleanupGarbage() runs after CharacterCreation::onFrame(), so
@@ -385,10 +385,11 @@ namespace MWGui
             }
         }
 
-        if (mReviewDialog)
-            mReviewDialog->onFrame(duration);
-        if (mRaceDialog)
-            mRaceDialog->onFrame(duration);
+        // WindowManager already calls onFrame() for the active WindowModal
+        // before CharacterCreation::onFrame(). Calling Race/Review here again
+        // advanced the live preview animation twice per frame and performed two
+        // scene-graph mutations against one rendered frame. The active CharGen
+        // modal is intentionally updated exactly once by WindowManager.
     }
 
     void CharacterCreation::spawnDialog(const char id)

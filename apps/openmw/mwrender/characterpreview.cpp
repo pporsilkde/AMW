@@ -269,15 +269,24 @@ namespace MWRender
         mDrawOnceCallback = new DrawOnceCallback;
         mCamera->addUpdateCallback(mDrawOnceCallback);
 
-        mParent->addChild(mCamera);
+        // Do not attach the RTT camera to the live scene graph yet. The camera
+        // becomes visible to OSG only after rebuild() has finished constructing
+        // the complete animation graph. This avoids a cull/draw thread seeing a
+        // half-initialized CharacterPreview during CharGen window transitions.
 
         mCharacter.mCell = nullptr;
     }
 
     CharacterPreview::~CharacterPreview ()
     {
-        mCamera->removeChildren(0, mCamera->getNumChildren());
+        // Hide and detach the RTT camera before tearing down its animation graph.
+        // OSG may be running cull/draw threads while CharGen replaces modal
+        // windows, so never leave a still-visible camera pointing at resources
+        // that are being released.
+        mCamera->setNodeMask(0);
         mParent->removeChild(mCamera);
+        mCamera->removeUpdateCallback(mDrawOnceCallback);
+        mCamera->removeChildren(0, mCamera->getNumChildren());
     }
 
     int CharacterPreview::getTextureWidth() const
@@ -317,6 +326,13 @@ namespace MWRender
         onSetup();
 
         redraw();
+
+        // Publish the fully initialized RTT camera atomically from the point of
+        // view of the scene graph. Initial Race/Review/Inventory previews all go
+        // through rebuild(), so the renderer can no longer traverse the camera
+        // between CharacterPreview construction and NpcAnimation setup.
+        if (mCamera->getNumParents() == 0)
+            mParent->addChild(mCamera);
     }
 
     void CharacterPreview::redraw()
