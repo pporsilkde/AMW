@@ -15,6 +15,7 @@
 #include <MyGUI_LanguageManager.h>
 #include <MyGUI_ListBox.h>
 #include <MyGUI_TabControl.h>
+#include <MyGUI_TabItem.h>
 #include <MyGUI_TextBox.h>
 
 #include <components/esm/loaddial.hpp>

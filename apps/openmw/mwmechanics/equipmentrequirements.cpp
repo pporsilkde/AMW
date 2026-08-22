@@ -3,13 +3,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <typeinfo>
+#include <vector>
 
 #include <MyGUI_LanguageManager.h>
 
 #include <components/esm/loadarmo.hpp>
 #include <components/esm/loadweap.hpp>
 #include <components/esm/loadskil.hpp>
-#include <components/esm/loadattr.hpp>
+#include <components/esm/attr.hpp>
 #include <components/misc/stringops.hpp>
 #include <components/settings/settings.hpp>
 
