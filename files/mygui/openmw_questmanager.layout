@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-  <Widget type="Window" skin="MW_Window" layer="Windows" position="0 0 820 540" name="_Main">
-    <Property key="MinSize" value="680 440"/>
+  <Widget type="Window" skin="MW_Window" layer="Windows" position="0 0 790 500" name="_Main">
+    <Property key="MinSize" value="790 500"/>
     <Property key="Caption" value="#{arenamp=questman.title}"/>
-    <Widget type="TextBox" skin="SandBrightText" position="14 8 694 26" name="QuestmanTitle">
+    <Property key="Sizeable" value="false"/>
+    <Widget type="TextBox" skin="SandBrightText" position="14 8 792 26" name="QuestmanTitle">
       <Property key="TextAlign" value="Center"/>
       <Property key="Caption" value="#{arenamp=questman.title}"/>
     </Widget>
 
-    <Widget type="TabControl" skin="TabControl" position="10 38 800 492" name="QuestmanTabs">
+    <Widget type="TabControl" skin="TabControl" position="10 38 770 388" name="QuestmanTabs">
       <Property key="ButtonAutoWidth" value="true"/>
 
       <Widget type="TabItem" skin="" position="4 32 792 456">
@@ -58,7 +59,7 @@
       </Widget>
     </Widget>
 
-    <Widget type="Button" skin="MW_Button" position="718 7 88 26" name="CloseButton">
+    <Widget type="Button" skin="MW_Button" position="688 466 88 26" name="CloseButton">
       <Property key="Caption" value="#{arenamp=questman.close}"/>
     </Widget>
   </Widget>
