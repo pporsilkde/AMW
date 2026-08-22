@@ -36,8 +36,8 @@ namespace MWRender
 
         void reloadSettings();
         void setEnvironment(const osg::Vec4f& fogColor, float fogStart, float fogEnd,
-            bool interior, bool underwater, bool firstPerson, const osg::Vec3f& sunDirection,
-            const osg::Vec4f& sunColor);
+            bool interior, bool underwater, bool waterActive, float waterHeight, bool firstPerson,
+            const osg::Vec3f& sunDirection, const osg::Vec4f& sunColor, float sunDayFactor);
         void update();
 
         // OpenMW 0.47 clears the depth buffer immediately before drawing the
@@ -131,9 +131,12 @@ namespace MWRender
         osg::ref_ptr<osg::Uniform> mCameraAspectUniform;
         osg::ref_ptr<osg::Uniform> mEnvironmentExteriorUniform;
         osg::ref_ptr<osg::Uniform> mEnvironmentUnderwaterUniform;
+        osg::ref_ptr<osg::Uniform> mEnvironmentWaterActiveUniform;
+        osg::ref_ptr<osg::Uniform> mEnvironmentWaterHeightUniform;
         osg::ref_ptr<osg::Uniform> mSunScreenPositionUniform;
         osg::ref_ptr<osg::Uniform> mSunVisibleUniform;
         osg::ref_ptr<osg::Uniform> mSunColorUniform;
+        osg::ref_ptr<osg::Uniform> mSunDayFactorUniform;
         osg::ref_ptr<osg::Uniform> mFirstPersonViewUniform;
         osg::ref_ptr<osg::Uniform> mFrameTimeUniform;
 

@@ -940,6 +940,8 @@ namespace MWGui
 
                     constexpr float markerRange = 8192.f;
                     constexpr float markerRangeSquared = markerRange * markerRange;
+                    constexpr float doorMarkerRange = 1250.f;
+                    constexpr float doorMarkerRangeSquared = doorMarkerRange * doorMarkerRange;
                     constexpr float pixelsPerDegree = 4.f;
                     constexpr int compassInnerPadding = 10;
                     const int markerWidth = mHorizontalCompassMarkers.empty()
@@ -1023,12 +1025,16 @@ namespace MWGui
 
                             const float dx = door.x - playerPosition.x();
                             const float dy = door.y - playerPosition.y();
+                            const float distanceSquared = dx * dx + dy * dy;
+                            if (distanceSquared > doorMarkerRangeSquared)
+                                continue;
+
                             std::ostringstream identity;
                             identity << "door:" << door.name << ':'
                                 << static_cast<int>(std::lround(door.x)) << ':'
                                 << static_cast<int>(std::lround(door.y));
                             appendCandidate(MWWorld::Ptr(), identity.str(), HorizontalCompassMarkerKind::Door,
-                                door.x, door.y, dx * dx + dy * dy);
+                                door.x, door.y, distanceSquared);
                         }
                     }
 

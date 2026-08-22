@@ -1397,15 +1397,30 @@ namespace MWRender
         if (mNativeEffectsProcessor)
         {
             const osg::Vec4f sunPosition = mSunLight->getPosition();
+            const osg::Vec4f sunDiffuse = mSunLight->getDiffuse();
+            const osg::Vec4f sunSpecular = mSunLight->getSpecular();
+            const auto luminance = [](const osg::Vec4f& color)
+            {
+                return std::max(0.f, color.r()) * 0.2126f
+                    + std::max(0.f, color.g()) * 0.7152f
+                    + std::max(0.f, color.b()) * 0.0722f;
+            };
+            const float diffuseLuma = luminance(sunDiffuse);
+            const float sunDayFactor = diffuseLuma > 0.0001f
+                ? std::clamp(luminance(sunSpecular) / diffuseLuma, 0.f, 1.f)
+                : 0.f;
             mNativeEffectsProcessor->setEnvironment(
                 mFog->getFogColor(mUnderwaterFogActive),
                 mFog->getFogStart(mUnderwaterFogActive),
                 mFog->getFogEnd(mUnderwaterFogActive),
                 mStateUpdater->isInterior(),
                 mUnderwaterFogActive,
+                mWater->isActive(),
+                mWater->getHeight(),
                 mCamera->isFirstPerson(),
                 osg::Vec3f(sunPosition.x(), sunPosition.y(), sunPosition.z()),
-                mSunLight->getDiffuse());
+                sunDiffuse,
+                sunDayFactor);
             mNativeEffectsProcessor->update();
             if (mBloomProcessor)
                 mBloomProcessor->setSuppressed(mNativeEffectsProcessor->isEnabled());

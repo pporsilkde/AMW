@@ -192,9 +192,12 @@ namespace MWRender
         mCameraAspectUniform = new osg::Uniform("cameraAspect", 1.f);
         mEnvironmentExteriorUniform = new osg::Uniform("environmentExterior", 1.f);
         mEnvironmentUnderwaterUniform = new osg::Uniform("environmentUnderwater", 0.f);
+        mEnvironmentWaterActiveUniform = new osg::Uniform("environmentWaterActive", 0.f);
+        mEnvironmentWaterHeightUniform = new osg::Uniform("environmentWaterHeight", 0.f);
         mSunScreenPositionUniform = new osg::Uniform("sunScreenPosition", osg::Vec2f(0.5f, 0.5f));
         mSunVisibleUniform = new osg::Uniform("sunVisible", 0.f);
         mSunColorUniform = new osg::Uniform("sunColor", osg::Vec3f(1.f, 0.9f, 0.75f));
+        mSunDayFactorUniform = new osg::Uniform("sunDayFactor", 1.f);
         mFirstPersonViewUniform = new osg::Uniform("firstPersonView", 0.f);
         mFrameTimeUniform = new osg::Uniform("frameTime", 0.f);
 
@@ -222,9 +225,12 @@ namespace MWRender
         mFinalState->addUniform(mCameraAspectUniform);
         mFinalState->addUniform(mEnvironmentExteriorUniform);
         mFinalState->addUniform(mEnvironmentUnderwaterUniform);
+        mFinalState->addUniform(mEnvironmentWaterActiveUniform);
+        mFinalState->addUniform(mEnvironmentWaterHeightUniform);
         mFinalState->addUniform(mSunScreenPositionUniform);
         mFinalState->addUniform(mSunVisibleUniform);
         mFinalState->addUniform(mSunColorUniform);
+        mFinalState->addUniform(mSunDayFactorUniform);
         mFinalState->addUniform(mFirstPersonViewUniform);
         mFinalState->addUniform(mFrameTimeUniform);
         mFinalCamera->addChild(finalPass);
@@ -424,8 +430,8 @@ namespace MWRender
     }
 
     void NativeEffectsProcessor::setEnvironment(const osg::Vec4f& fogColor, float fogStart, float fogEnd,
-        bool interior, bool underwater, bool firstPerson, const osg::Vec3f& sunDirection,
-        const osg::Vec4f& sunColor)
+        bool interior, bool underwater, bool waterActive, float waterHeight, bool firstPerson,
+        const osg::Vec3f& sunDirection, const osg::Vec4f& sunColor, float sunDayFactor)
     {
         mInterior = interior;
         mUnderwater = underwater;
@@ -440,8 +446,11 @@ namespace MWRender
         mFogEndUniform->set(std::max(fogEnd, fogStart + 1.f));
         mEnvironmentExteriorUniform->set(interior ? 0.f : 1.f);
         mEnvironmentUnderwaterUniform->set(underwater ? 1.f : 0.f);
+        mEnvironmentWaterActiveUniform->set(waterActive ? 1.f : 0.f);
+        mEnvironmentWaterHeightUniform->set(waterHeight);
         mFirstPersonViewUniform->set(firstPerson ? 1.f : 0.f);
         mSunColorUniform->set(osg::Vec3f(std::max(sunColor.r(), 0.f), std::max(sunColor.g(), 0.f), std::max(sunColor.b(), 0.f)));
+        mSunDayFactorUniform->set(std::clamp(sunDayFactor, 0.f, 1.f));
     }
 
     void NativeEffectsProcessor::updateSourceBindings()

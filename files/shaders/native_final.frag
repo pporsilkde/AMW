@@ -30,9 +30,12 @@ uniform float cameraTanHalfFovY;
 uniform float cameraAspect;
 uniform float environmentExterior;
 uniform float environmentUnderwater;
+uniform float environmentWaterActive;
+uniform float environmentWaterHeight;
 uniform vec2 sunScreenPosition;
 uniform float sunVisible;
 uniform vec3 sunColor;
+uniform float sunDayFactor;
 uniform float firstPersonView;
 uniform float frameTime;
 
@@ -138,6 +141,17 @@ vec3 applyAtmosphericFog(vec3 color, vec2 uv, float rawDepth)
     vec3 worldPos = reconstructWorldPosition(uv, d);
     float relativeHeight = worldPos.z - cameraWorldPosition.z;
 
+    // The native atmospheric pass is an air-volume effect. When the camera is
+    // above water, depth can still belong to the water surface or submerged
+    // terrain. Applying the air fog to those pixels creates a hard-looking
+    // horizontal/vertical cut at the water boundary. Fade the extra atmospheric
+    // contribution out at and below the current water plane, while leaving the
+    // engine's normal underwater fog/refraction pipeline untouched.
+    float aboveWater = 1.0;
+    if (environmentWaterActive > 0.5)
+        aboveWater = smoothstep(environmentWaterHeight + 24.0,
+            environmentWaterHeight + 220.0, worldPos.z);
+
     // Dense near the ground / low valleys, thinner above the eye line.
     float heightWeight = mix(1.32, 0.48, smoothstep(-420.0, 1650.0, relativeHeight));
 
@@ -151,9 +165,37 @@ vec3 applyAtmosphericFog(vec3 color, vec2 uv, float rawDepth)
 
     // Exponential response gives a visibly volumetric build-up while staying
     // bounded and preserving the game's native distance fog underneath.
-    float optical = distanceFog * strength * density * 0.72;
+    float optical = distanceFog * strength * density * aboveWater * 0.72;
     float amount = clamp(1.0 - exp(-optical), 0.0, 0.52);
     return mix(color, max(fogColor, vec3(0.0)), amount);
+}
+
+float sunSurroundVisibility()
+{
+    if (sunScreenPosition.x <= 0.0 || sunScreenPosition.x >= 1.0
+        || sunScreenPosition.y <= 0.0 || sunScreenPosition.y >= 1.0)
+        return 0.0;
+
+    // Sample a ring outside the apparent disc. A thin branch, pole or small
+    // foreground prop can cover every sample on the disc itself, but it should
+    // not remove the entire surrounding light volume. Large occluders still
+    // cover this ring and therefore suppress the shafts normally.
+    vec2 aspectScale = vec2(1.0 / max(cameraAspect, 0.01), 1.0);
+    vec2 r0 = aspectScale * 0.026;
+
+    float v = 0.0;
+    float w = 0.0;
+
+    v += skyVisibilityAt(sunScreenPosition + vec2( r0.x, 0.0)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2(-r0.x, 0.0)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2(0.0,  r0.y)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2(0.0, -r0.y)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2( r0.x,  r0.y)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2(-r0.x,  r0.y)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2( r0.x, -r0.y)); w += 1.0;
+    v += skyVisibilityAt(sunScreenPosition + vec2(-r0.x, -r0.y)); w += 1.0;
+
+    return clamp(v / max(w, 0.0001), 0.0, 1.0);
 }
 
 float sunDiscCoverage()
@@ -195,7 +237,7 @@ float sunDiscCoverage()
     return clamp(v / max(w, 0.0001), 0.0, 1.0);
 }
 
-vec3 computeGodRays(vec2 uv)
+vec3 computeGodRays(vec2 uv, float sunCoverage, float surroundVisibility)
 {
     if (sunVisible < 0.5 || environmentExterior < 0.5 || environmentUnderwater > 0.5
         || firstPersonForeground(uv))
@@ -210,16 +252,17 @@ vec3 computeGodRays(vec2 uv)
     if (sunLuma < 0.015)
         return vec3(0.0);
 
-    float sunCoverage = sunDiscCoverage();
-    // Only a nearly *fully* covered disc may switch shafts off. Partial
-    // coverage (branches, leaves, fences) is intentionally soft so it cannot
-    // make the whole frame pop darker in one step.
-    float fullOcclusionGate = smoothstep(0.015, 0.12, sunCoverage);
+    // A small object may cover the complete sampled disc for a few frames even
+    // though most of the sky around the sun is open. Preserve a reduced shaft
+    // source in that case. A wall, cliff or roof covers both the disc and the
+    // wider ring, so full occlusion still reaches zero.
+    float effectiveCoverage = max(sunCoverage, surroundVisibility * 0.34);
+    float fullOcclusionGate = smoothstep(0.012, 0.14, effectiveCoverage);
     if (fullOcclusionGate <= 0.001)
         return vec3(0.0);
 
     float shaftSource = fullOcclusionGate
-        * mix(0.72, 1.0, smoothstep(0.14, 0.88, sunCoverage));
+        * mix(0.44, 1.0, smoothstep(0.10, 0.86, sunCoverage));
     float coreSource = fullOcclusionGate * smoothstep(0.05, 0.82, sunCoverage);
 
     // Volumetric march from the fragment toward the sun, accumulating
@@ -291,25 +334,30 @@ vec3 computeGodRays(vec2 uv)
 
     vec3 warmSun = mix(max(sunColor, vec3(0.0)),
         vec3(1.0, 0.76, 0.48) * min(1.0, sunLuma + 0.20), 0.20);
+
+    // Keep a faint remnant at night rather than reusing daytime intensity.
+    // Sun diffuse luminance already follows the weather/time-of-day lighting,
+    // so this also gives sensible attenuation in heavy overcast conditions.
+    float daylight = smoothstep(0.02, 0.85, sunDayFactor);
+    float timeOfDayAttenuation = mix(0.18, 1.0, daylight);
     // Keep the broad shaft field stable under thin occluders. Only the sun
     // core follows partial disc coverage strongly; the shaft field mostly
     // responds to the local radial samples above. Full occlusion still fades
     // both terms to zero.
     float intensity = (shaft * 1.05 * shaftSource + coreGlow * coreSource) * sunFalloff * edgeFade;
-    return warmSun * intensity * max(godRaysStrength, 0.0) * 0.70;
+    return warmSun * intensity * max(godRaysStrength, 0.0) * 0.70 * timeOfDayAttenuation;
 }
 
-vec3 computeSunGlare(vec2 uv)
+vec3 computeSunGlare(vec2 uv, float coverage, float surroundVisibility)
 {
     if (sunVisible < 0.5 || environmentExterior < 0.5 || environmentUnderwater > 0.5)
         return vec3(0.0);
 
-    float coverage = sunDiscCoverage();
-
-    // Preserve the soft behaviour introduced in V5: a twig or a few leaves
-    // only reduce the flash proportionally, while a genuinely covered sun
-    // disc fades the effect away.  No GPU occlusion query/readback is needed.
-    float visibility = smoothstep(0.01, 0.22, coverage);
+    // The broad halo uses the same surrounding-sky test as the shafts: a small
+    // object can kill the bright core, but it should only attenuate the halo.
+    // Large occluders cover both regions and still fade the full effect away.
+    float effectiveCoverage = max(coverage, surroundVisibility * 0.30);
+    float visibility = smoothstep(0.01, 0.22, effectiveCoverage);
     if (visibility <= 0.0001)
         return vec3(0.0);
 
@@ -328,6 +376,8 @@ vec3 computeSunGlare(vec2 uv)
 
     vec3 warmSun = mix(max(sunColor, vec3(0.0)),
         vec3(1.0, 0.76, 0.48) * min(1.0, sunLuma + 0.20), 0.22);
+    float daylight = smoothstep(0.02, 0.85, sunDayFactor);
+    float timeOfDayAttenuation = mix(0.18, 1.0, daylight);
 
     // Local flash/halo plus a weak full-frame veiling glare when the player
     // looks toward the sun.  All terms are positive-only.
@@ -337,7 +387,7 @@ vec3 computeSunGlare(vec2 uv)
 
     // Thin occluders affect the small core more strongly than the broad wash,
     // avoiding the old whole-screen pop when a branch crosses the sun.
-    float softCoverage = mix(0.72, 1.0, smoothstep(0.12, 0.88, coverage));
+    float softCoverage = mix(0.48, 1.0, smoothstep(0.12, 0.88, effectiveCoverage));
     float local = (core * smoothstep(0.04, 0.80, coverage) + halo * softCoverage) * visibility;
     float veil = wash * visibility * softCoverage;
 
@@ -346,7 +396,7 @@ vec3 computeSunGlare(vec2 uv)
     if (firstPersonForeground(uv))
         local *= 0.12;
 
-    return warmSun * (local + veil);
+    return warmSun * (local + veil) * timeOfDayAttenuation;
 }
 
 vec3 sharpenCAS(vec2 uv, vec3 center)
@@ -400,13 +450,20 @@ void main()
     if (atmosphericFogEnabled >= 0.5)
         color = applyAtmosphericFog(color, uv, rawDepth);
 
-    // Replacement for the legacy query-driven SunFlash/SunGlare.  It uses
-    // the preserved world-depth texture, so occlusion is stable in both
-    // first- and third-person views and does not depend on osg::OcclusionQueryNode.
-    color += computeSunGlare(uv);
+    // Replacement for the legacy query-driven SunFlash/SunGlare. Sample the
+    // sun visibility once and share it between glare and god rays; this avoids
+    // duplicating a relatively expensive depth kernel in the full-screen pass.
+    float sunCoverage = 0.0;
+    float sunSurround = 0.0;
+    if (sunVisible >= 0.5 && environmentExterior >= 0.5 && environmentUnderwater < 0.5)
+    {
+        sunCoverage = sunDiscCoverage();
+        sunSurround = sunSurroundVisibility();
+    }
+    color += computeSunGlare(uv, sunCoverage, sunSurround);
 
     if (godRaysEnabled >= 0.5)
-        color += computeGodRays(uv);
+        color += computeGodRays(uv, sunCoverage, sunSurround);
 
     if (ditheringEnabled >= 0.5)
     {
