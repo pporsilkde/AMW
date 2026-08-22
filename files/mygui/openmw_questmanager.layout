@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-  <Widget type="Window" skin="MW_Window" layer="Windows" position="0 0 790 500" name="_Main">
+  <Widget type="Window" skin="MW_Window_NoCaption" layer="Windows" position="0 0 790 500" name="_Main">
     <Property key="MinSize" value="790 500"/>
     <Property key="Caption" value="#{arenamp=questman.title}"/>
     <Property key="Sizeable" value="false"/>
-    <Widget type="TextBox" skin="SandBrightText" position="14 8 792 26" name="QuestmanTitle">
+    <Widget type="TextBox" skin="SandBrightText" position="14 6 762 24" name="QuestmanTitle">
       <Property key="TextAlign" value="Center"/>
       <Property key="Caption" value="#{arenamp=questman.title}"/>
     </Widget>
 
-    <Widget type="TabControl" skin="TabControl" position="10 38 770 388" name="QuestmanTabs">
+    <Widget type="TabControl" skin="TabControl" position="10 36 770 420" name="QuestmanTabs">
       <Property key="ButtonAutoWidth" value="true"/>
 
-      <Widget type="TabItem" skin="" position="4 32 792 456">
+      <Widget type="TabItem" skin="" position="4 32 762 384">
         <Property key="Caption" value="#{arenamp=questman.tab.quests}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 313 24" name="QuestSearch">
           <UserString key="AcceptTab" value="true"/>
@@ -33,7 +33,7 @@
         <Widget type="ListBox" skin="MW_List" position="335 404 439 48" name="QuestRelatedList"/>
       </Widget>
 
-      <Widget type="TabItem" skin="" position="4 32 792 456">
+      <Widget type="TabItem" skin="" position="4 32 762 384">
         <Property key="Caption" value="#{arenamp=questman.tab.topics}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 235 24" name="TopicSearch"/>
         <Widget type="ListBox" skin="MW_List" position="6 38 235 392" name="TopicList"/>
@@ -44,7 +44,7 @@
         <Widget type="ListBox" skin="MW_List" position="257 402 517 52" name="TopicRelatedList"/>
       </Widget>
 
-      <Widget type="TabItem" skin="" position="4 32 792 456">
+      <Widget type="TabItem" skin="" position="4 32 762 384">
         <Property key="Caption" value="#{arenamp=questman.tab.records}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 235 24" name="RecordSearch"/>
         <Widget type="ListBox" skin="MW_List" position="6 38 235 392" name="RecordList"/>
@@ -53,13 +53,13 @@
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="257 38 517 416" name="RecordDetail"/>
       </Widget>
 
-      <Widget type="TabItem" skin="" position="4 32 792 456">
+      <Widget type="TabItem" skin="" position="4 32 762 384">
         <Property key="Caption" value="#{arenamp=questman.tab.stats}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 768 430" name="StatsDetail"/>
       </Widget>
     </Widget>
 
-    <Widget type="Button" skin="MW_Button" position="688 466 88 26" name="CloseButton">
+    <Widget type="Button" skin="MW_Button" position="688 464 88 26" name="CloseButton">
       <Property key="Caption" value="#{arenamp=questman.close}"/>
     </Widget>
   </Widget>

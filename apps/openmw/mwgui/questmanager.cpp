@@ -335,46 +335,47 @@ namespace MWGui
             mRestoringGeometry = false;
         }
 
-        // Fixed compact layout. All inner frames stay fully inside the window,
-        // the exit button lives in the footer, quest details are slightly
-        // shorter, and the related-topics list gets more vertical room.
-        mTitle->setCoord(MyGUI::IntCoord(14, 8, 762, 26));
-        mCloseButton->setCoord(MyGUI::IntCoord(688, 466, 88, 26));
-        mTabs->setCoord(MyGUI::IntCoord(10, 38, 770, 388));
+        // Fixed compact layout. MW_Window_NoCaption gives us the full client
+        // area, so every child frame is now placed explicitly inside it. The
+        // footer is reserved for Exit and never overlaps the tab contents.
+        mTitle->setCoord(MyGUI::IntCoord(14, 6, 762, 24));
+        mCloseButton->setCoord(MyGUI::IntCoord(688, 464, 88, 26));
+        mTabs->setCoord(MyGUI::IntCoord(10, 36, 770, 420));
 
-        // Quests tab
+        // Quests tab. Keep the left list and the related-topics frame aligned
+        // to the same lower baseline, close to the bottom of the tab frame.
         mQuestSearch->setCoord(MyGUI::IntCoord(6, 6, 282, 24));
         mQuestFilter->setCoord(MyGUI::IntCoord(304, 6, 214, 24));
         mShowCompleted->setCoord(MyGUI::IntCoord(528, 6, 104, 24));
         mShowHidden->setCoord(MyGUI::IntCoord(640, 6, 104, 24));
-        mQuestList->setCoord(MyGUI::IntCoord(6, 38, 282, 286));
-        mQuestCounter->setCoord(MyGUI::IntCoord(6, 328, 282, 20));
+        mQuestList->setCoord(MyGUI::IntCoord(6, 38, 282, 304));
+        mQuestCounter->setCoord(MyGUI::IntCoord(6, 346, 282, 20));
         mQuestIcon->setCoord(MyGUI::IntCoord(304, 40, 44, 44));
         mQuestHeading->setCoord(MyGUI::IntCoord(358, 42, 386, 40));
-        mQuestDetail->setCoord(MyGUI::IntCoord(304, 92, 440, 164));
-        mPinButton->setCoord(MyGUI::IntCoord(304, 262, 120, 28));
-        mHideButton->setCoord(MyGUI::IntCoord(432, 262, 120, 28));
-        mQuestRelatedLabel->setCoord(MyGUI::IntCoord(304, 300, 440, 18));
-        mQuestRelatedList->setCoord(MyGUI::IntCoord(304, 322, 440, 34));
+        mQuestDetail->setCoord(MyGUI::IntCoord(304, 92, 440, 146));
+        mPinButton->setCoord(MyGUI::IntCoord(304, 246, 120, 28));
+        mHideButton->setCoord(MyGUI::IntCoord(432, 246, 120, 28));
+        mQuestRelatedLabel->setCoord(MyGUI::IntCoord(304, 282, 440, 18));
+        mQuestRelatedList->setCoord(MyGUI::IntCoord(304, 304, 440, 62));
 
         // Topics tab
         mTopicSearch->setCoord(MyGUI::IntCoord(6, 6, 220, 24));
-        mTopicList->setCoord(MyGUI::IntCoord(6, 38, 220, 286));
-        mTopicCounter->setCoord(MyGUI::IntCoord(6, 328, 220, 20));
+        mTopicList->setCoord(MyGUI::IntCoord(6, 38, 220, 304));
+        mTopicCounter->setCoord(MyGUI::IntCoord(6, 346, 220, 20));
         mTopicHeading->setCoord(MyGUI::IntCoord(242, 8, 502, 26));
-        mTopicDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 226));
-        mTopicRelatedLabel->setCoord(MyGUI::IntCoord(242, 272, 502, 18));
-        mTopicRelatedList->setCoord(MyGUI::IntCoord(242, 294, 502, 62));
+        mTopicDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 238));
+        mTopicRelatedLabel->setCoord(MyGUI::IntCoord(242, 284, 502, 18));
+        mTopicRelatedList->setCoord(MyGUI::IntCoord(242, 306, 502, 60));
 
         // Records tab
         mRecordSearch->setCoord(MyGUI::IntCoord(6, 6, 220, 24));
-        mRecordList->setCoord(MyGUI::IntCoord(6, 38, 220, 286));
-        mRecordCounter->setCoord(MyGUI::IntCoord(6, 328, 220, 20));
+        mRecordList->setCoord(MyGUI::IntCoord(6, 38, 220, 304));
+        mRecordCounter->setCoord(MyGUI::IntCoord(6, 346, 220, 20));
         mRecordHeading->setCoord(MyGUI::IntCoord(242, 8, 502, 26));
-        mRecordDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 318));
+        mRecordDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 328));
 
-        // Stats tab
-        mStatsDetail->setCoord(MyGUI::IntCoord(6, 6, 738, 350));
+        // Progress tab
+        mStatsDetail->setCoord(MyGUI::IntCoord(6, 6, 738, 360));
     }
 
     std::string QuestManagerWindow::tr(const std::string& key)
@@ -1228,18 +1229,15 @@ namespace MWGui
     void QuestManagerWindow::refreshStats()
     {
         int active = 0, completed = 0, hidden = 0, pinned = 0;
-        std::map<std::string, int> doneAddons, doneCategories, doneFactions;
+        std::map<std::string, int> doneCategories, doneFactions;
         std::set<std::string> touchedCategories, touchedFactions;
-        std::map<std::string, bool> mainDone;
         for (const QuestData& quest : mQuests)
         {
             if (quest.mCompleted)
             {
                 ++completed;
-                ++doneAddons[quest.mAddon];
                 ++doneCategories[quest.mCategory];
                 if (!quest.mFaction.empty()) ++doneFactions[quest.mFaction];
-                if (isMainQuestFinal(quest.mAddon, quest.mIds)) mainDone[quest.mAddon] = true;
             }
             else ++active;
             if (quest.mHidden) ++hidden;
@@ -1250,7 +1248,7 @@ namespace MWGui
 
         // Original Questman compares completed quests against the entire loaded
         // quest catalog, not only quests already touched by the player.
-        struct CatalogQuest { std::string addon, category, faction; };
+        struct CatalogQuest { std::string category, faction; };
         std::map<std::string, CatalogQuest> catalog;
         const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
         const MWWorld::Store<ESM::Dialogue>& dialogues = store.get<ESM::Dialogue>();
@@ -1270,13 +1268,12 @@ namespace MWGui
             const std::string group = lower(name);
             if (catalog.count(group)) continue;
             const Metadata meta = classifyQuest(dial->mId);
-            catalog[group] = { meta.mAddon, meta.mCategory, meta.mFaction };
+            catalog[group] = { meta.mCategory, meta.mFaction };
         }
 
-        std::map<std::string, int> totalAddons, totalCategories, totalFactions;
+        std::map<std::string, int> totalCategories, totalFactions;
         for (const auto& row : catalog)
         {
-            ++totalAddons[row.second.addon];
             ++totalCategories[row.second.category];
             if (!row.second.faction.empty()) ++totalFactions[row.second.faction];
         }
@@ -1329,30 +1326,6 @@ namespace MWGui
         text << "  " << tr("questman.stats.hidden") << ": " << hidden << "\n";
         text << "  " << tr("questman.stats.topics") << ": " << mTopics.size() << "\n";
         text << "  " << tr("questman.stats.records") << ": " << mRecords.size() << "\n\n";
-
-        text << tr("questman.stats.by_addon") << "\n";
-        std::vector<std::string> addonKeys;
-        for (const auto& value : totalAddons) addonKeys.push_back(value.first);
-        const auto addonRank = [](const std::string& value)
-        {
-            if (value == "morrowind") return 0;
-            if (value == "tribunal") return 1;
-            if (value == "bloodmoon") return 2;
-            if (value == "unknown") return 1000;
-            return 10;
-        };
-        std::sort(addonKeys.begin(), addonKeys.end(), [addonRank](const std::string& a, const std::string& b)
-        {
-            const int ra = addonRank(a), rb = addonRank(b);
-            if (ra != rb) return ra < rb;
-            return QuestManagerWindow::labelForAddon(a) < QuestManagerWindow::labelForAddon(b);
-        });
-        for (const std::string& key : addonKeys)
-        {
-            text << "  " << labelForAddon(key) << ": " << doneAddons[key] << " / " << totalAddons[key];
-            if (mainDone[key]) text << "  [" << tr("questman.stats.main_done") << "]";
-            text << "\n";
-        }
 
         text << "\n" << tr("questman.stats.by_category") << "\n";
         std::vector<std::string> categoryKeys(touchedCategories.begin(), touchedCategories.end());
