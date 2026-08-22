@@ -1,10 +1,7 @@
 #include "npcanimation.hpp"
 
-#include <utility>
-
 #include <osg/UserDataContainer>
 #include <osg/MatrixTransform>
-#include <osg/observer_ptr>
 #include <osg/Depth>
 
 #include <osgUtil/RenderBin>
@@ -34,7 +31,6 @@
 #include "../mwworld/player.hpp"
 
 #include "../mwmechanics/npcstats.hpp"
-#include "../mwmechanics/drawstate.hpp"
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/weapontype.hpp"
 
@@ -111,89 +107,6 @@ std::string getShieldBodypartMesh(const std::vector<ESM::PartReference>& bodypar
     }
 
     return std::string();
-}
-
-osg::Matrix mirrorBowArmMatrix(const osg::Matrix& input)
-{
-    // Mirror a local skeletal transform across the actor's sagittal plane.
-    // Conjugating the 3x3 part by X reflection keeps a proper rotation (no
-    // negative-scale/culling problems), while translation simply changes side.
-    static const float sign[3] = { -1.f, 1.f, 1.f };
-    osg::Matrix result = input;
-    for (int row = 0; row < 3; ++row)
-        for (int column = 0; column < 3; ++column)
-            result(row, column) = input(row, column) * sign[row] * sign[column];
-
-    osg::Vec3f translation = input.getTrans();
-    translation.x() = -translation.x();
-    result.setTrans(translation);
-    return result;
-}
-
-class BowArmMirrorCallback final : public osg::NodeCallback
-{
-public:
-    using BonePair = std::pair<osg::observer_ptr<osg::MatrixTransform>, osg::observer_ptr<osg::MatrixTransform>>;
-
-    BowArmMirrorCallback(const MWWorld::Ptr& actor, std::vector<BonePair> pairs)
-        : mActor(actor)
-        , mPairs(std::move(pairs))
-    {
-    }
-
-    void operator()(osg::Node* node, osg::NodeVisitor* nv) override
-    {
-        // Let every ordinary KF/controller establish the source pose first.
-        // The mirrored arm pose is a render-time post-process, so gameplay,
-        // projectile direction and animation timing remain unchanged.
-        traverse(node, nv);
-
-        if (!shouldMirror())
-            return;
-
-        for (const BonePair& pair : mPairs)
-        {
-            osg::MatrixTransform* left = pair.first.get();
-            osg::MatrixTransform* right = pair.second.get();
-            if (!left || !right)
-                continue;
-
-            const osg::Matrix leftSource = left->getMatrix();
-            const osg::Matrix rightSource = right->getMatrix();
-            left->setMatrix(mirrorBowArmMatrix(rightSource));
-            right->setMatrix(mirrorBowArmMatrix(leftSource));
-        }
-    }
-
-private:
-    bool shouldMirror() const
-    {
-        if (mActor.isEmpty() || !mActor.getClass().hasInventoryStore(mActor))
-            return false;
-        if (mActor.getClass().getCreatureStats(mActor).getDrawState() != MWMechanics::DrawState_Weapon)
-            return false;
-
-        const MWWorld::InventoryStore& inventory = mActor.getClass().getInventoryStore(mActor);
-        MWWorld::ConstContainerStoreIterator weapon = inventory.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
-        return weapon != inventory.end() && weapon->getTypeName() == typeid(ESM::Weapon).name()
-            && weapon->get<ESM::Weapon>()->mBase->mData.mType == ESM::Weapon::MarksmanBow;
-    }
-
-    MWWorld::Ptr mActor;
-    std::vector<BonePair> mPairs;
-};
-
-bool isBowArmBoneName(const std::string& name)
-{
-    // Only the clavicle/arm/hand/finger subtree is mirrored. Legs, torso, head
-    // and weapon-sheathing nodes retain their normal animation.
-    return name.find("clavicle") != std::string::npos
-        || name.find("upperarm") != std::string::npos
-        || name.find("upper arm") != std::string::npos
-        || name.find("forearm") != std::string::npos
-        || name.find("hand") != std::string::npos
-        || name.find("finger") != std::string::npos
-        || name.find("thumb") != std::string::npos;
 }
 
 }
@@ -615,53 +528,6 @@ void NpcAnimation::updateNpcBase()
         smodel = Misc::ResourceHelpers::correctActorModelPath("meshes\\" + mNpc->mModel, mResourceSystem->getVFS());
 
     setObjectRoot(smodel, true, true, false);
-
-    // Morrowind's stock bow pose is visually left-handed (bow in the right
-    // hand, string/arrow worked by the left). ArenaMW can mirror just the two
-    // arm subtrees at runtime so a right-handed archer holds the bow in the
-    // left hand and draws with the right, without shipping replacement KF
-    // assets. Also synthesize Weapon Bone Left when a skeleton does not provide
-    // OpenMW's optional extension node, using the mirrored right-hand weapon
-    // attachment as a stable fallback.
-    if (Settings::Manager::getBool("right handed bow", "Game"))
-    {
-        const NodeMap& currentNodes = getNodeMap();
-
-        if (currentNodes.find("weapon bone left") == currentNodes.end())
-        {
-            NodeMap::const_iterator rightWeapon = currentNodes.find("weapon bone");
-            NodeMap::const_iterator leftHand = currentNodes.find("bip01 l hand");
-            if (leftHand == currentNodes.end())
-                leftHand = currentNodes.find("left hand");
-
-            if (rightWeapon != currentNodes.end() && leftHand != currentNodes.end())
-            {
-                osg::ref_ptr<osg::MatrixTransform> leftWeapon = new osg::MatrixTransform;
-                leftWeapon->setName("Weapon Bone Left");
-                leftWeapon->setMatrix(mirrorBowArmMatrix(rightWeapon->second->getMatrix()));
-                leftHand->second->addChild(leftWeapon);
-                mNodeMap["weapon bone left"] = leftWeapon;
-            }
-        }
-
-        std::vector<BowArmMirrorCallback::BonePair> mirrorPairs;
-        for (const auto& entry : mNodeMap)
-        {
-            const std::string& leftName = entry.first;
-            const std::size_t side = leftName.find(" l ");
-            if (side == std::string::npos || !isBowArmBoneName(leftName))
-                continue;
-
-            std::string rightName = leftName;
-            rightName.replace(side, 3, " r ");
-            NodeMap::const_iterator right = mNodeMap.find(rightName);
-            if (right != mNodeMap.end())
-                mirrorPairs.emplace_back(entry.second.get(), right->second.get());
-        }
-
-        if (!mirrorPairs.empty())
-            mObjectRoot->addUpdateCallback(new BowArmMirrorCallback(mPtr, std::move(mirrorPairs)));
-    }
 
     updateParts();
 

@@ -63,10 +63,32 @@ namespace
         return false;
     }
 
-    std::string firstUsefulName(const MWDialogue::Quest& quest, const std::string& fallback)
+    std::string questNameFromEsm(const std::string& id)
     {
-        std::string name = trim(quest.getName());
-        return name.empty() ? fallback : name;
+        // TES3 has no separate quest-title field. The canonical localized
+        // title is the Journal INFO marked QS_Name, so read that directly
+        // from the loaded ESM store and never expose an editor id as a title.
+        // This mirrors the original Questman: unnamed journals are Records.
+        try
+        {
+            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+            const ESM::Dialogue* dialogue = store.get<ESM::Dialogue>().search(id);
+            if (!dialogue || dialogue->mType != ESM::Dialogue::Journal)
+                return std::string();
+
+            for (const ESM::DialInfo& info : dialogue->mInfo)
+            {
+                if (info.mQuestStatus != ESM::DialInfo::QS_Name)
+                    continue;
+                const std::string title = trim(info.mResponse);
+                if (!title.empty())
+                    return title;
+            }
+        }
+        catch (...)
+        {
+        }
+        return std::string();
     }
 
     std::string sanitizeJournalText(const std::string& value)
@@ -124,7 +146,8 @@ namespace MWGui
         getWidget(mTabs, "QuestmanTabs");
         getWidget(mQuestSearch, "QuestSearch");
         getWidget(mQuestFilter, "QuestFilter");
-        getWidget(mShowCompletedHidden, "ShowCompletedHidden");
+        getWidget(mShowCompleted, "ShowCompleted");
+        getWidget(mShowHidden, "ShowHidden");
         getWidget(mQuestList, "QuestList");
         getWidget(mQuestCounter, "QuestCounter");
         getWidget(mQuestIcon, "QuestIcon");
@@ -157,7 +180,8 @@ namespace MWGui
         mQuestSearch->setCaption("");
         mTopicSearch->setCaption("");
         mRecordSearch->setCaption("");
-        mShowCompletedHidden->setCaption(tr("questman.show_completed_hidden"));
+        mShowCompleted->setCaption(tr("questman.show_completed"));
+        mShowHidden->setCaption(tr("questman.show_hidden"));
         mQuestRelatedLabel->setCaption(tr("questman.related_topics"));
         mTopicRelatedLabel->setCaption(tr("questman.related_topics"));
         mCloseButton->setCaption(tr("questman.close"));
@@ -185,7 +209,8 @@ namespace MWGui
         mTopicSearch->eventEditTextChange += MyGUI::newDelegate(this, &QuestManagerWindow::notifySearchChanged);
         mRecordSearch->eventEditTextChange += MyGUI::newDelegate(this, &QuestManagerWindow::notifySearchChanged);
         mQuestFilter->eventComboChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyFilterChanged);
-        mShowCompletedHidden->eventMouseButtonClick += MyGUI::newDelegate(this, &QuestManagerWindow::notifyShowCompletedHidden);
+        mShowCompleted->eventMouseButtonClick += MyGUI::newDelegate(this, &QuestManagerWindow::notifyShowCompleted);
+        mShowHidden->eventMouseButtonClick += MyGUI::newDelegate(this, &QuestManagerWindow::notifyShowHidden);
         mQuestList->eventListChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyQuestSelected);
         mTopicList->eventListChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyTopicSelected);
         mRecordList->eventListChangePosition += MyGUI::newDelegate(this, &QuestManagerWindow::notifyRecordSelected);
@@ -242,30 +267,50 @@ namespace MWGui
     void QuestManagerWindow::restoreWindowGeometry()
     {
         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
-        int w = std::min(920, std::max(700, view.width - 30));
-        int h = std::min(620, std::max(480, view.height - 30));
+        int w = std::min(820, std::max(680, view.width - 40));
+        int h = std::min(540, std::max(440, view.height - 40));
         int x = std::max(0, (view.width - w) / 2);
         int y = std::max(0, (view.height - h) / 2);
 
-        try
-        {
-            const float sw = Settings::Manager::getFloat("window w", "Questman");
-            const float sh = Settings::Manager::getFloat("window h", "Questman");
-            const float sx = Settings::Manager::getFloat("window x", "Questman");
-            const float sy = Settings::Manager::getFloat("window y", "Questman");
-            if (sw > 0.f && sh > 0.f)
-            {
-                w = std::max(700, std::min(static_cast<int>(sw * view.width), view.width));
-                h = std::max(480, std::min(static_cast<int>(sh * view.height), view.height));
-                x = std::max(0, std::min(static_cast<int>(sx * view.width), view.width - w));
-                y = std::max(0, std::min(static_cast<int>(sy * view.height), view.height - h));
-            }
-        }
+        int layoutVersion = 0;
+        try { layoutVersion = Settings::Manager::getInt("layout version", "Questman"); }
         catch (...) {}
+
+        if (layoutVersion < 2)
+        {
+            // Preserve the old combined visibility preference while migrating
+            // to independent Completed/Hidden toggles.
+            const bool legacyShow = getBool("show completed hidden", false);
+            Settings::Manager::setBool("show completed", "Questman", legacyShow);
+            Settings::Manager::setBool("show hidden", "Questman", legacyShow);
+        }
+
+        // Version 2 deliberately resets the old 920x620 saved geometry once,
+        // otherwise existing users would never see the new compact default.
+        if (layoutVersion >= 2)
+        {
+            try
+            {
+                const float sw = Settings::Manager::getFloat("window w", "Questman");
+                const float sh = Settings::Manager::getFloat("window h", "Questman");
+                const float sx = Settings::Manager::getFloat("window x", "Questman");
+                const float sy = Settings::Manager::getFloat("window y", "Questman");
+                if (sw > 0.f && sh > 0.f)
+                {
+                    w = std::max(680, std::min(static_cast<int>(sw * view.width), view.width));
+                    h = std::max(440, std::min(static_cast<int>(sh * view.height), view.height));
+                    x = std::max(0, std::min(static_cast<int>(sx * view.width), view.width - w));
+                    y = std::max(0, std::min(static_cast<int>(sy * view.height), view.height - h));
+                }
+            }
+            catch (...) {}
+        }
 
         mRestoringGeometry = true;
         mMainWidget->setCoord(MyGUI::IntCoord(x, y, w, h));
         mRestoringGeometry = false;
+        if (layoutVersion < 2)
+            Settings::Manager::setInt("layout version", "Questman", 2);
     }
 
     void QuestManagerWindow::saveWindowGeometry()
@@ -284,14 +329,17 @@ namespace MWGui
 
     void QuestManagerWindow::applyResponsiveLayout()
     {
-        const int w = std::max(700, mMainWidget->getSize().width);
-        const int h = std::max(480, mMainWidget->getSize().height);
-        mTitle->setCoord(MyGUI::IntCoord(14, 10, std::max(100, w - 28), 24));
-        mTabs->setCoord(MyGUI::IntCoord(10, 38, std::max(620, w - 20), std::max(386, h - 94)));
-        mCloseButton->setCoord(MyGUI::IntCoord(std::max(10, w - 130), std::max(40, h - 46), 116, 30));
+        const int w = std::max(680, mMainWidget->getSize().width);
+        const int h = std::max(440, mMainWidget->getSize().height);
+
+        // Keep Exit inside the visible header. The old footer control could be
+        // clipped when Questman was resized to a compact height.
+        mTitle->setCoord(MyGUI::IntCoord(14, 8, std::max(100, w - 126), 26));
+        mCloseButton->setCoord(MyGUI::IntCoord(std::max(10, w - 102), 7, 88, 26));
+        mTabs->setCoord(MyGUI::IntCoord(10, 38, std::max(620, w - 20), std::max(386, h - 48)));
 
         const int paneW = std::max(612, mTabs->getSize().width - 8);
-        const int paneH = std::max(350, mTabs->getSize().height - 36);
+        const int paneH = std::max(346, mTabs->getSize().height - 36);
         const auto pct = [](const char* key, float fallback)
         {
             try { return std::max(20.f, std::min(60.f, Settings::Manager::getFloat(key, "Questman"))); }
@@ -307,17 +355,26 @@ namespace MWGui
         const int qRightW = std::max(280, paneW - qRightX - 10);
         const int qListH = std::max(180, paneH - 64);
         mQuestSearch->setCoord(MyGUI::IntCoord(6, 6, qLeft, 24));
-        const int filterW = std::max(150, qRightW / 2);
+        // Independent compact toggles fit even a narrow Questman window and
+        // allow completed and hidden quests to be controlled separately.
+        const int toggleGap = 6;
+        int toggleW = 112;
+        int filterW = qRightW - toggleW * 2 - toggleGap * 2;
+        if (filterW < 120)
+        {
+            filterW = 120;
+            toggleW = std::max(82, (qRightW - filterW - toggleGap * 2) / 2);
+        }
         mQuestFilter->setCoord(MyGUI::IntCoord(qRightX, 6, filterW, 24));
-        mShowCompletedHidden->setCoord(MyGUI::IntCoord(qRightX + filterW + 8, 6,
-            std::max(120, qRightW - filterW - 8), 24));
+        mShowCompleted->setCoord(MyGUI::IntCoord(qRightX + filterW + toggleGap, 6, toggleW, 24));
+        mShowHidden->setCoord(MyGUI::IntCoord(qRightX + filterW + toggleGap * 2 + toggleW, 6, toggleW, 24));
         mQuestList->setCoord(MyGUI::IntCoord(6, 38, qLeft, qListH));
         mQuestCounter->setCoord(MyGUI::IntCoord(6, 42 + qListH, qLeft, 20));
         mQuestIcon->setCoord(MyGUI::IntCoord(qRightX, 40, 44, 44));
         mQuestHeading->setCoord(MyGUI::IntCoord(qRightX + 54, 42, std::max(100, qRightW - 54), 40));
         const int qDetailY = 92;
-        const int relatedListH = 66;
-        const int qDetailH = std::max(105, paneH - qDetailY - 138);
+        const int relatedListH = 48;
+        const int qDetailH = std::max(105, paneH - qDetailY - 120);
         mQuestDetail->setCoord(MyGUI::IntCoord(qRightX, qDetailY, qRightW, qDetailH));
         const int qButtonsY = qDetailY + qDetailH + 8;
         mPinButton->setCoord(MyGUI::IntCoord(qRightX, qButtonsY, 120, 28));
@@ -334,7 +391,7 @@ namespace MWGui
         mTopicList->setCoord(MyGUI::IntCoord(6, 38, tLeft, tListH));
         mTopicCounter->setCoord(MyGUI::IntCoord(6, 42 + tListH, tLeft, 20));
         mTopicHeading->setCoord(MyGUI::IntCoord(tRightX, 8, tRightW, 26));
-        const int topicRelatedH = 70;
+        const int topicRelatedH = 52;
         const int topicDetailH = std::max(150, paneH - 38 - topicRelatedH - 34);
         mTopicDetail->setCoord(MyGUI::IntCoord(tRightX, 38, tRightW, topicDetailH));
         const int topicRelatedY = 46 + topicDetailH;
@@ -816,14 +873,17 @@ namespace MWGui
         mVisibleRecords.clear();
         mPinned = readIdSet("pinned quests");
         mHidden = readIdSet("hidden quests");
-        mShowCompletedHiddenState = getBool("show completed hidden", false);
+        const bool legacyShow = getBool("show completed hidden", false);
+        mShowCompletedState = getBool("show completed", legacyShow);
+        mShowHiddenState = getBool("show hidden", legacyShow);
         try { mLastQuestId = lower(Settings::Manager::getString("last quest", "Questman")); }
         catch (...) { mLastQuestId.clear(); }
         try { mLastTopicId = lower(Settings::Manager::getString("last topic", "Questman")); }
         catch (...) { mLastTopicId.clear(); }
         try { mLastRecordTopic = lower(Settings::Manager::getString("last record", "Questman")); }
         catch (...) { mLastRecordTopic.clear(); }
-        mShowCompletedHidden->setStateSelected(mShowCompletedHiddenState);
+        mShowCompleted->setStateSelected(mShowCompletedState);
+        mShowHidden->setStateSelected(mShowHiddenState);
         if (mQuestGivers.empty())
             rebuildQuestGivers();
 
@@ -842,7 +902,12 @@ namespace MWGui
         for (auto it = journal->questBegin(); it != journal->questEnd(); ++it)
         {
             const std::string id = it->first;
-            const std::string name = firstUsefulName(it->second, id);
+            const std::string name = questNameFromEsm(id);
+            // If the ESM has no QS_Name, this is an unnamed journal record,
+            // not a titled quest. Leave it unmapped so its entries appear in
+            // the Records tab instead of exposing a raw editor id.
+            if (name.empty())
+                continue;
             const std::string groupKey = lower(name);
             Group& group = groups[groupKey];
             if (group.mQuest.mId.empty())
@@ -1070,7 +1135,9 @@ namespace MWGui
         for (std::size_t i = 0; i < mQuests.size(); ++i)
         {
             const QuestData& quest = mQuests[i];
-            if (!mShowCompletedHiddenState && (quest.mHidden || (quest.mCompleted && !quest.mPinned)))
+            if (!mShowHiddenState && quest.mHidden)
+                continue;
+            if (!mShowCompletedState && quest.mCompleted && !quest.mPinned)
                 continue;
             if (filter && filter->mAxis != FilterData::All)
             {
@@ -1483,11 +1550,19 @@ namespace MWGui
         refreshQuests();
     }
 
-    void QuestManagerWindow::notifyShowCompletedHidden(MyGUI::Widget*)
+    void QuestManagerWindow::notifyShowCompleted(MyGUI::Widget*)
     {
-        mShowCompletedHiddenState = !mShowCompletedHiddenState;
-        Settings::Manager::setBool("show completed hidden", "Questman", mShowCompletedHiddenState);
-        mShowCompletedHidden->setStateSelected(mShowCompletedHiddenState);
+        mShowCompletedState = !mShowCompletedState;
+        Settings::Manager::setBool("show completed", "Questman", mShowCompletedState);
+        mShowCompleted->setStateSelected(mShowCompletedState);
+        refreshQuests();
+    }
+
+    void QuestManagerWindow::notifyShowHidden(MyGUI::Widget*)
+    {
+        mShowHiddenState = !mShowHiddenState;
+        Settings::Manager::setBool("show hidden", "Questman", mShowHiddenState);
+        mShowHidden->setStateSelected(mShowHiddenState);
         refreshQuests();
     }
 

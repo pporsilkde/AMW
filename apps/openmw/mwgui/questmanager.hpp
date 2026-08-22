@@ -116,7 +116,8 @@ namespace MWGui
         void notifyTabChanged(MyGUI::TabControl* sender, std::size_t index);
         void notifySearchChanged(MyGUI::EditBox* sender);
         void notifyFilterChanged(MyGUI::ComboBox* sender, std::size_t index);
-        void notifyShowCompletedHidden(MyGUI::Widget* sender);
+        void notifyShowCompleted(MyGUI::Widget* sender);
+        void notifyShowHidden(MyGUI::Widget* sender);
         void notifyQuestSelected(MyGUI::ListBox* sender, std::size_t index);
         void notifyTopicSelected(MyGUI::ListBox* sender, std::size_t index);
         void notifyRecordSelected(MyGUI::ListBox* sender, std::size_t index);
@@ -148,7 +149,8 @@ namespace MWGui
         MyGUI::TabControl* mTabs = nullptr;
         MyGUI::EditBox* mQuestSearch = nullptr;
         MyGUI::ComboBox* mQuestFilter = nullptr;
-        MyGUI::Button* mShowCompletedHidden = nullptr;
+        MyGUI::Button* mShowCompleted = nullptr;
+        MyGUI::Button* mShowHidden = nullptr;
         MyGUI::ListBox* mQuestList = nullptr;
         MyGUI::TextBox* mQuestCounter = nullptr;
         MyGUI::ImageBox* mQuestIcon = nullptr;
@@ -186,7 +188,8 @@ namespace MWGui
         std::vector<std::size_t> mTopicRelatedTopics;
         std::set<std::string> mPinned;
         std::set<std::string> mHidden;
-        bool mShowCompletedHiddenState = false;
+        bool mShowCompletedState = false;
+        bool mShowHiddenState = false;
         std::string mLastQuestId;
         std::string mLastTopicId;
         std::string mLastRecordTopic;
