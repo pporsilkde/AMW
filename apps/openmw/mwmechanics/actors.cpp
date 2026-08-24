@@ -69,6 +69,25 @@ namespace
 
 constexpr float sDynamicIdleTransitionSeconds = 0.18f;
 
+// Keep an NPC that is already fighting the player active across a neighbouring
+// exterior-cell hand-off. The normal 7168-unit actor-processing cap is kept for
+// everyone else, so quest timing and ambient actors retain vanilla behaviour.
+bool keepsExteriorPlayerCombatActive(const MWWorld::Ptr& actor, const MWWorld::Ptr& player, float distanceSquared,
+    float normalProcessingRange)
+{
+    if (actor.isEmpty() || player.isEmpty() || actor == player || !actor.isInCell() || !player.isInCell())
+        return false;
+    if (!actor.getCell()->isExterior() || !player.getCell()->isExterior() || actor.getCell() == player.getCell())
+        return false;
+    if (!actor.getClass().getCreatureStats(actor).getAiSequence().isInCombat(player))
+        return false;
+
+    static const float configuredRange = std::max(0.f,
+        Settings::Manager::getFloat("combat exterior processing range", "Game"));
+    const float range = std::max(normalProcessingRange, configuredRange);
+    return distanceSquared <= range * range;
+}
+
 struct DynamicIdleAnimation
 {
     const char* mGroup;
@@ -2377,7 +2396,9 @@ namespace MWMechanics
         {
             if (iter->first == player) continue;
 
-            bool inProcessingRange = (playerPos - iter->first.getRefData().getPosition().asVec3()).length2() <= mActorsProcessingRange*mActorsProcessingRange;
+            const float distSqr = (playerPos - iter->first.getRefData().getPosition().asVec3()).length2();
+            bool inProcessingRange = distSqr <= mActorsProcessingRange*mActorsProcessingRange
+                || keepsExteriorPlayerCombatActive(iter->first, player, distSqr, mActorsProcessingRange);
             if (!inProcessingRange) continue;
 
             MWMechanics::CreatureStats& stats = iter->first.getClass().getCreatureStats(iter->first);
@@ -2617,18 +2638,29 @@ namespace MWMechanics
                 if (!shouldYieldCollision(ptr, nearestCollisionActor))
                     continue;
 
-                if (timeToCollision > 0.65f)
+                // Ported from ArenaMP FIX26: actors in Combat/Pursue must not
+                // brake because of bystanders. Scaling the movement vector also
+                // scales CharacterController's speed factor, which makes both the
+                // actual pursuit and the run cycle look like slow motion. Combat
+                // actors still sidestep around traffic, but keep their pace.
+                if (!isCombatOrPursue)
                 {
-                    // Timely soft slowdown while there is still room to resolve
-                    // the encounter without changing animation direction.
-                    movement.mPosition[1] *= 0.45f;
-                    movement.mPosition[0] *= 0.65f;
-                    continue;
-                }
+                    if (timeToCollision > 0.65f)
+                    {
+                        movement.mPosition[1] *= 0.45f;
+                        movement.mPosition[0] *= 0.65f;
+                        continue;
+                    }
 
-                if (avoidance.mCooldown > 0.f && timeToCollision > 0.20f)
+                    if (avoidance.mCooldown > 0.f && timeToCollision > 0.20f)
+                    {
+                        movement.mPosition[1] *= 0.35f;
+                        continue;
+                    }
+                }
+                else if (timeToCollision > 0.35f)
                 {
-                    movement.mPosition[1] *= 0.35f;
+                    movement.mPosition[0] = nearestActorRelativeX > 0.f ? -0.6f : 0.6f;
                     continue;
                 }
 
@@ -2706,8 +2738,11 @@ namespace MWMechanics
                 CharacterController* ctrl = iter->second->getCharacterController();
 
                 float distSqr = (playerPos - iter->first.getRefData().getPosition().asVec3()).length2();
-                // AI processing is only done within given distance to the player.
-                bool inProcessingRange = distSqr <= mActorsProcessingRange*mActorsProcessingRange;
+                // Existing combat gets a small exterior-only extension so a player
+                // cell boundary does not suspend the pursuer while both actors are
+                // still in neighbouring active cells.
+                bool inProcessingRange = distSqr <= mActorsProcessingRange*mActorsProcessingRange
+                    || keepsExteriorPlayerCombatActive(iter->first, player, distSqr, mActorsProcessingRange);
 
                 if (isPlayer)
                     ctrl->setAttackingOrSpell(world->getPlayer().getAttackingOrSpell());
@@ -2899,7 +2934,9 @@ namespace MWMechanics
                     MWMechanics::AiSequence& seq = stats.getAiSequence();
                     alwaysActive = !seq.isEmpty() && seq.getActivePackage().alwaysActive();
                 }
-                bool inRange = isPlayer || dist <= mActorsProcessingRange || alwaysActive;
+                const bool exteriorCombatActive = !isPlayer
+                    && keepsExteriorPlayerCombatActive(iter->first, player, dist * dist, mActorsProcessingRange);
+                bool inRange = isPlayer || dist <= mActorsProcessingRange || exteriorCombatActive || alwaysActive;
                 int activeFlag = 1; // Can be changed back to '2' to keep updating bounding boxes off screen (more accurate, but slower)
                 if (isPlayer)
                     activeFlag = 2;

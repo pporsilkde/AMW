@@ -1,9 +1,11 @@
 #include "spellpriority.hpp"
 #include "weaponpriority.hpp"
 
+#include <algorithm>
 #include <components/esm/loadench.hpp>
 #include <components/esm/loadmgef.hpp>
 #include <components/esm/loadspel.hpp>
+#include <components/settings/settings.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -396,9 +398,13 @@ namespace MWMechanics
                 // NB: this currently assumes the hardcoded magic effect flags are used
                 const float magnitude = (effect.mMagnMin + effect.mMagnMax)/2.f;
                 const float toHeal = magnitude * std::max(1, effect.mDuration);
-                // Effect doesn't heal more than we need, *or* we are below 1/2 health
+                // Ported from ArenaMP FIX26: use a configurable restorative
+                // threshold. The old hardcoded value was 0.50, which often made
+                // actors die while still carrying a useful heal.
+                static const float healThreshold = std::min(0.95f, std::max(0.f,
+                    Settings::Manager::getFloat("combat heal threshold", "Game")));
                 if (current.getModified() - current.getCurrent() > toHeal
-                        || current.getCurrent() < current.getModified()*0.5)
+                        || current.getCurrent() < current.getModified() * healThreshold)
                 {
                     return 10000.f * priority
                             - (toHeal - (current.getModified()-current.getCurrent())); // prefer the most fitting potion
@@ -629,7 +635,16 @@ namespace MWMechanics
         {
             ratingMult = (it->mRange == ESM::RT_Target) ? fAIRangeMagicSpellMult : fAIMagicSpellMult;
 
-            rating += rateEffect(*it, actor, enemy) * ratingMult;
+            // Ported from ArenaMP FIX26: slightly favour offensive/utility
+            // magic so capable casters actually use their spellbooks. Restore
+            // effects keep their fixed high/low priorities and are not biased.
+            static const float magicBias = std::max(0.f,
+                Settings::Manager::getFloat("combat magic bias", "Game"));
+            const bool isRestore = it->mEffectID == ESM::MagicEffect::RestoreHealth
+                || it->mEffectID == ESM::MagicEffect::RestoreMagicka
+                || it->mEffectID == ESM::MagicEffect::RestoreFatigue;
+
+            rating += rateEffect(*it, actor, enemy) * ratingMult * (isRestore ? 1.f : magicBias);
         }
         return rating;
     }

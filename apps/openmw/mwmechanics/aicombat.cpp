@@ -141,6 +141,30 @@ namespace MWMechanics
             return true;
         }
 
+        // Crossing an exterior cell boundary replaces the player's CellStore
+        // immediately, while LOS/pathfinding/actor processing can still be on
+        // data from the previous exterior cell for a frame or two. Do not let
+        // that transient hand-off terminate an already running combat package.
+        const MWWorld::CellStore* targetCell = target.getCell();
+        if (storage.mTargetCell && targetCell && storage.mTargetCell != targetCell
+            && storage.mTargetCell->isExterior() && targetCell->isExterior())
+        {
+            const int dx = std::abs(storage.mTargetCell->getCell()->getGridX() - targetCell->getCell()->getGridX());
+            const int dy = std::abs(storage.mTargetCell->getCell()->getGridY() - targetCell->getCell()->getGridY());
+            if (dx <= 1 && dy <= 1)
+            {
+                storage.mExteriorCellTransitionGrace = std::max(0.f,
+                    Settings::Manager::getFloat("combat exterior cell transition grace", "Game"));
+                storage.mUpdateLOSTimer = 0.f;
+                storage.mUseCustomDestination = false;
+                storage.mFormationActive = false;
+                mPathFinder.clearPath();
+            }
+        }
+        storage.mTargetCell = targetCell;
+        storage.mExteriorCellTransitionGrace
+            = std::max(0.f, storage.mExteriorCellTransitionGrace - duration);
+
         if (updatePursuitLeash(actor, duration, storage))
         {
             clearTacticalMovement(actor, storage);
@@ -251,8 +275,17 @@ namespace MWMechanics
 
             storage.updateCombatMove(duration);
             updateTacticalMovement(actor, target, duration, storage, characterController);
+
+            // Ported from ArenaMP FIX26. pathTo() has already written a full-speed
+            // pursuit vector this frame. AiCombatStorage should replace that vector
+            // only while a real tactical/combat move is active; otherwise preserve
+            // translation and update facing only. This avoids combat pursuit looking
+            // like a slowed-down run animation.
+            const bool hasStorageTranslation = storage.hasTacticalMovement() || storage.isCombatMoving()
+                || storage.mMovement.mPosition[0] != 0.f || storage.mMovement.mPosition[1] != 0.f;
+
             if (storage.mReadyToAttack || storage.hasTacticalMovement() || meleePressureMovement)
-                updateActorsMovement(actor, duration, storage);
+                updateActorsMovement(actor, duration, storage, hasStorageTranslation);
             storage.updateAttack(characterController);
         }
         else
@@ -286,21 +319,37 @@ namespace MWMechanics
         bool forceFlee = false;
         if (!canFight(actor, target))
         {
-            storage.stopAttack();
-            characterController.setAttackingOrSpell(false);
+            bool keepExteriorCellCombat = false;
+            if (storage.mExteriorCellTransitionGrace > 0.f && actor.getClass().isNpc()
+                && target == MWMechanics::getPlayer() && actor.getCell() && target.getCell()
+                && actor.getCell()->isExterior() && target.getCell()->isExterior())
+            {
+                const float keepRange = std::max(7168.f,
+                    Settings::Manager::getFloat("combat exterior processing range", "Game"));
+                const float dist = MWBase::Environment::get().getWorld()->getHitDistance(actor, target);
+                const osg::Vec3f targetPos = target.getRefData().getPosition().asVec3();
+                const bool recentlyTracked = storage.mGeometricLOS
+                    || (storage.mHasLastSeenTarget
+                        && (targetPos - storage.mLastSeenTargetPos).length2() <= 1024.f * 1024.f);
+                keepExteriorCellCombat = dist <= keepRange && recentlyTracked;
+            }
 
-            
+            if (!keepExteriorCellCombat)
+            {
+                storage.stopAttack();
+                characterController.setAttackingOrSpell(false);
 
-            storage.mActionCooldown = 0.f;
-            // Continue combat if target is player or player follower/escorter and an attack has been attempted
-            const std::list<MWWorld::Ptr>& playerFollowersAndEscorters = MWBase::Environment::get().getMechanicsManager()->getActorsSidingWith(MWMechanics::getPlayer());
-            bool targetSidesWithPlayer = (std::find(playerFollowersAndEscorters.begin(), playerFollowersAndEscorters.end(), target) != playerFollowersAndEscorters.end());
-            if ((target == MWMechanics::getPlayer() || targetSidesWithPlayer)
-                && ((actor.getClass().getCreatureStats(actor).getHitAttemptActorId() == target.getClass().getCreatureStats(target).getActorId())
-                || (target.getClass().getCreatureStats(target).getHitAttemptActorId() == actor.getClass().getCreatureStats(actor).getActorId())))
-                forceFlee = true;
-            else // Otherwise end combat
-                return true;
+                storage.mActionCooldown = 0.f;
+                // Continue combat if target is player or player follower/escorter and an attack has been attempted
+                const std::list<MWWorld::Ptr>& playerFollowersAndEscorters = MWBase::Environment::get().getMechanicsManager()->getActorsSidingWith(MWMechanics::getPlayer());
+                bool targetSidesWithPlayer = (std::find(playerFollowersAndEscorters.begin(), playerFollowersAndEscorters.end(), target) != playerFollowersAndEscorters.end());
+                if ((target == MWMechanics::getPlayer() || targetSidesWithPlayer)
+                    && ((actor.getClass().getCreatureStats(actor).getHitAttemptActorId() == target.getClass().getCreatureStats(target).getActorId())
+                    || (target.getClass().getCreatureStats(target).getHitAttemptActorId() == actor.getClass().getCreatureStats(actor).getActorId())))
+                    forceFlee = true;
+                else // Otherwise end combat
+                    return true;
+            }
         }
 
         const MWWorld::Class& actorClass = actor.getClass();
@@ -1116,17 +1165,23 @@ namespace MWMechanics
         };
     }
 
-    void AiCombat::updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage)
+    void AiCombat::updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage,
+        bool applyTranslation)
     {
-        // apply combat movement
-        float deltaAngle = storage.mMovement.mRotation[2] - actor.getRefData().getPosition().rot[2];
-        osg::Vec2f movement = Misc::rotateVec2f(
-            osg::Vec2f(storage.mMovement.mPosition[0], storage.mMovement.mPosition[1]), -deltaAngle);
-
         MWMechanics::Movement& actorMovementSettings = actor.getClass().getMovementSettings(actor);
-        actorMovementSettings.mPosition[0] = movement.x();
-        actorMovementSettings.mPosition[1] = movement.y();
-        actorMovementSettings.mPosition[2] = storage.mMovement.mPosition[2];
+
+        // Apply combat translation only when AiCombatStorage actually owns it.
+        // Otherwise pathTo()'s pursuit vector must survive this frame.
+        if (applyTranslation)
+        {
+            float deltaAngle = storage.mMovement.mRotation[2] - actor.getRefData().getPosition().rot[2];
+            osg::Vec2f movement = Misc::rotateVec2f(
+                osg::Vec2f(storage.mMovement.mPosition[0], storage.mMovement.mPosition[1]), -deltaAngle);
+
+            actorMovementSettings.mPosition[0] = movement.x();
+            actorMovementSettings.mPosition[1] = movement.y();
+            actorMovementSettings.mPosition[2] = storage.mMovement.mPosition[2];
+        }
 
         rotateActorOnAxis(actor, 2, actorMovementSettings, storage);
         rotateActorOnAxis(actor, 0, actorMovementSettings, storage);
@@ -1371,6 +1426,11 @@ namespace MWMechanics
     bool AiCombatStorage::hasTacticalMovement() const
     {
         return mTacticalState != Tactical_None && mTacticalState != Tactical_SneakApproach;
+    }
+
+    bool AiCombatStorage::isCombatMoving() const
+    {
+        return mCombatMove && mTimerCombatMove > 0.f;
     }
 
     bool AiCombatStorage::suppressesAttack() const

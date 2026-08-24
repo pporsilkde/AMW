@@ -594,10 +594,10 @@ namespace MWGui
     std::string QuestManagerWindow::questIconFor(const Metadata& meta)
     {
         if (!meta.mIcon.empty())
-            return "Icons/questman/" + meta.mIcon;
+            return "icons/questman/" + meta.mIcon;
         if (!meta.mFaction.empty())
-            return "Icons/questman/fa_shared.dds";
-        return "Icons/questman/cat_misc.dds";
+            return "icons/questman/fa_shared.dds";
+        return "icons/questman/cat_misc.dds";
     }
 
     QuestManagerWindow::Metadata QuestManagerWindow::classifyQuest(const std::string& rawId)

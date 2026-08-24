@@ -1685,9 +1685,17 @@ bool CharacterController::updateWeaponState(CharacterState& idle)
                 }
                 else
                 {
-                    if(mPtr == getPlayer())
+                    // Ported from ArenaMP FIX26: NPCs can choose their strongest
+                    // weapon attack instead of letting the direction they happen to
+                    // move in decide chop/slash/thrust. The player keeps the existing
+                    // "best attack" setting and behaviour.
+                    const bool useBestAttack = mPtr == getPlayer()
+                        ? Settings::Manager::getBool("best attack", "Game")
+                        : Settings::Manager::getBool("npcs use best attack", "Game");
+
+                    if (mPtr == getPlayer() || useBestAttack)
                     {
-                        if (Settings::Manager::getBool("best attack", "Game"))
+                        if (useBestAttack)
                         {
                             if (isWeapon)
                             {
@@ -1696,7 +1704,7 @@ bool CharacterController::updateWeaponState(CharacterState& idle)
                             }
                             else
                             {
-                                // There is no "best attack" for Hand-to-Hand
+                                // There is no "best attack" for Hand-to-Hand.
                                 setAttackTypeRandomly(mAttackType);
                             }
                         }
@@ -1704,12 +1712,9 @@ bool CharacterController::updateWeaponState(CharacterState& idle)
                         {
                             setAttackTypeBasedOnMovement();
                         }
-
-                        
                     }
-                    
 
-                    // else if (mPtr != getPlayer()) use mAttackType set by AiCombat
+                    // Otherwise NPCs keep the attack type selected by AiCombat.
                     startKey = mAttackType+" start";
                     stopKey = mAttackType+" min attack";
                 }
