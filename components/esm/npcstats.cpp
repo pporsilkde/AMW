@@ -104,6 +104,22 @@ void ESM::NpcStats::load (ESMReader &esm)
     mLevelProgress = 0;
     esm.getHNOT (mLevelProgress, "LPRO");
 
+    mXpVersion = 0;
+    esm.getHNOT (mXpVersion, "XPVR");
+
+    mExperience = 0.f;
+    esm.getHNOT (mExperience, "XPXP");
+
+    mSkillPoints = 0;
+    esm.getHNOT (mSkillPoints, "XPSP");
+
+    for (int i = 0; i < 8; ++i)
+        mXpAttributeProgress[i] = 0.f;
+    esm.getHNOT (mXpAttributeProgress, "XPAP");
+
+    while (esm.isNextSub("XPRK"))
+        mXpRewardKeys.push_back(esm.getHString());
+
     for (int i = 0; i < 8; ++i)
         mSkillIncrease[i] = 0;
     esm.getHNOT (mSkillIncrease, "INCR");
@@ -171,6 +187,30 @@ void ESM::NpcStats::save (ESMWriter &esm) const
     if (mLevelProgress)
         esm.writeHNT ("LPRO", mLevelProgress);
 
+    if (mXpVersion)
+        esm.writeHNT ("XPVR", mXpVersion);
+
+    if (mExperience != 0.f)
+        esm.writeHNT ("XPXP", mExperience);
+
+    if (mSkillPoints)
+        esm.writeHNT ("XPSP", mSkillPoints);
+
+    bool saveXpAttributeProgress = false;
+    for (int i = 0; i < 8; ++i)
+    {
+        if (mXpAttributeProgress[i] != 0.f)
+        {
+            saveXpAttributeProgress = true;
+            break;
+        }
+    }
+    if (saveXpAttributeProgress)
+        esm.writeHNT ("XPAP", mXpAttributeProgress);
+
+    for (const std::string& key : mXpRewardKeys)
+        esm.writeHNString("XPRK", key);
+
     bool saveSkillIncreases = false;
     for (int i = 0; i < 8; ++i)
     {
@@ -208,6 +248,12 @@ void ESM::NpcStats::blank()
     mReputation = 0;
     mWerewolfKills = 0;
     mLevelProgress = 0;
+    mXpVersion = 0;
+    mExperience = 0.f;
+    mSkillPoints = 0;
+    mXpRewardKeys.clear();
+    for (int i = 0; i < 8; ++i)
+        mXpAttributeProgress[i] = 0.f;
     for (int i=0; i<8; ++i)
         mSkillIncrease[i] = 0;
     for (int i=0; i<3; ++i)

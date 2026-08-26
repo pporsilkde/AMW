@@ -19,12 +19,15 @@
 #include <components/detournavigator/navigator.hpp>
 #include <components/detournavigator/debug.hpp>
 #include <components/misc/convert.hpp>
+#include <components/misc/stringops.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
+
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "../mwrender/renderingmanager.hpp"
 #include "../mwrender/landmanager.hpp"
@@ -45,6 +48,14 @@
 namespace
 {
     using MWWorld::RotationOrder;
+
+    void awardTravelTransition()
+    {
+        if (!MWMechanics::XPLeveling::isEnabled())
+            return;
+        MWMechanics::XPLeveling::awardTravel(
+            MWBase::Environment::get().getWorld()->getPlayerPtr());
+    }
 
     osg::Quat makeActorOsgQuat(const ESM::Position& position)
     {
@@ -710,6 +721,7 @@ namespace MWWorld
 
     void Scene::changePlayerCell(CellStore *cell, const ESM::Position &pos, bool adjustPlayerPos)
     {
+        CellStore* previousCell = mCurrentCell;
         mCurrentCell = cell;
 
         mRendering.enableTerrain(cell->isExterior());
@@ -740,6 +752,13 @@ namespace MWWorld
         world->adjustSky();
 
         mLastPlayerPos = player.getRefData().getPosition().asVec3();
+
+        // The pointer changes on real exterior crossings as well as teleports.
+        // Travel XP rolls here on real cell transitions. The XP system applies a
+        // persistent cooldown/roll slot, while the null previous cell suppresses
+        // a free roll on initial load.
+        if (previousCell && previousCell != cell)
+            awardTravelTransition();
     }
 
     Scene::Scene (MWRender::RenderingManager& rendering, MWPhysics::PhysicsSystem *physics,

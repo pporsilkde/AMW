@@ -1,5 +1,7 @@
 #include "security.hpp"
 
+#include <algorithm>
+
 #include <components/misc/rng.hpp>
 
 #include "../mwworld/class.hpp"
@@ -11,6 +13,7 @@
 #include "../mwbase/mechanicsmanager.hpp"
 
 #include "creaturestats.hpp"
+#include "xpleveling.hpp"
 
 namespace MWMechanics
 {
@@ -59,7 +62,10 @@ namespace MWMechanics
                 lock.getCellRef().unlock();
                 resultMessage = "#{sLockSuccess}";
                 resultSound = "Open Lock";
-                mActor.getClass().skillUsageSucceeded(mActor, ESM::Skill::Security, 1);
+                const float xpFactor = XPLeveling::isEnabled()
+                    ? 1.f + std::max(0, lockStrength) / 50.f
+                    : 1.f;
+                mActor.getClass().skillUsageSucceeded(mActor, ESM::Skill::Security, 1, xpFactor);
             }
             else
                 resultMessage = "#{sLockFail}";
@@ -104,7 +110,10 @@ namespace MWMechanics
 
                 resultSound = "Disarm Trap";
                 resultMessage = "#{sTrapSuccess}";
-                mActor.getClass().skillUsageSucceeded(mActor, ESM::Skill::Security, 0);
+                const float xpFactor = XPLeveling::isEnabled()
+                    ? 1.f + std::max(0, trapSpellPoints) / 50.f
+                    : 1.f;
+                mActor.getClass().skillUsageSucceeded(mActor, ESM::Skill::Security, 0, xpFactor);
             }
             else
                 resultMessage = "#{sTrapFail}";

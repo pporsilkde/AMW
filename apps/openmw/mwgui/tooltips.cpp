@@ -293,8 +293,24 @@ namespace MWGui
                             key.erase(key.begin(), key.begin() + caretPos + 1);
                         }
 
-                        MyGUI::Widget* w;
-                        getWidget(w, widgetName);
+                        // A user string may simply be payload the owner widget
+                        // carries around (ArenaXPSkillId and friends). Those must
+                        // never abort the whole pass: getWidget() throws, and the
+                        // exception used to escape all the way out of
+                        // WindowManager::update(), leaving the tooltip box visible
+                        // but empty and unpositioned.
+                        MyGUI::Widget* w = nullptr;
+                        try
+                        {
+                            getWidget(w, widgetName);
+                        }
+                        catch (const std::exception&)
+                        {
+                            continue;
+                        }
+                        if (!w)
+                            continue;
+
                         if (type == "Property")
                             w->setProperty(key, userStringPair.second);
                         else if (type == "UserData")

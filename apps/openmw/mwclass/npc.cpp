@@ -1,4 +1,4 @@
-﻿#include "npc.hpp"
+#include "npc.hpp"
 
 #include <memory>
 
@@ -31,6 +31,7 @@
 #include "../mwmechanics/difficultyscaling.hpp"
 #include "../mwmechanics/weapontype.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/actiontalk.hpp"
@@ -676,6 +677,7 @@ namespace MWClass
         {
             MWMechanics::getHandToHandDamage(ptr, victim, damage, healthdmg, attackStrength);
         }
+        bool xpCriticalHit = false;
         if(ptr == MWMechanics::getPlayer())
         {
             skillUsageSucceeded(ptr, weapskill, 0);
@@ -686,6 +688,7 @@ namespace MWClass
                     && !MWBase::Environment::get().getMechanicsManager()->awarenessCheck(ptr, victim);
             if(unaware)
             {
+                xpCriticalHit = true;
                 damage *= store.find("fCombatCriticalStrikeMult")->mValue.getFloat();
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sTargetCriticalStrike}");
                 MWBase::Environment::get().getSoundManager()->playSound3D(victim, "critical damage", 1.0f, 1.0f);
@@ -703,6 +706,9 @@ namespace MWClass
         const bool blocked = MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength);
         if (blocked)
             damage = 0;
+
+        if (xpCriticalHit && !blocked && damage > 0.f)
+            MWMechanics::XPLeveling::awardCriticalHit(ptr, victim);
 
         bool poisonHit = !blocked;
         if (victim == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState())
@@ -1261,6 +1267,12 @@ namespace MWClass
             MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find (
                 ref->mBase->mClass
             );
+
+        if (ptr == MWMechanics::getPlayer() && MWMechanics::XPLeveling::isEnabled())
+        {
+            MWMechanics::XPLeveling::awardSkillUse(ptr, skill, usageType, extraFactor, *class_);
+            return;
+        }
 
         stats.useSkill (skill, *class_, usageType, extraFactor);
     }

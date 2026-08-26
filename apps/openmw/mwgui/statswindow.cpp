@@ -1,6 +1,8 @@
 #include "statswindow.hpp"
 
+#include <cmath>
 #include <MyGUI_Window.h>
+#include <MyGUI_Button.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_ProgressBar.h>
 #include <MyGUI_ImageBox.h>
@@ -20,6 +22,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "tooltips.hpp"
 
@@ -32,6 +35,11 @@ namespace MWGui
         // continue underneath that frame and clips the final statistics rows.
         constexpr int StatsWindowBottomFrameInset = 34;
         constexpr int StatsDocumentBottomPadding = 52;
+
+        std::string arenaText(const std::string& key)
+        {
+            return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+        }
     }
 
     StatsWindow::StatsWindow (DragAndDrop* drag)
@@ -49,6 +57,7 @@ namespace MWGui
       , mReputation(0)
       , mBounty(0)
       , mSkillWidgets()
+      , mLastSkillPoints(-1)
       , mChanged(true)
       , mMinFullWidth(mMainWidget->getSize().width)
     {
@@ -334,6 +343,16 @@ namespace MWGui
     void setSkillProgress(MyGUI::Widget* w, float progress, int skillId)
     {
         MWWorld::Ptr player = MWMechanics::getPlayer();
+
+        if (MWMechanics::XPLeveling::isEnabled())
+        {
+            // XP mode uses SkillNoProgressToolTip, which has neither
+            // SkillProgress nor SkillProgressText. Writing those user strings
+            // here would only mutate the hidden classic SkillToolTip, so skip
+            // them entirely.
+            return;
+        }
+
         const MWWorld::ESMStore &esmStore =
             MWBase::Environment::get().getWorld()->getStore();
 
@@ -352,6 +371,8 @@ namespace MWGui
 
     void StatsWindow::setValue(const ESM::Skill::SkillEnum parSkill, const MWMechanics::SkillValue& value)
     {
+        const bool purchaseUiChanged = MWMechanics::XPLeveling::isEnabled()
+            && mSkillValues[parSkill].getBase() != value.getBase();
         mSkillValues[parSkill] = value;
         std::pair<MyGUI::TextBox*, MyGUI::TextBox*> widgets = mSkillWidgetMap[(int)parSkill];
         MyGUI::TextBox* valueWidget = widgets.second;
@@ -368,6 +389,17 @@ namespace MWGui
 
             valueWidget->setCaption(text);
             valueWidget->_setWidgetState(state);
+
+            // SkillMaxed / SkillProgressVBox only exist in the classic
+            // SkillToolTip. In XP mode the skill rows point at
+            // SkillNoProgressToolTip instead, so these toggles would silently
+            // reconfigure a layout that is never shown.
+            if (MWMechanics::XPLeveling::isEnabled())
+            {
+                if (purchaseUiChanged)
+                    mChanged = true;
+                return;
+            }
 
             if (value.getBase() < 100)
             {
@@ -397,6 +429,9 @@ namespace MWGui
                 valueWidget->setUserString("UserData^Hidden_SkillProgressVBox", "true");
             }
         }
+
+        if (purchaseUiChanged)
+            mChanged = true;
     }
 
     void StatsWindow::configureSkills (const std::vector<int>& major, const std::vector<int>& minor)
@@ -425,29 +460,60 @@ namespace MWGui
         MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWMechanics::NpcStats &PCstats = player.getClass().getNpcStats(player);
 
-        // level progress
-        MyGUI::Widget* levelWidget;
+        // Level progress. XP Leveling completely replaces the vanilla sleep-based
+        // LPRO counter while keeping the same tooltip/progress-bar layout.
+        MyGUI::Widget* levelWidget = nullptr;
+        const bool xpLeveling = MWMechanics::XPLeveling::isEnabled();
+        const int levelProgress = xpLeveling
+            ? static_cast<int>(std::floor(std::max(0.f, PCstats.getExperience())))
+            : PCstats.getLevelProgress();
+        const int levelMaximum = xpLeveling
+            ? std::max(1, static_cast<int>(std::ceil(MWMechanics::XPLeveling::getXpForNextLevel(player))))
+            : MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>()
+                .find("iLevelUpTotal")->mValue.getInteger();
+
+        std::stringstream detail;
+        if (xpLeveling)
+        {
+            // The progress bar right above already renders "<xp>/<next level>",
+            // so the detail block carries only what the bar cannot show.
+            detail << arenaText("xp.free_skill_points") << ": " << PCstats.getSkillPoints()
+                   << "\n" << arenaText("xp.double_click_hint");
+
+            if (mLastSkillPoints != PCstats.getSkillPoints())
+            {
+                mLastSkillPoints = PCstats.getSkillPoints();
+                mChanged = true;
+            }
+        }
+        else
+        {
+            for (int attribute = 0; attribute < ESM::Attribute::Length; ++attribute)
+            {
+                float mult = PCstats.getLevelupAttributeMultiplier(attribute);
+                mult = std::min(mult, 100 - PCstats.getAttribute(attribute).getBase());
+                if (mult > 1)
+                    detail << (detail.str().empty() ? "" : "\n") << "#{"
+                    << MyGUI::TextIterator::toTagsString(ESM::Attribute::sGmstAttributeIds[attribute])
+                    << "} x" << MyGUI::utility::toString(mult);
+            }
+        }
+
+        const std::string detailText = MyGUI::LanguageManager::getInstance().replaceTags(detail.str());
+
+        // Every user string has to land on both widgets. Pushing the detail
+        // caption to LevelText alone left Level_str holding whatever text the
+        // previous hover had written, so the block under the bar lagged behind
+        // the bar itself.
         for (int i=0; i<2; ++i)
         {
-            int max = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("iLevelUpTotal")->mValue.getInteger();
             getWidget(levelWidget, i==0 ? "Level_str" : "LevelText");
-
-            levelWidget->setUserString("RangePosition_LevelProgress", MyGUI::utility::toString(PCstats.getLevelProgress()));
-            levelWidget->setUserString("Range_LevelProgress", MyGUI::utility::toString(max));
-            levelWidget->setUserString("Caption_LevelProgressText", MyGUI::utility::toString(PCstats.getLevelProgress()) + "/"
-                                       + MyGUI::utility::toString(max));
+            levelWidget->setUserString("RangePosition_LevelProgress", MyGUI::utility::toString(std::min(levelProgress, levelMaximum)));
+            levelWidget->setUserString("Range_LevelProgress", MyGUI::utility::toString(levelMaximum));
+            levelWidget->setUserString("Caption_LevelProgressText", MyGUI::utility::toString(levelProgress) + "/"
+                                       + MyGUI::utility::toString(levelMaximum));
+            levelWidget->setUserString("Caption_LevelDetailText", detailText);
         }
-        std::stringstream detail;
-        for (int attribute = 0; attribute < ESM::Attribute::Length; ++attribute)
-        {
-            float mult = PCstats.getLevelupAttributeMultiplier(attribute);
-            mult = std::min(mult, 100 - PCstats.getAttribute(attribute).getBase());
-            if (mult > 1)
-                detail << (detail.str().empty() ? "" : "\n") << "#{"
-                << MyGUI::TextIterator::toTagsString(ESM::Attribute::sGmstAttributeIds[attribute])
-                << "} x" << MyGUI::utility::toString(mult);
-        }
-        levelWidget->setUserString("Caption_LevelDetailText", MyGUI::LanguageManager::getInstance().replaceTags(detail.str()));
 
         setFactions(PCstats.getFactionRanks());
         setExpelled(PCstats.getExpelled ());
@@ -486,6 +552,30 @@ namespace MWGui
         if (signId != mBirthSignId)
         {
             mBirthSignId = signId;
+            mChanged = true;
+        }
+    }
+
+    void StatsWindow::onSkillDoubleClicked(MyGUI::Widget* sender)
+    {
+        onSkillIncreaseClicked(sender);
+    }
+
+    void StatsWindow::onSkillIncreaseClicked(MyGUI::Widget* sender)
+    {
+        if (!sender || !MWMechanics::XPLeveling::isEnabled())
+            return;
+
+        const std::string value = sender->getUserString("ArenaXPSkillId");
+        if (value.empty())
+            return;
+
+        std::istringstream stream(value);
+        int skillId = -1;
+        stream >> skillId;
+        if (!stream.fail() && MWMechanics::XPLeveling::spendSkillPoints(MWMechanics::getPlayer(), skillId))
+        {
+            mLastSkillPoints = -1;
             mChanged = true;
         }
     }
@@ -598,19 +688,95 @@ namespace MWGui
             const ESM::Attribute* attr =
                 esmStore.get<ESM::Attribute>().find(skill->mData.mAttribute);
 
+            const int rowTop = coord1.top;
             std::pair<MyGUI::TextBox*, MyGUI::TextBox*> widgets = addValueItem(MWBase::Environment::get().getWindowManager()->getGameSettingString(skillNameId, skillNameId),
                 "", "normal", coord1, coord2);
             mSkillWidgetMap[skillId] = widgets;
 
             for (int i=0; i<2; ++i)
             {
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ToolTipType", "Layout");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ToolTipLayout", "SkillToolTip");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillName", "#{"+skillNameId+"}");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillDescription", skill->mDescription);
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ImageTexture_SkillImage", icon);
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Range_SkillProgress", "100");
+                MyGUI::Widget* skillWidget = mSkillWidgets[mSkillWidgets.size()-1-i];
+                skillWidget->setUserString("ToolTipType", "Layout");
+
+                if (MWMechanics::XPLeveling::isEnabled())
+                {
+                    const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
+                    const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
+                    const float base = stats.getSkill(skillId).getBase();
+                    const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
+
+                    std::string description = skill->mDescription;
+                    if (!description.empty())
+                        description += "\n\n";
+                    if (base >= 100.f)
+                        description += arenaText("xp.skill_maxed_hint");
+                    else
+                    {
+                        description += arenaText("xp.tooltip_next_cost") + ": "
+                            + MyGUI::utility::toString(cost) + " " + arenaText("xp.sp");
+                        description += "\n" + arenaText("xp.free_skill_points") + ": "
+                            + MyGUI::utility::toString(stats.getSkillPoints());
+                    }
+
+                    // The classic SkillToolTip places SkillProgress at the bottom.
+                    // XP uses the auto-sized no-progress layout so cost/SP text
+                    // stays with the skill description instead of floating below it.
+                    skillWidget->setUserString("ToolTipLayout", "SkillNoProgressToolTip");
+                    skillWidget->setUserString("Caption_SkillNoProgressName", "#{"+skillNameId+"}");
+                    skillWidget->setUserString("Caption_SkillNoProgressDescription", description);
+                    skillWidget->setUserString("Caption_SkillNoProgressAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
+                    skillWidget->setUserString("ImageTexture_SkillNoProgressImage", icon);
+
+                    skillWidget->setUserString("ArenaXPSkillId", MyGUI::utility::toString(skillId));
+                    skillWidget->setNeedMouseFocus(true);
+                    skillWidget->eventMouseButtonDoubleClick
+                        += MyGUI::newDelegate(this, &StatsWindow::onSkillDoubleClicked);
+                }
+                else
+                {
+                    skillWidget->setUserString("ToolTipLayout", "SkillToolTip");
+                    skillWidget->setUserString("Caption_SkillName", "#{"+skillNameId+"}");
+                    skillWidget->setUserString("Caption_SkillDescription", skill->mDescription);
+                    skillWidget->setUserString("Caption_SkillAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
+                    skillWidget->setUserString("ImageTexture_SkillImage", icon);
+                    skillWidget->setUserString("Range_SkillProgress", "100");
+                }
+            }
+
+            if (MWMechanics::XPLeveling::isEnabled())
+            {
+                const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
+                const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
+                const float base = stats.getSkill(skillId).getBase();
+                const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
+                const bool maxed = base >= 100.f;
+                const bool affordable = !maxed && stats.getSkillPoints() >= cost;
+                const int buttonLeft = coord2.left + coord2.width + 4;
+                const int buttonWidth = std::max(1, mSkillView->getWidth() - buttonLeft - 2);
+
+                MyGUI::Button* button = mSkillView->createWidget<MyGUI::Button>(
+                    affordable ? "SandTextButton" : "SandTextButtonDisabled",
+                    MyGUI::IntCoord(buttonLeft, rowTop, buttonWidth, coord2.height),
+                    MyGUI::Align::Left | MyGUI::Align::Top);
+
+                if (maxed)
+                    button->setCaption(arenaText("xp.max"));
+                else
+                    button->setCaption("+1 | " + MyGUI::utility::toString(cost) + " " + arenaText("xp.sp"));
+
+                button->setUserString("ArenaXPSkillId", MyGUI::utility::toString(skillId));
+                button->setUserString("ToolTipType", "Layout");
+                button->setUserString("ToolTipLayout", "TextToolTip");
+                if (maxed)
+                    button->setUserString("Caption_Text", arenaText("xp.skill_maxed_hint"));
+                else if (affordable)
+                    button->setUserString("Caption_Text", arenaText("xp.spend_hint"));
+                else
+                    button->setUserString("Caption_Text", arenaText("xp.not_enough_hint"));
+                button->eventMouseWheel += MyGUI::newDelegate(this, &StatsWindow::onMouseWheel);
+                if (!maxed)
+                    button->eventMouseButtonClick += MyGUI::newDelegate(this, &StatsWindow::onSkillIncreaseClicked);
+                mSkillWidgets.push_back(button);
             }
 
             setValue(static_cast<ESM::Skill::SkillEnum>(skillId), mSkillValues.find(skillId)->second);
@@ -627,17 +793,50 @@ namespace MWGui
         }
         mSkillWidgets.clear();
 
-        // Fill the current SkillView width. The value column remains fixed in size
-        // but moves with the right edge when the statistics window is stretched.
-        constexpr int valueSize = 52;
+        // Fill the current SkillView width. XP mode reserves a compact purchase
+        // button column so every skill clearly exposes its next +1 cost.
+        constexpr int valueSize = 36;
+        constexpr int purchaseButtonWidth = 78;
+        constexpr int purchaseGap = 4;
         constexpr int leftMargin = 10;
         constexpr int rightMargin = 2;
+        const bool xpLeveling = MWMechanics::XPLeveling::isEnabled();
         const int contentRight = std::max(leftMargin + valueSize + 44,
             mSkillView->getWidth() - rightMargin);
+        const int valueRight = xpLeveling
+            ? std::max(leftMargin + valueSize + 44, contentRight - purchaseButtonWidth - purchaseGap)
+            : contentRight;
         MyGUI::IntCoord coord1(leftMargin, 0,
-            std::max(44, contentRight - leftMargin - valueSize), 18);
-        MyGUI::IntCoord coord2(contentRight - valueSize, coord1.top,
+            std::max(44, valueRight - leftMargin - valueSize), 18);
+        MyGUI::IntCoord coord2(valueRight - valueSize, coord1.top,
             valueSize, coord1.height);
+
+        if (xpLeveling)
+        {
+            const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
+            const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
+            const int headerWidth = std::max(1, mSkillView->getWidth() - leftMargin - rightMargin);
+            const int lineHeight = MWBase::Environment::get().getWindowManager()->getFontHeight() + 2;
+
+            MyGUI::TextBox* points = mSkillView->createWidget<MyGUI::TextBox>("SandBrightText",
+                MyGUI::IntCoord(leftMargin, coord1.top, headerWidth, coord1.height),
+                MyGUI::Align::Left | MyGUI::Align::Top);
+            points->setCaption(arenaText("xp.free_skill_points") + ": "
+                + MyGUI::utility::toString(stats.getSkillPoints()));
+            points->eventMouseWheel += MyGUI::newDelegate(this, &StatsWindow::onMouseWheel);
+            mSkillWidgets.push_back(points);
+            coord1.top += lineHeight;
+            coord2.top += lineHeight;
+
+            MyGUI::TextBox* hint = mSkillView->createWidget<MyGUI::TextBox>("SandText",
+                MyGUI::IntCoord(leftMargin, coord1.top, headerWidth, coord1.height),
+                MyGUI::Align::Left | MyGUI::Align::Top);
+            hint->setCaption(arenaText("xp.purchase_hint"));
+            hint->eventMouseWheel += MyGUI::newDelegate(this, &StatsWindow::onMouseWheel);
+            mSkillWidgets.push_back(hint);
+            coord1.top += lineHeight;
+            coord2.top += lineHeight;
+        }
 
         if (!mMajorSkills.empty())
             addSkills(mMajorSkills, "sSkillClassMajor", "Major Skills", coord1, coord2);

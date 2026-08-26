@@ -28,6 +28,7 @@
 
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "inventorywindow.hpp"
 #include "draganddrop.hpp"
@@ -419,6 +420,9 @@ namespace MWGui
         // make the item transfer
         mTradeModel->transferItems();
         playerItemModel->transferItems();
+
+        // C30/C23: a completed barter can grant an additional random XP bonus.
+        MWMechanics::XPLeveling::awardSuccessfulTrade(player);
 
         ///snapshot the gold you recieve, if any, for EncoreMP XP calculations further down
         int goldRecieved = 0;

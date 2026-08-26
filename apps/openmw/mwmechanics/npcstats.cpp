@@ -24,9 +24,12 @@ MWMechanics::NpcStats::NpcStats()
 , mBounty(0)
 , mWerewolfKills (0)
 , mLevelProgress(0)
+, mExperience(0.f)
+, mSkillPoints(0)
 , mTimeToStartDrowning(-1.0) // set breath to special value, it will be replaced during actor update
     , mIsWerewolf(false)
 {
+    mXpAttributeProgress.resize(ESM::Attribute::Length, 0.f);
     mSkillIncreases.resize (ESM::Attribute::Length, 0);
     mSpecIncreases.resize(3, 0);
 }
@@ -277,6 +280,7 @@ void MWMechanics::NpcStats::increaseSkill(int skillIndex, const ESM::Class &clas
 {
     float base = getSkill (skillIndex).getBase();
     bool bookLevelLimit = Settings::Manager::getBool("skill books have level limit", "Game");
+    const bool xpLeveling = Settings::Manager::getBool("enabled", "XP Leveling");
 
     if (base >= 100.f)
         return;
@@ -295,29 +299,35 @@ void MWMechanics::NpcStats::increaseSkill(int skillIndex, const ESM::Class &clas
     const MWWorld::Store<ESM::GameSetting> &gmst =
         MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
 
-    // is this a minor or major skill?
-    int increase = gmst.find("iLevelupMiscMultAttriubte")->mValue.getInteger(); // Note: GMST has a typo
-    for (int k=0; k<5; ++k)
+    // ArenaMW XP leveling owns character levels and attribute progression. Direct
+    // skill increases (training, books and point allocation) remain legal, but
+    // must not feed the old LPRO / x2-x5 multiplier machinery.
+    if (!xpLeveling)
     {
-        if (class_.mData.mSkills[k][0] == skillIndex)
+        // is this a minor or major skill?
+        int increase = gmst.find("iLevelupMiscMultAttriubte")->mValue.getInteger(); // Note: GMST has a typo
+        for (int k=0; k<5; ++k)
         {
-            mLevelProgress += gmst.find("iLevelUpMinorMult")->mValue.getInteger();
-            increase = gmst.find("iLevelUpMinorMultAttribute")->mValue.getInteger();
-            break;
+            if (class_.mData.mSkills[k][0] == skillIndex)
+            {
+                mLevelProgress += gmst.find("iLevelUpMinorMult")->mValue.getInteger();
+                increase = gmst.find("iLevelUpMinorMultAttribute")->mValue.getInteger();
+                break;
+            }
+            else if (class_.mData.mSkills[k][1] == skillIndex)
+            {
+                mLevelProgress += gmst.find("iLevelUpMajorMult")->mValue.getInteger();
+                increase = gmst.find("iLevelUpMajorMultAttribute")->mValue.getInteger();
+                break;
+            }
         }
-        else if (class_.mData.mSkills[k][1] == skillIndex)
-        {
-            mLevelProgress += gmst.find("iLevelUpMajorMult")->mValue.getInteger();
-            increase = gmst.find("iLevelUpMajorMultAttribute")->mValue.getInteger();
-            break;
-        }
+
+        const ESM::Skill* skill =
+            MWBase::Environment::get().getWorld ()->getStore ().get<ESM::Skill>().find(skillIndex);
+        mSkillIncreases[skill->mData.mAttribute] += increase;
+
+        mSpecIncreases[skill->mData.mSpecialization] += gmst.find("iLevelupSpecialization")->mValue.getInteger();
     }
-
-    const ESM::Skill* skill =
-        MWBase::Environment::get().getWorld ()->getStore ().get<ESM::Skill>().find(skillIndex);
-    mSkillIncreases[skill->mData.mAttribute] += increase;
-
-    mSpecIncreases[skill->mData.mSpecialization] += gmst.find("iLevelupSpecialization")->mValue.getInteger();
 
     // Play sound & skill progress notification
     /// \todo check if character is the player, if levelling is ever implemented for NPCs
@@ -331,7 +341,7 @@ void MWMechanics::NpcStats::increaseSkill(int skillIndex, const ESM::Class &clas
     
     MWBase::Environment::get().getWindowManager ()->messageBox(message, MWGui::ShowInDialogueMode_Never);
 
-    if (mLevelProgress >= gmst.find("iLevelUpTotal")->mValue.getInteger())
+    if (!xpLeveling && mLevelProgress >= gmst.find("iLevelUpTotal")->mValue.getInteger())
     {
         // levelup is possible now
         MWBase::Environment::get().getWindowManager ()->messageBox ("#{sLevelUpMsg}", MWGui::ShowInDialogueMode_Never);
@@ -347,6 +357,59 @@ int MWMechanics::NpcStats::getLevelProgress () const
     return mLevelProgress;
 }
 
+void MWMechanics::NpcStats::addSkillPoints(int points)
+{
+    if (points <= 0)
+        return;
+    mSkillPoints += points;
+}
+
+bool MWMechanics::NpcStats::spendSkillPoints(int points)
+{
+    if (points <= 0 || mSkillPoints < points)
+        return false;
+    mSkillPoints -= points;
+    return true;
+}
+
+float MWMechanics::NpcStats::getXpAttributeProgress(int attribute) const
+{
+    if (attribute < 0 || attribute >= static_cast<int>(mXpAttributeProgress.size()))
+        throw std::runtime_error("attribute index out of range");
+    return mXpAttributeProgress[attribute];
+}
+
+void MWMechanics::NpcStats::setXpAttributeProgress(int attribute, float progress)
+{
+    if (attribute < 0 || attribute >= static_cast<int>(mXpAttributeProgress.size()))
+        throw std::runtime_error("attribute index out of range");
+    mXpAttributeProgress[attribute] = std::max(0.f, progress);
+}
+
+bool MWMechanics::NpcStats::hasXpRewardKey(const std::string& key) const
+{
+    return mXpRewardKeys.find(key) != mXpRewardKeys.end();
+}
+
+void MWMechanics::NpcStats::addXpRewardKey(const std::string& key)
+{
+    if (!key.empty())
+        mXpRewardKeys.insert(key);
+}
+
+void MWMechanics::NpcStats::removeXpRewardKeysWithPrefix(const std::string& prefix)
+{
+    if (prefix.empty())
+        return;
+    for (auto it = mXpRewardKeys.begin(); it != mXpRewardKeys.end();)
+    {
+        if (it->compare(0, prefix.size(), prefix) == 0)
+            it = mXpRewardKeys.erase(it);
+        else
+            ++it;
+    }
+}
+
 
 
 
@@ -357,6 +420,11 @@ int MWMechanics::NpcStats::getLevelProgress () const
 
 void MWMechanics::NpcStats::levelUp()
 {
+    // XP Leveling owns character levels completely. The vanilla level-up
+    // dialog / sleep path must never advance the player a second time.
+    if (Settings::Manager::getBool("enabled", "XP Leveling"))
+        return;
+
     const MWWorld::Store<ESM::GameSetting> &gmst =
         MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
 
@@ -568,6 +636,14 @@ void MWMechanics::NpcStats::writeState (ESM::NpcStats& state) const
     state.mReputation = mReputation;
     state.mWerewolfKills = mWerewolfKills;
     state.mLevelProgress = mLevelProgress;
+    state.mXpVersion = 1;
+    state.mExperience = mExperience;
+    state.mSkillPoints = mSkillPoints;
+
+    for (int i = 0; i < ESM::Attribute::Length; ++i)
+        state.mXpAttributeProgress[i] = mXpAttributeProgress[i];
+
+    state.mXpRewardKeys.assign(mXpRewardKeys.begin(), mXpRewardKeys.end());
 
     for (int i=0; i<ESM::Attribute::Length; ++i)
         state.mSkillIncrease[i] = mSkillIncreases[i];
@@ -614,9 +690,42 @@ void MWMechanics::NpcStats::readState (const ESM::NpcStats& state)
     mReputation = state.mReputation;
     mWerewolfKills = state.mWerewolfKills;
     mLevelProgress = state.mLevelProgress;
+    mExperience = std::max(0.f, state.mExperience);
+    mSkillPoints = std::max(0, state.mSkillPoints);
+
+    for (int i = 0; i < ESM::Attribute::Length; ++i)
+        mXpAttributeProgress[i] = std::max(0.f, state.mXpAttributeProgress[i]);
+
+    mXpRewardKeys.clear();
+    mXpRewardKeys.insert(state.mXpRewardKeys.begin(), state.mXpRewardKeys.end());
+
+    // One-time migration for saves created before native XP leveling existed.
+    // Preserve the fraction of the old 0..iLevelUpTotal progress as XP toward
+    // the next character level, then retire LPRO so sleeping can no longer open
+    // the vanilla attribute-selection level-up dialog.
+    const bool xpLeveling = Settings::Manager::getBool("enabled", "XP Leveling");
+    if (xpLeveling)
+    {
+        if (state.mXpVersion == 0 && mLevelProgress > 0)
+        {
+            const MWWorld::Store<ESM::GameSetting>& gmst
+                = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
+            const int oldRequirement = std::max(1, gmst.find("iLevelUpTotal")->mValue.getInteger());
+            const float fraction = std::max(0.f,
+                static_cast<float>(mLevelProgress) / static_cast<float>(oldRequirement));
+            const float baseXp = Settings::Manager::getFloat("base xp to level", "XP Leveling");
+            const float xpPerLevel = Settings::Manager::getFloat("xp per level", "XP Leveling");
+            const float nextLevelXp = std::max(1.f, baseXp + std::max(0, getLevel() - 1) * xpPerLevel);
+            mExperience = std::max(mExperience, nextLevelXp * fraction);
+        }
+        mLevelProgress = 0;
+    }
 
     for (int i=0; i<ESM::Attribute::Length; ++i)
         mSkillIncreases[i] = state.mSkillIncrease[i];
+
+    if (xpLeveling)
+        std::fill(mSkillIncreases.begin(), mSkillIncreases.end(), 0);
 
     for (int i=0; i<3; ++i)
         mSpecIncreases[i] = state.mSpecIncreases[i];

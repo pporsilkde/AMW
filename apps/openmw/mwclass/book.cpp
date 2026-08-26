@@ -1,5 +1,7 @@
 #include "book.hpp"
 
+#include <MyGUI_LanguageManager.h>
+
 #include <components/esm/loadbook.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -20,6 +22,7 @@
 #include "../mwgui/tooltips.hpp"
 
 #include "../mwmechanics/npcstats.hpp"
+#include "../mwmechanics/actorutil.hpp"
 
 namespace MWClass
 {
@@ -122,6 +125,20 @@ namespace MWClass
 
         text += MWGui::ToolTips::getWeightString(ref->mBase->mData.mWeight, "#{sWeight}");
         text += MWGui::ToolTips::getValueString(ref->mBase->mData.mValue, "#{sValue}");
+
+        // Bookworm: ordinary books keep a persistent per-player read marker.
+        // Scrolls are intentionally excluded: they are consumable magic items,
+        // not entries in the player's reading history.
+        if (!ref->mBase->mData.mIsScroll)
+        {
+            const MWWorld::Ptr player = MWMechanics::getPlayer();
+            if (!player.isEmpty()
+                && player.getClass().getNpcStats(player).hasBeenUsed(ref->mBase->mId))
+            {
+                text += "\n" + MyGUI::LanguageManager::getInstance().replaceTags(
+                    "#{arenamp=bookworm.read_status}");
+            }
+        }
 
         if (MWBase::Environment::get().getWindowManager()->getFullHelp()) {
             text += MWGui::ToolTips::getCellRefString(ptr.getCellRef());

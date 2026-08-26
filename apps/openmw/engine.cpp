@@ -75,6 +75,7 @@
 #include "mwmechanics/animationenhancements.hpp"
 #include "mwmechanics/creaturestats.hpp"
 #include "mwmechanics/npcstats.hpp"
+#include "mwmechanics/xpleveling.hpp"
 
 #include "mwstate/statemanagerimp.hpp"
 
@@ -579,7 +580,10 @@ bool OMW::Engine::frame(float frametime)
 
                         // Azura returns the player weakened rather than fully restored.
                         restoreRespawnResourcesToTenPercent(revivedStats);
-                        applyAzuraSkillPenalty(revivedPlayer);
+                        if (MWMechanics::XPLeveling::isEnabled())
+                            MWMechanics::XPLeveling::applyDeathPenalty(revivedPlayer);
+                        else
+                            applyAzuraSkillPenalty(revivedPlayer);
                         revivedStats.setDrawState(MWMechanics::DrawState_Nothing);
                         mEnvironment.getWorld()->setGlobalInt("pcknownwerewolf", 0);
                         unequipRespawnDamageItems(revivedPlayer);

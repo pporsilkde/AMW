@@ -6,6 +6,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "player.hpp"
 #include "class.hpp"
@@ -39,23 +40,30 @@ namespace MWWorld
         else
             MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_Book, getTarget());
 
-        MWMechanics::NpcStats& npcStats = actor.getClass().getNpcStats (actor);
+        MWMechanics::NpcStats& npcStats = actor.getClass().getNpcStats(actor);
+        const bool firstRead = !npcStats.hasBeenUsed(ref->mBase->mId);
+        const bool skillBook = ref->mBase->mData.mSkillId >= 0
+            && ref->mBase->mData.mSkillId < ESM::Skill::Length;
 
-        // Skill gain from books
-        if (ref->mBase->mData.mSkillId >= 0 && ref->mBase->mData.mSkillId < ESM::Skill::Length
-                && !npcStats.hasBeenUsed (ref->mBase->mId))
+        if (firstRead && MWMechanics::XPLeveling::isEnabled())
+            MWMechanics::XPLeveling::awardBookRead(actor, *ref->mBase);
+
+        // Skill gain from books remains a one-time effect.
+        if (skillBook && firstRead)
         {
-            MWWorld::LiveCellRef<ESM::NPC> *playerRef = actor.get<ESM::NPC>();
+            MWWorld::LiveCellRef<ESM::NPC>* playerRef = actor.get<ESM::NPC>();
+            const ESM::Class* class_ =
+                MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find(
+                    playerRef->mBase->mClass);
 
-            const ESM::Class *class_ =
-                MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find (
-                    playerRef->mBase->mClass
-                );
-
-            npcStats.increaseSkill (ref->mBase->mData.mSkillId, *class_, true, true);
-
-            npcStats.flagAsUsed (ref->mBase->mId);
+            npcStats.increaseSkill(ref->mBase->mData.mSkillId, *class_, true, true);
         }
+
+        // Bookworm: remember every ordinary book even when XP Leveling is disabled.
+        // Keep the skill-book flag behaviour as well for unusual data where a
+        // skill-bearing BOOK record is marked as a scroll.
+        if (firstRead && (!ref->mBase->mData.mIsScroll || skillBook))
+            npcStats.flagAsUsed(ref->mBase->mId);
 
     }
 }

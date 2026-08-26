@@ -88,7 +88,7 @@ add_openmw_dir (mwmechanics
     disease pickpocket levelledlist combat steering obstacle autocalcspell difficultyscaling aicombataction actor summoning
     character actors objects aistate trading weaponpriority spellpriority weapontype spellutil tickableeffects
     spellabsorption linkedeffects
-    animationenhancements equipmentrequirements
+    animationenhancements equipmentrequirements xpleveling
     )
 
 add_openmw_dir (mwstate

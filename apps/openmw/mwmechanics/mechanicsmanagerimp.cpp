@@ -32,6 +32,7 @@
 #include "actorutil.hpp"
 #include "combat.hpp"
 #include "alchemyknowledge.hpp"
+#include "xpleveling.hpp"
 
 namespace
 {
@@ -1165,8 +1166,14 @@ namespace MWMechanics
             if (victim.isEmpty() || (victim.getClass().isActor() && victim.getRefData().getCount() > 0 && !victim.getClass().getCreatureStats(victim).isDead()))
                 mStolenItems[Misc::StringUtils::lowerCase(item.getCellRef().getRefId())][owner] += count;
         }
+        bool reported = false;
         if (alarm)
-            commitCrime(ptr, victim, OT_Theft, ownerCellRef->getFaction(), item.getClass().getValue(item) * count);
+            reported = commitCrime(ptr, victim, OT_Theft, ownerCellRef->getFaction(), item.getClass().getValue(item) * count);
+
+        // Reward only a theft that actually succeeded without being reported.
+        // Successful pickpocket transfers arrive here with alarm=false.
+        if (!reported)
+            XPLeveling::awardSuccessfulTheft(ptr, item, count);
     }
 
 
@@ -1536,6 +1543,11 @@ namespace MWMechanics
 
         if (victim == attacker)
             return; // known to happen
+
+        // Progression reward is independent from the crime code below and also
+        // covers creatures. Responsibility is resolved for the player and the
+        // player's followers inside the XP system.
+        XPLeveling::awardKill(victim, attacker);
 
         if (!victim.getClass().isNpc())
             return; // TODO: implement animal rights

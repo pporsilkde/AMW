@@ -229,7 +229,7 @@
                 <Widget type="ImageBox" skin="ImageBox" position="8 8 32 32" align="Left Top" name="SkillNoProgressImage"/>
 
                 <Widget type="VBox">
-                    <Widget type="AutoSizedEditBox" skin="NormalText" position="44 8 0 16" align="Left Top" name="SkillNoProgressName">
+                    <Widget type="AutoSizedTextBox" skin="NormalText" position="44 8 0 16" align="Left Top" name="SkillNoProgressName">
                         <Property key="TextAlign" value="Left"/>
                         <UserString key="HStretch" value="true"/>
                     </Widget>
@@ -245,8 +245,10 @@
 
             <Widget type="AutoSizedEditBox" skin="SandText" position="8 44 430 0" align="Left Top" name="SkillNoProgressDescription">
                 <Property key="MultiLine" value="true"/>
+                <Property key="Shrink" value="true"/>
                 <Property key="WordWrap" value="true"/>
                 <Property key="TextAlign" value="Left Top"/>
+                <UserString key="HStretch" value="true"/>
             </Widget>
         </Widget>
 

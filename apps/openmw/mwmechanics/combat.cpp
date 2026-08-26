@@ -25,6 +25,7 @@
 #include "difficultyscaling.hpp"
 #include "actorutil.hpp"
 #include "pathfinding.hpp"
+#include "xpleveling.hpp"
 
 // added by EncoreMP
 
@@ -291,6 +292,9 @@ namespace MWMechanics
                 if (!knockedDown)
                     MWBase::Environment::get().getSoundManager()->playSound3D(victim, "critical damage", 1.0f, 1.0f);
             }
+
+            if (unaware && damage > 0.f)
+                XPLeveling::awardCriticalHit(attacker, victim);
         }
 
         reduceWeaponCondition(damage, validVictim, weapon, attacker);

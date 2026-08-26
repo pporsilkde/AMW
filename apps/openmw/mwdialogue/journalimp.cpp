@@ -14,6 +14,8 @@
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
+#include "../mwmechanics/xpleveling.hpp"
+
 #include "../mwgui/messagebox.hpp"
 
 namespace MWDialogue
@@ -93,7 +95,11 @@ namespace MWDialogue
         StampedJournalEntry entry = StampedJournalEntry::makeFromQuest (id, index, actor);
 
         Quest& quest = getQuest (id);
+        const bool wasFinished = quest.isFinished();
         quest.addEntry (entry); // we are doing slicing on purpose here
+
+        MWMechanics::XPLeveling::awardQuestProgress(
+            id, index, !wasFinished && quest.isFinished());
 
         // there is no need to show empty entries in journal
         if (!entry.getText().empty())

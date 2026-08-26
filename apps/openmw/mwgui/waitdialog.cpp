@@ -261,7 +261,8 @@ namespace MWGui
         // trigger levelup if possible
         const MWWorld::Store<ESM::GameSetting> &gmst =
             MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
-        if (mSleeping && pcstats.getLevelProgress () >= gmst.find("iLevelUpTotal")->mValue.getInteger())
+        if (!Settings::Manager::getBool("enabled", "XP Leveling")
+            && mSleeping && pcstats.getLevelProgress () >= gmst.find("iLevelUpTotal")->mValue.getInteger())
         {
             MWBase::Environment::get().getWindowManager()->pushGuiMode (GM_Levelup);
         }

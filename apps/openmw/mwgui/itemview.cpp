@@ -17,8 +17,13 @@
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TextBox.h>
 
+#include <components/esm/loadbook.hpp>
+
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
+
+#include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/npcstats.hpp"
 
 #include "itemmodel.hpp"
 #include "itemwidget.hpp"
@@ -29,6 +34,28 @@ namespace
     std::string arenaInventoryText(const std::string& key)
     {
         return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    bool isReadBook(const MWGui::ItemStack& item)
+    {
+        if (item.mBase.isEmpty() || item.mBase.getTypeName() != typeid(ESM::Book).name())
+            return false;
+
+        const MWWorld::LiveCellRef<ESM::Book>* book = item.mBase.get<ESM::Book>();
+        if (!book || book->mBase->mData.mIsScroll)
+            return false;
+
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        return !player.isEmpty()
+            && player.getClass().getNpcStats(player).hasBeenUsed(book->mBase->mId);
+    }
+
+    std::string bookwormDisplayName(const MWGui::ItemStack& item)
+    {
+        std::string name = item.mBase.getClass().getName(item.mBase);
+        if (isReadBook(item))
+            name = arenaInventoryText("bookworm.read_mark") + " " + name;
+        return name;
     }
 
     std::string formatWeight(float value)
@@ -664,7 +691,7 @@ void ItemView::update()
         }
         else
         {
-            name->setCaption(item.mBase.getClass().getName(item.mBase));
+            name->setCaption(bookwormDisplayName(item));
             count->setCaption(MyGUI::utility::toString(item.mCount));
             weight->setCaption(formatWeight(item.mBase.getClass().getWeight(item.mBase)));
             value->setCaption(MyGUI::utility::toString(item.mBase.getClass().getValue(item.mBase)));

@@ -38,6 +38,10 @@ namespace MWMechanics
             std::set<std::string> mExpelled;
             std::map<std::string, int> mFactionReputation;
             int mLevelProgress; // 0-10
+            float mExperience;
+            int mSkillPoints;
+            std::vector<float> mXpAttributeProgress;
+            std::set<std::string> mXpRewardKeys;
             std::vector<int> mSkillIncreases; // number of skill increases for each attribute (resets after leveling up)
             std::vector<int> mSpecIncreases; // number of skill increases for each specialization (accumulates throughout the entire game)
             std::set<std::string> mUsedIds;
@@ -90,6 +94,20 @@ namespace MWMechanics
             void increaseSkill (int skillIndex, const ESM::Class& class_, bool preserveProgress, bool readBook = false);
 
             int getLevelProgress() const;
+
+            float getExperience() const { return mExperience; }
+            void setExperience(float experience) { mExperience = experience; }
+
+            int getSkillPoints() const { return mSkillPoints; }
+            void addSkillPoints(int points);
+            bool spendSkillPoints(int points);
+
+            float getXpAttributeProgress(int attribute) const;
+            void setXpAttributeProgress(int attribute, float progress);
+
+            bool hasXpRewardKey(const std::string& key) const;
+            void addXpRewardKey(const std::string& key);
+            void removeXpRewardKeysWithPrefix(const std::string& prefix);
 
             
 
