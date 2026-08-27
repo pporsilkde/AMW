@@ -134,6 +134,46 @@ namespace
             text = text.substr(0, 39) + "...";
         return text.empty() ? id : text;
     }
+
+    std::string fallbackTopicEntryText(const std::string& topicId, const std::string& infoId)
+    {
+        if (topicId.empty())
+            return std::string();
+
+        try
+        {
+            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+            const ESM::Dialogue* dialogue = store.get<ESM::Dialogue>().search(topicId);
+            if (!dialogue)
+                return std::string();
+
+            if (!infoId.empty())
+            {
+                for (const ESM::DialInfo& info : dialogue->mInfo)
+                    if (Misc::StringUtils::ciEqual(info.mId, infoId))
+                        return info.mResponse;
+            }
+
+            const ESM::DialInfo* generic = nullptr;
+            for (const ESM::DialInfo& info : dialogue->mInfo)
+            {
+                if (info.mResponse.empty())
+                    continue;
+                if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
+                    || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
+                    || !info.mSelects.empty())
+                    continue;
+                generic = &info;
+            }
+            if (generic)
+                return generic->mResponse;
+        }
+        catch (...)
+        {
+        }
+
+        return std::string();
+    }
 }
 
 namespace MWGui
@@ -341,7 +381,7 @@ namespace MWGui
         // the skin reserves 28 px at the top and 8 px at the bottom, so child
         // controls must not be positioned as if all 500 window pixels were client space.
         mTitle->setCoord(MyGUI::IntCoord(14, 6, 762, 24));
-        mCloseButton->setCoord(MyGUI::IntCoord(688, 430, 88, 26));
+        mCloseButton->setCoord(MyGUI::IntCoord(674, 430, 88, 26));
         mTabs->setCoord(MyGUI::IntCoord(10, 36, 770, 388));
 
         // Quests tab. Keep the left list and the related-topics frame aligned
@@ -350,8 +390,8 @@ namespace MWGui
         mQuestFilter->setCoord(MyGUI::IntCoord(304, 6, 214, 24));
         mShowCompleted->setCoord(MyGUI::IntCoord(528, 6, 104, 24));
         mShowHidden->setCoord(MyGUI::IntCoord(640, 6, 104, 24));
-        mQuestList->setCoord(MyGUI::IntCoord(6, 38, 282, 304));
-        mQuestCounter->setCoord(MyGUI::IntCoord(6, 346, 282, 20));
+        mQuestList->setCoord(MyGUI::IntCoord(6, 38, 282, 284));
+        mQuestCounter->setCoord(MyGUI::IntCoord(6, 326, 282, 20));
         mQuestIcon->setCoord(MyGUI::IntCoord(304, 40, 44, 44));
         mQuestHeading->setCoord(MyGUI::IntCoord(358, 42, 386, 40));
         mQuestDetail->setCoord(MyGUI::IntCoord(304, 92, 440, 146));
@@ -362,8 +402,8 @@ namespace MWGui
 
         // Topics tab
         mTopicSearch->setCoord(MyGUI::IntCoord(6, 6, 220, 24));
-        mTopicList->setCoord(MyGUI::IntCoord(6, 38, 220, 304));
-        mTopicCounter->setCoord(MyGUI::IntCoord(6, 346, 220, 20));
+        mTopicList->setCoord(MyGUI::IntCoord(6, 38, 220, 284));
+        mTopicCounter->setCoord(MyGUI::IntCoord(6, 326, 220, 20));
         mTopicHeading->setCoord(MyGUI::IntCoord(242, 8, 502, 26));
         mTopicDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 238));
         mTopicRelatedLabel->setCoord(MyGUI::IntCoord(242, 284, 502, 18));
@@ -371,8 +411,8 @@ namespace MWGui
 
         // Records tab
         mRecordSearch->setCoord(MyGUI::IntCoord(6, 6, 220, 24));
-        mRecordList->setCoord(MyGUI::IntCoord(6, 38, 220, 304));
-        mRecordCounter->setCoord(MyGUI::IntCoord(6, 346, 220, 20));
+        mRecordList->setCoord(MyGUI::IntCoord(6, 38, 220, 284));
+        mRecordCounter->setCoord(MyGUI::IntCoord(6, 326, 220, 20));
         mRecordHeading->setCoord(MyGUI::IntCoord(242, 8, 502, 26));
         mRecordDetail->setCoord(MyGUI::IntCoord(242, 38, 502, 310));
 
@@ -907,6 +947,7 @@ namespace MWGui
                 << " " << it->mDay;
             const std::string date = dateStream.str();
             EntryData entry;
+            entry.mInfoId = it->mInfoId;
             entry.mText = it->getText();
             entry.mActor = it->mActorName;
             entry.mDate = date;
@@ -978,6 +1019,7 @@ namespace MWGui
             for (auto entry = it->second.begin(); entry != it->second.end(); ++entry, ++topicOrder)
             {
                 EntryData data;
+                data.mInfoId = entry->mInfoId;
                 data.mText = entry->getText();
                 data.mActor = entry->mActorName;
                 data.mOrder = topicOrder;
@@ -1433,11 +1475,33 @@ namespace MWGui
         const TopicData& topic = mTopics[mVisibleTopics[selected]];
         mTopicHeading->setCaption(topic.mName);
         std::ostringstream text;
+        bool hasVisibleContent = false;
         for (const EntryData& entry : topic.mEntries)
         {
-            if (!entry.mActor.empty()) text << entry.mActor << ":\n";
-            text << sanitizeJournalText(entry.mText) << "\n\n";
+            std::string entryText = entry.mText;
+            if (entryText.empty())
+                entryText = fallbackTopicEntryText(topic.mId, entry.mInfoId);
+            entryText = trim(sanitizeJournalText(entryText));
+
+            if (!entry.mActor.empty())
+            {
+                text << entry.mActor;
+                if (!entryText.empty())
+                    text << ":";
+                text << "\n";
+                hasVisibleContent = true;
+            }
+
+            if (!entryText.empty())
+            {
+                text << entryText << "\n\n";
+                hasVisibleContent = true;
+            }
         }
+
+        if (!hasVisibleContent)
+            text << tr("questman.no_entries");
+
         mTopicDetail->setCaption(text.str());
         refreshTopicRelatedTopics();
     }

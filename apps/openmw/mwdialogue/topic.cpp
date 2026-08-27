@@ -1,5 +1,7 @@
 #include "topic.hpp"
 
+#include <components/misc/stringops.hpp>
+
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 
@@ -26,7 +28,7 @@ namespace MWDialogue
         // bail out if we already have heard this
         for (Topic::TEntryIter it = mEntries.begin(); it != mEntries.end(); ++it)
         {
-            if (it->mInfoId == entry.mInfoId)
+            if (Misc::StringUtils::ciEqual(it->mInfoId, entry.mInfoId))
                 return;
         }
 

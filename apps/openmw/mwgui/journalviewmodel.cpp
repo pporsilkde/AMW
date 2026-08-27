@@ -5,6 +5,7 @@
 
 #include <MyGUI_LanguageManager.h>
 
+#include <components/esm/loaddial.hpp>
 #include <components/translation/translation.hpp>
 #include <components/misc/stringops.hpp>
 
@@ -14,6 +15,7 @@
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwdialogue/keywordsearch.hpp"
+#include "../mwworld/esmstore.hpp"
 
 namespace MWGui {
 
@@ -302,6 +304,8 @@ struct JournalViewModelImpl : JournalViewModel
 
     void visitTopicName (TopicId topicId, std::function <void (Utf8Span)> visitor) const override
     {
+        if (!topicId)
+            return;
         MWDialogue::Topic const & topic = * reinterpret_cast <MWDialogue::Topic const *> (topicId);
         visitor (toUtf8Span (topic.getName()));
     }
@@ -332,7 +336,47 @@ struct JournalViewModelImpl : JournalViewModel
 
         std::string getText () const override
         {
-            return  itr->getText();
+            std::string text = itr->getText();
+            if (!text.empty())
+                return text;
+
+            // Some saves / imported journal data can contain a valid topic INFO
+            // id but an empty cached TEXT field. Reconstruct the response from
+            // the loaded dialogue record so opening the topic never yields an
+            // empty page just because the cached text is missing.
+            try
+            {
+                const ESM::Dialogue* dialogue = MWBase::Environment::get().getWorld()->getStore()
+                    .get<ESM::Dialogue>().search(mTopic.getTopic());
+                if (dialogue)
+                {
+                    if (!itr->mInfoId.empty())
+                    {
+                        for (const ESM::DialInfo& info : dialogue->mInfo)
+                            if (Misc::StringUtils::ciEqual(info.mId, itr->mInfoId))
+                                return info.mResponse;
+                    }
+
+                    const ESM::DialInfo* generic = nullptr;
+                    for (const ESM::DialInfo& info : dialogue->mInfo)
+                    {
+                        if (info.mResponse.empty())
+                            continue;
+                        if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
+                            || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
+                            || !info.mSelects.empty())
+                            continue;
+                        generic = &info;
+                    }
+                    if (generic)
+                        return generic->mResponse;
+                }
+            }
+            catch (...)
+            {
+            }
+
+            return text;
         }
 
         Utf8Span source () const override
@@ -346,6 +390,8 @@ struct JournalViewModelImpl : JournalViewModel
     {
         typedef MWDialogue::Topic::TEntryIter iterator_t;
 
+        if (!topicId)
+            return;
         MWDialogue::Topic const & topic = * reinterpret_cast <MWDialogue::Topic const *> (topicId);
 
         for (iterator_t i = topic.begin (); i != topic.end (); ++i)

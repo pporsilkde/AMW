@@ -38,6 +38,7 @@ namespace MWGui
     private:
         struct EntryData
         {
+            std::string mInfoId;
             std::string mText;
             std::string mActor;
             std::string mDate;

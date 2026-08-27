@@ -20,8 +20,8 @@
         <Widget type="ComboBox" skin="MW_ComboBox" position="335 6 203 24" name="QuestFilter"/>
         <Widget type="Button" skin="MW_Button" position="544 6 112 24" name="ShowCompleted"/>
         <Widget type="Button" skin="MW_Button" position="662 6 112 24" name="ShowHidden"/>
-        <Widget type="ListBox" skin="MW_List" position="6 38 282 286" name="QuestList"/>
-        <Widget type="TextBox" skin="SandText" position="6 328 282 20" name="QuestCounter"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 282 284" name="QuestList"/>
+        <Widget type="TextBox" skin="SandText" position="6 326 282 20" name="QuestCounter"/>
         <Widget type="ImageBox" skin="ImageBox" position="335 40 44 44" name="QuestIcon"/>
         <Widget type="TextBox" skin="SandBrightText" position="389 42 385 40" name="QuestHeading">
           <Property key="TextAlign" value="Left VCenter"/>
@@ -36,8 +36,8 @@
       <Widget type="TabItem" skin="" position="4 32 762 352">
         <Property key="Caption" value="#{arenamp=questman.tab.topics}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 235 24" name="TopicSearch"/>
-        <Widget type="ListBox" skin="MW_List" position="6 38 220 286" name="TopicList"/>
-        <Widget type="TextBox" skin="SandText" position="6 328 220 20" name="TopicCounter"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 220 284" name="TopicList"/>
+        <Widget type="TextBox" skin="SandText" position="6 326 220 20" name="TopicCounter"/>
         <Widget type="TextBox" skin="SandBrightText" position="257 8 517 26" name="TopicHeading"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="242 38 502 238" name="TopicDetail"/>
         <Widget type="TextBox" skin="SandBrightText" position="242 284 502 18" name="TopicRelatedLabel"/>
@@ -47,8 +47,8 @@
       <Widget type="TabItem" skin="" position="4 32 762 352">
         <Property key="Caption" value="#{arenamp=questman.tab.records}"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="6 6 235 24" name="RecordSearch"/>
-        <Widget type="ListBox" skin="MW_List" position="6 38 220 286" name="RecordList"/>
-        <Widget type="TextBox" skin="SandText" position="6 328 220 20" name="RecordCounter"/>
+        <Widget type="ListBox" skin="MW_List" position="6 38 220 284" name="RecordList"/>
+        <Widget type="TextBox" skin="SandText" position="6 326 220 20" name="RecordCounter"/>
         <Widget type="TextBox" skin="SandBrightText" position="257 8 517 26" name="RecordHeading"/>
         <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="242 38 502 310" name="RecordDetail"/>
       </Widget>
@@ -59,7 +59,7 @@
       </Widget>
     </Widget>
 
-    <Widget type="Button" skin="MW_Button" position="688 430 88 26" name="CloseButton">
+    <Widget type="Button" skin="MW_Button" position="674 430 88 26" name="CloseButton">
       <Property key="Caption" value="#{arenamp=questman.close}"/>
     </Widget>
   </Widget>

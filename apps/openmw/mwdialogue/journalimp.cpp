@@ -6,6 +6,7 @@
 #include <components/esm/esmreader.hpp>
 #include <components/esm/queststate.hpp>
 #include <components/esm/journalentry.hpp>
+#include <components/misc/stringops.hpp>
 
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/class.hpp"
@@ -60,7 +61,7 @@ namespace MWDialogue
 
             for (ESM::Dialogue::InfoContainer::const_iterator iter (dialogue->mInfo.begin());
                 iter!=dialogue->mInfo.end(); ++iter)
-                if (iter->mId == infoId)
+                if (Misc::StringUtils::ciEqual(iter->mId, infoId))
                     return true;
         }
 
@@ -248,24 +249,27 @@ namespace MWDialogue
             ESM::JournalEntry record;
             record.load (reader);
 
-            if (isThere (record.mTopic, record.mInfo))
-                switch (record.mType)
-                {
-                    case ESM::JournalEntry::Type_Quest:
+            switch (record.mType)
+            {
+                case ESM::JournalEntry::Type_Quest:
+                    if (isThere(record.mTopic, record.mInfo))
+                        getQuest(record.mTopic).insertEntry(record);
+                    break;
 
-                        getQuest (record.mTopic).insertEntry (record);
-                        break;
+                case ESM::JournalEntry::Type_Journal:
+                    if (isThere(record.mTopic, record.mInfo))
+                        mJournal.push_back(record);
+                    break;
 
-                    case ESM::JournalEntry::Type_Journal:
-
-                        mJournal.push_back (record);
-                        break;
-
-                    case ESM::JournalEntry::Type_Topic:
-
-                        getTopic (record.mTopic).insertEntry (record);
-                        break;
-                }
+                case ESM::JournalEntry::Type_Topic:
+                    // Topic history is saved with its resolved plaintext. Do not throw
+                    // that history away merely because a plugin update changed or
+                    // removed the original INFO id. This is especially important for
+                    // old/converted saves: the journal can still display saved TEXT.
+                    if (isThere(record.mTopic))
+                        getTopic(record.mTopic).insertEntry(record);
+                    break;
+            }
         }
         else if (type==ESM::REC_QUES)
         {

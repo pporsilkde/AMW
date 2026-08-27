@@ -445,15 +445,21 @@ namespace
 
         void notifyTopicSelected (const std::string& topic, int id)
         {
-            const MWBase::Journal* journal = MWBase::Environment::get().getJournal();
-            intptr_t topicId = 0; /// \todo get rid of intptr ids
-            for(MWBase::Journal::TTopicIter i = journal->topicBegin(); i != journal->topicEnd (); ++i)
-            {
-                if (Misc::StringUtils::ciEqual(i->first, topic))
-                    topicId = intptr_t (&i->second);
-            }
+            Book topicBook = createTopicBook(topic);
 
-            notifyTopicClicked(topicId);
+            if (mStates.size() > 1)
+                replaceBook(topicBook, 0);
+            else
+                pushBook(topicBook, 0);
+
+            setVisible(OptionsOverlay, false);
+            setVisible(OptionsBTN, true);
+            setVisible(JournalBTN, true);
+
+            mOptionsMode = false;
+            mTopicsMode = false;
+
+            MWBase::Environment::get().getWindowManager()->playSound("book page");
         }
 
         void notifyQuestClicked (const std::string& name, int id)

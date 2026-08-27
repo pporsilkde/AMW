@@ -1,10 +1,12 @@
 #include "journalbooks.hpp"
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/journal.hpp"
 #include "../mwbase/windowmanager.hpp"
 
 #include <components/fontloader/fontloader.hpp>
 #include <components/misc/utf8stream.hpp>
+#include <components/misc/stringops.hpp>
 
 #include "textcolours.hpp"
 
@@ -199,6 +201,26 @@ book JournalBooks::createTopicBook (uintptr_t topicId)
     mModel->visitTopicEntries (topicId, AddTopicEntry (typesetter, body, header, contentId));
 
     return typesetter->complete ();
+}
+
+book JournalBooks::createTopicBook (const std::string& topicId)
+{
+    MWBase::Journal* journal = MWBase::Environment::get().getJournal();
+    for (MWBase::Journal::TTopicIter i = journal->topicBegin(); i != journal->topicEnd(); ++i)
+    {
+        if (Misc::StringUtils::ciEqual(i->first, topicId)
+            || Misc::StringUtils::ciEqual(i->second.getName(), topicId))
+            return createTopicBook(reinterpret_cast<uintptr_t>(&i->second));
+    }
+
+    // Keep the journal usable even if a translated/display topic name can no
+    // longer be resolved to an internal key. Show the requested topic title
+    // instead of producing an entirely blank book.
+    BookTypesetter::Ptr typesetter = createTypesetter();
+    BookTypesetter::Style* header = typesetter->createStyle("", MyGUI::Colour(0.60f, 0.00f, 0.00f));
+    AddTopicName addName(typesetter, header);
+    addName(to_utf8_span(topicId.c_str()));
+    return typesetter->complete();
 }
 
 book JournalBooks::createQuestBook (const std::string& questName)
