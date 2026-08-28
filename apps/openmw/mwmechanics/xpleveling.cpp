@@ -174,6 +174,17 @@ namespace
         stats.setHealth(health);
 
         stats.setLevel(stats.getLevel() + 1);
+
+        // Arena XP: Luck is not governed by any skill, so it advances from
+        // character levels instead. Grant +1 Luck on every even character
+        // level (2, 4, 6, ...), capped at the normal attribute maximum of 100.
+        if ((stats.getLevel() % 2) == 0)
+        {
+            const float luck = stats.getAttribute(ESM::Attribute::Luck).getBase();
+            if (luck < 100.f)
+                stats.setAttribute(ESM::Attribute::Luck, std::min(100.f, luck + 1.f));
+        }
+
         const int points = std::max(0, Settings::Manager::getInt("skill points per level", "XP Leveling"));
         stats.addSkillPoints(points);
 
