@@ -100,9 +100,16 @@ namespace MWMechanics
     {
     }
 
+    AiActivate::AiActivate(MWWorld::Ptr object)
+        : mObjectId("")
+        , mObjectPtr(object)
+    {
+    }
+
     bool AiActivate::execute(const MWWorld::Ptr& actor, CharacterController& characterController, AiState& state, float duration)
     {
-        const MWWorld::Ptr target = MWBase::Environment::get().getWorld()->searchPtr(mObjectId, false); //The target to follow
+        const MWWorld::Ptr target = mObjectId.empty() ? mObjectPtr
+            : MWBase::Environment::get().getWorld()->searchPtr(mObjectId, false);
 
         actor.getClass().getCreatureStats(actor).setDrawState(DrawState_Nothing);
 

@@ -120,8 +120,11 @@ namespace MWInput
             return false;
         }
 
-        MWWorld::Player& player = MWBase::Environment::get().getWorld()->getPlayer();
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWWorld::Player& player = world->getPlayer();
         bool triedToMove = false;
+        const bool placementActive = world->isPhysicsGrabActive();
+        const bool placementMoveMode = placementActive && world->getPhysicsGrabMoveMode() != 0;
 
         // Configure player movement according to controller input. Actual movement will
         // be done in the physics system.
@@ -129,6 +132,17 @@ namespace MWInput
         {
             float xAxis = mBindingsManager->getActionValue(A_MoveLeftRight);
             float yAxis = mBindingsManager->getActionValue(A_MoveForwardBackward);
+            if (placementMoveMode)
+            {
+                // The same left-stick channels now belong to the held object.
+                // Zero player motion here as well as in ActionManager so there is
+                // no one-frame movement impulse before the placement update.
+                xAxis = 0.5f;
+                yAxis = 0.5f;
+                player.setAutoMove(false);
+                player.setLeftRight(0.f);
+                player.setForwardBackward(0.f);
+            }
             if (xAxis != 0.5)
             {
                 triedToMove = true;
@@ -149,7 +163,7 @@ namespace MWInput
             }
 
             static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
-            if (!isToggleSneak)
+            if (!placementActive && !isToggleSneak)
             {
                 if (mJoystickLastUsed)
                 {
@@ -185,7 +199,9 @@ namespace MWInput
 
         if (MWBase::Environment::get().getInputManager()->getControlSwitch("playerviewswitch"))
         {
-            if (!mBindingsManager->actionIsActive(A_TogglePOV))
+            if (placementActive)
+                mGamepadZoom = 0;
+            else if (!mBindingsManager->actionIsActive(A_TogglePOV))
                 mGamepadZoom = 0;
 
             if (mGamepadZoom)

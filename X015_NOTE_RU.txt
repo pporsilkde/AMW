@@ -1,0 +1,5 @@
+ArenaMW X015 cumulative
+=======================
+
+В X015 исправление относится только к ArenaMP server QuestIndex runtime API.
+ArenaMW функционально совпадает с X014; номер сохранён синхронным с ArenaMP.

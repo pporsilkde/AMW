@@ -101,13 +101,26 @@ namespace
 
         void operator () (MWGui::JournalViewModel::TopicEntry const & entry)
         {
-            mTypesetter->write (mBodyStyle, entry.source ());
-            mTypesetter->write (mBodyStyle, 0, 3);// begin
+            // Entries recovered from the dialogue records have no known speaker.
+            // Writing the quoted-speaker decoration for them would produce a
+            // stray leading comma and an unmatched quotation mark.
+            MWGui::JournalViewModel::Utf8Span source = entry.source ();
+            const bool hasSource = source.first != source.second;
+
+            if (hasSource)
+            {
+                mTypesetter->write (mBodyStyle, source);
+                mTypesetter->selectContent (mContentId);
+                mTypesetter->write (mBodyStyle, 0, 3);// begin
+            }
 
             AddEntry::operator() (entry);
 
-            mTypesetter->selectContent (mContentId);
-            mTypesetter->write (mBodyStyle, 2, 3);// end quote
+            if (hasSource)
+            {
+                mTypesetter->selectContent (mContentId);
+                mTypesetter->write (mBodyStyle, 2, 3);// end quote
+            }
 
             mTypesetter->sectionBreak (30);
         }

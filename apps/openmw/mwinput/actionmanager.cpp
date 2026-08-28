@@ -1,5 +1,7 @@
 #include "actionmanager.hpp"
 
+#include <algorithm>
+
 #include <MyGUI_InputManager.h>
 
 #include <SDL_keyboard.h>
@@ -106,8 +108,8 @@ namespace MWInput
             }
         }
 
-        // Placement is a gameplay-only state. Entering GUI/pause finalizes the
-        // current object according to Physics ON/OFF and removes the help panel.
+        // Placement is a gameplay-only state. Entering GUI/pause commits the
+        // current kinematic transform and removes the help panel.
         if (guiMode || !gameRunning)
         {
             if (world->isPhysicsGrabActive())
@@ -119,24 +121,41 @@ namespace MWInput
 
         const bool physicsGrabActive = world->isPhysicsGrabActive();
         const int physicsGrabMoveMode = physicsGrabActive ? world->getPhysicsGrabMoveMode() : 0;
+        if (physicsGrabMoveMode != 0)
+            triedToMove = false;
 
         if (physicsGrabActive)
         {
-            // Placement rotation uses literal R/F and KeyboardManager consumes those
-            // keys before normal bindings, so no secondary bound action also fires.
-            const Uint8* keys = SDL_GetKeyboardState(nullptr);
-            const float rollInput = keys && keys[SDL_SCANCODE_F] ? 1.f : 0.f;
-            const float pitchInput = keys && keys[SDL_SCANCODE_R] ? 1.f : 0.f;
-            world->rotatePhysicsGrab(rollInput, pitchInput, dt);
+            // X006: placement never uses literal R/F. Reuse the player's existing
+            // Weapon / Magic actions so custom keyboard and controller bindings keep
+            // working. Weapon rotates around the held object's own vertical axis;
+            // Magic rotates around its own horizontal axis. Hold Run to reverse.
+            const float rotationDirection = mBindingsManager->actionIsActive(A_Run) ? -1.f : 1.f;
+            const float horizontalRotation = mBindingsManager->actionIsActive(A_ToggleWeapon)
+                ? rotationDirection : 0.f;
+            const float verticalRotation = mBindingsManager->actionIsActive(A_ToggleSpell)
+                ? rotationDirection : 0.f;
+            world->rotatePhysicsGrab(horizontalRotation, verticalRotation, dt);
 
             if (physicsGrabMoveMode != 0)
             {
-                const float firstAxis =
+                const float digitalFirst =
                     (mBindingsManager->actionIsActive(A_MoveRight) ? 1.f : 0.f)
                     - (mBindingsManager->actionIsActive(A_MoveLeft) ? 1.f : 0.f);
-                const float secondAxis =
+                const float digitalSecond =
                     (mBindingsManager->actionIsActive(A_MoveForward) ? 1.f : 0.f)
                     - (mBindingsManager->actionIsActive(A_MoveBackward) ? 1.f : 0.f);
+                const float analogFirst =
+                    (mBindingsManager->getActionValue(A_MoveLeftRight) - 0.5f) * 2.f;
+                const float analogSecond =
+                    (0.5f - mBindingsManager->getActionValue(A_MoveForwardBackward)) * 2.f;
+                float firstAxis = std::max(-1.f, std::min(1.f, digitalFirst + analogFirst));
+                float secondAxis = std::max(-1.f, std::min(1.f, digitalSecond + analogSecond));
+                if (mBindingsManager->actionIsActive(A_Run))
+                {
+                    firstAxis *= 0.25f;
+                    secondAxis *= 0.25f;
+                }
                 world->translatePhysicsGrab(firstAxis, secondAxis, dt);
             }
         }
@@ -203,8 +222,8 @@ namespace MWInput
 
             if (mAttemptJump && MWBase::Environment::get().getInputManager()->getControlSwitch("playerjumping"))
             {
-                // Space is reserved for Physics ON/OFF during placement mode. This
-                // also prevents controller/alternate Jump bindings from jumping.
+                // Jump is suppressed while placement owns the object, so controller
+                // and alternate bindings cannot move the player during editing.
                 if (!physicsGrabActive)
                 {
                     player.setUpDown(1);
@@ -234,7 +253,13 @@ namespace MWInput
             {
                 const float switchLimit = 0.25;
                 MWBase::World* world = MWBase::Environment::get().getWorld();
-                if (mBindingsManager->actionIsActive(A_TogglePOV))
+                if (physicsGrabActive)
+                {
+                    if (mPreviewPOVDelay > 0.f)
+                        world->togglePreviewMode(false);
+                    mPreviewPOVDelay = 0.f;
+                }
+                else if (mBindingsManager->actionIsActive(A_TogglePOV))
                 {
                     if (world->isFirstPerson() ? mPreviewPOVDelay > switchLimit : mPreviewPOVDelay == 0)
                         world->togglePreviewMode(true);
@@ -255,7 +280,7 @@ namespace MWInput
                 MWBase::Environment::get().getInputManager()->resetIdleTime();
 
             static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
-            if (!isToggleSneak)
+            if (!isToggleSneak && !physicsGrabActive)
             {
                 if(!MWBase::Environment::get().getInputManager()->joystickLastUsed())
                     player.setSneak(mBindingsManager->actionIsActive(A_Sneak));
@@ -329,7 +354,16 @@ namespace MWInput
             screenshot();
             break;
         case A_Inventory:
-            toggleInventory ();
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            {
+                MWBase::Environment::get().getWorld()->cancelPhysicsGrab();
+                mActivateHoldObject = MWWorld::Ptr();
+                mActivateHoldTime = 0.f;
+                mActivateHoldPending = false;
+                windowManager->setPhysicsGrabHint(false, 0, false);
+            }
+            else
+                toggleInventory ();
             break;
         case A_Console:
             toggleConsole ();
@@ -384,8 +418,8 @@ namespace MWInput
             toggleWalking();
             break;
         case A_ToggleWeapon:
-            // When an object is physically held, this action is temporarily a
-            // screen-plane rotate modifier.  Do not also draw/sheath the weapon.
+            // While placing, holding the existing Weapon action is continuous
+            // horizontal self-rotation; update() owns the actual rotation.
             if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
                 toggleWeapon();
             break;
@@ -393,8 +427,8 @@ namespace MWInput
             rest();
             break;
         case A_ToggleSpell:
-            // Same rule for the second rotation plane.  Outside physics-grab mode
-            // the original ready/unready magic action remains unchanged.
+            // While placing, holding the existing Magic action is continuous
+            // vertical self-rotation; update() owns the actual rotation.
             if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
                 toggleSpell();
             break;
@@ -471,11 +505,21 @@ namespace MWInput
                 MWBase::Environment::get().getWindowManager()->cycleWeapon(true);
             break;
         case A_Sneak:
-            static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
-            if (isToggleSneak)
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->resetPhysicsGrabTransform();
+            else
             {
-                toggleSneaking();
+                static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
+                if (isToggleSneak)
+                    toggleSneaking();
             }
+            break;
+        case A_Jump:
+            // Placement is always kinematic in X006; there is no physics toggle.
+            break;
+        case A_TogglePOV:
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->cyclePhysicsGrabMoveMode();
             break;
         }
     }

@@ -15,6 +15,7 @@
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwdialogue/keywordsearch.hpp"
+#include "../mwdialogue/topicrecovery.hpp"
 #include "../mwworld/esmstore.hpp"
 
 namespace MWGui {
@@ -340,43 +341,10 @@ struct JournalViewModelImpl : JournalViewModel
             if (!text.empty())
                 return text;
 
-            // Some saves / imported journal data can contain a valid topic INFO
-            // id but an empty cached TEXT field. Reconstruct the response from
-            // the loaded dialogue record so opening the topic never yields an
-            // empty page just because the cached text is missing.
-            try
-            {
-                const ESM::Dialogue* dialogue = MWBase::Environment::get().getWorld()->getStore()
-                    .get<ESM::Dialogue>().search(mTopic.getTopic());
-                if (dialogue)
-                {
-                    if (!itr->mInfoId.empty())
-                    {
-                        for (const ESM::DialInfo& info : dialogue->mInfo)
-                            if (Misc::StringUtils::ciEqual(info.mId, itr->mInfoId))
-                                return info.mResponse;
-                    }
-
-                    const ESM::DialInfo* generic = nullptr;
-                    for (const ESM::DialInfo& info : dialogue->mInfo)
-                    {
-                        if (info.mResponse.empty())
-                            continue;
-                        if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
-                            || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
-                            || !info.mSelects.empty())
-                            continue;
-                        generic = &info;
-                    }
-                    if (generic)
-                        return generic->mResponse;
-                }
-            }
-            catch (...)
-            {
-            }
-
-            return text;
+            // A stored entry can carry a valid INFO id but no cached text, which
+            // is the normal shape of journal data restored from the server or
+            // from an old save. Resolve it against the local dialogue records.
+            return MWDialogue::TopicRecovery::responseFor (mTopic.getTopic (), itr->mInfoId);
         }
 
         Utf8Span source () const override
@@ -384,6 +352,31 @@ struct JournalViewModelImpl : JournalViewModel
             return toUtf8Span (itr->mActorName);
         }
 
+    };
+
+    /// Entry that is not backed by stored journal data at all, but rebuilt from
+    /// the dialogue records for a topic the player is known to have.
+    struct RecoveredTopicEntry : BaseEntry <MWDialogue::Topic const *, TopicEntry>
+    {
+        std::string mBody;
+        std::string mSource;
+
+        RecoveredTopicEntry (JournalViewModelImpl const * model, MWDialogue::Topic const & topic,
+            const std::string& body) :
+            BaseEntry (model, &topic), mBody (body)
+        {}
+
+        std::string getText () const override
+        {
+            return mBody;
+        }
+
+        /// The speaker is unknown for a recovered entry; the book layout drops
+        /// the quoted-speaker decoration when this is empty.
+        Utf8Span source () const override
+        {
+            return toUtf8Span (mSource);
+        }
     };
 
     void visitTopicEntries (TopicId topicId, std::function <void (TopicEntry const &)> visitor) const override
@@ -394,8 +387,23 @@ struct JournalViewModelImpl : JournalViewModel
             return;
         MWDialogue::Topic const & topic = * reinterpret_cast <MWDialogue::Topic const *> (topicId);
 
+        bool visited = false;
         for (iterator_t i = topic.begin (); i != topic.end (); ++i)
+        {
             visitor (TopicEntryImpl (this, topic, i));
+            visited = true;
+        }
+
+        if (visited)
+            return;
+
+        // The multiplayer server replicates only the *list* of topics a player
+        // knows, so after a relog a known topic arrives without any entry at all
+        // and the page would come up blank. The dialogue database is loaded on
+        // every client, so the response is looked up locally here.
+        const std::string recovered = MWDialogue::TopicRecovery::responseFor (topic.getTopic (), std::string ());
+        if (!recovered.empty ())
+            visitor (RecoveredTopicEntry (this, topic, recovered));
     }
 };
 

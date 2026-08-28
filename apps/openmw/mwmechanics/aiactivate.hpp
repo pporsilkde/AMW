@@ -2,6 +2,7 @@
 #define GAME_MWMECHANICS_AIACTIVATE_H
 
 #include "typedaipackage.hpp"
+#include "../mwworld/ptr.hpp"
 
 #include <string>
 
@@ -25,6 +26,7 @@ namespace MWMechanics
             /// Constructor
             /** \param objectId Reference to object to activate **/
             explicit AiActivate(const std::string &objectId);
+            explicit AiActivate(MWWorld::Ptr object);
 
             explicit AiActivate(const ESM::AiSequence::AiActivate* activate);
 
@@ -36,6 +38,7 @@ namespace MWMechanics
 
         private:
             const std::string mObjectId;
+            MWWorld::Ptr mObjectPtr;
 
             // Runtime-only immersive use state. It is intentionally not serialized: the
             // original AiActivate package is perpetual and only its target belongs in saves.

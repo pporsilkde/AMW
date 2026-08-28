@@ -211,6 +211,9 @@ namespace MWMechanics
             /// Has the player stolen this item from the given owner?
             bool isItemStolenFrom(const std::string& itemid, const MWWorld::Ptr& ptr) override;
 
+            bool hasStolenItemsFrom(const MWWorld::Ptr& owner) const override;
+            void clearStolenItemsFrom(const MWWorld::Ptr& owner) override;
+
             bool isBoundItem(const MWWorld::Ptr& item) override;
 
             /// @return is \a ptr allowed to take/use \a target or is it a crime?

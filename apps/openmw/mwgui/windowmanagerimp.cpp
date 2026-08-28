@@ -1466,6 +1466,16 @@ namespace MWGui
         mKeyboardNavigation->restoreFocus(mode);
 
         updateVisible();
+
+        // Arena X010: InventoryWindow::onOpen() is called again by updateVisible()
+        // and would otherwise steal key/controller focus from the container. Always
+        // make a freshly opened/re-targeted container the active transfer side.
+        if (mode == GM_Container && !mGuiModeStates[mode].mWindows.empty())
+        {
+            MyGUI::Widget* focus = mGuiModeStates[mode].mWindows.front()->getDefaultKeyFocus();
+            if (focus && focus->getVisible() && focus->getEnabled())
+                setKeyFocusWidget(focus);
+        }
     }
 
     void WindowManager::popGuiMode(bool noSound)
@@ -2493,20 +2503,24 @@ namespace MWGui
             return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
         };
 
+        (void)physicsEnabled; // X006 placement is always kinematic.
         std::string caption = arenaText("placement.release") + "\n"
-            + arenaText("placement.physics") + ": "
-            + arenaText(physicsEnabled ? "placement.on" : "placement.off") + "\n"
             + arenaText("placement.rotate") + "\n"
+            + arenaText("placement.rotate_reverse") + "\n"
             + arenaText("placement.reset") + "\n"
+            + arenaText("placement.cancel") + "\n"
+            + arenaText("placement.surface_auto") + "\n"
             + arenaText("placement.mode") + ": " + arenaText(modeKeys[safeMode]);
-
         if (safeMode != 0)
+        {
             caption += "\n" + arenaText("placement.move");
+            caption += "\n" + arenaText("placement.fine");
+        }
 
         // Match the Z animation menu width and left offset, but sit slightly
         // below vertical centre so it does not compete with the crosshair/object.
         const int width = 310;
-        const int height = safeMode == 0 ? 166 : 185;
+        const int height = safeMode == 0 ? 223 : 261;
         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
         const int left = std::max(14, static_cast<int>(view.width * 0.035f));
         const int top = std::max(14, (view.height - height) / 2

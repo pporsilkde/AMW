@@ -272,26 +272,30 @@ namespace MWBase
             /// ArenaMW ownerless-world-item placement / physics-grab mode.
             virtual bool canPhysicsGrab(const MWWorld::ConstPtr& object) const = 0;
             virtual bool beginPhysicsGrab(const MWWorld::Ptr& object) = 0;
-            /// Release the held object as a live physics prop.
+            /// Legacy free-body release path. X006 placement itself is always kinematic.
             virtual void releasePhysicsGrab() = 0;
             virtual bool isPhysicsGrabActive() const = 0;
-            /// Finish placement with physics disabled, preserving the current transform.
+            /// Finish exact placement, preserving the arranged transform.
             virtual bool placePhysicsGrab() = 0;
-            /// Finish the active grab using its current Physics ON/OFF setting.
+            /// Finish the active placement through the deterministic kinematic path.
             virtual bool finishPhysicsGrab() = 0;
-            /// Rotate the currently grabbed object relative to the camera.
-            /// rollInput rotates in the screen plane, pitchInput rotates around the camera-right axis.
-            virtual void rotatePhysicsGrab(float rollInput, float pitchInput, float duration) = 0;
+            /// Rotate around the held object's own centre. Horizontal input is yaw;
+            /// vertical input tilts around the object's horizontal/right axis.
+            virtual void rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration) = 0;
             /// Move the held target along the currently selected world-axis pair.
             virtual void translatePhysicsGrab(float firstAxisInput, float secondAxisInput, float duration) = 0;
             /// Cycle Walk -> X-Y -> X-Z -> Z-Y -> Walk. Returns the new mode (0..3).
             virtual int cyclePhysicsGrabMoveMode() = 0;
             virtual int getPhysicsGrabMoveMode() const = 0;
-            /// Toggle whether the object becomes a live physics prop when released.
+            /// Compatibility no-op in X006; placement no longer has a physics toggle.
             virtual bool togglePhysicsGrabPhysics() = 0;
             virtual bool isPhysicsGrabPhysicsEnabled() const = 0;
-            /// Clear manual placement offset and restore the orientation from grab start.
+            /// Stand the object upright and move it to a practical position in front of the player.
             virtual void resetPhysicsGrabTransform() = 0;
+            /// Optional exact 15-degree horizontal/vertical self-rotation helper.
+            virtual void stepPhysicsGrabRotation(float horizontalSteps, float verticalSteps) = 0;
+            /// Cancel the current placement and restore the transform captured when the grab began.
+            virtual bool cancelPhysicsGrab() = 0;
 
             virtual float getMaxActivationDistance() = 0;
 

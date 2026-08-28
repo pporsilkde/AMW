@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <vector>
 
@@ -20,8 +21,18 @@
 
 #include "../mwphysics/collisiontype.hpp"
 
+#include <components/debug/debuglog.hpp>
+#include <components/misc/stringops.hpp>
+
+#include <components/esm/loadalch.hpp>
+#include <components/esm/loadcell.hpp>
+#include <components/esm/loaddoor.hpp>
+#include <components/esm/loadmgef.hpp>
+
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/containerstore.hpp"
+#include "../mwworld/actionteleport.hpp"
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/dialoguemanager.hpp"
@@ -44,6 +55,139 @@ namespace
 
     osg::Vec3f AimDirToMovingTarget(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, const osg::Vec3f& vLastTargetPos,
         float duration, int weapType, float strength);
+
+    // ---------------------------------------------------------------------
+    // ArenaMW combat tuning. These are deliberately plain constants and not
+    // Settings::Manager keys, so that this file can be dropped into an existing
+    // build without touching files/settings-default.cfg.
+    // ---------------------------------------------------------------------
+
+    // How long an actor waits for a target that is not in any active cell before
+    // it gives up and drops the combat package. Without this an AiCombat package
+    // whose target left the loaded area lives forever and the NPC just stands
+    // there with its weapon drawn.
+    const float sTargetLostTimeout = 6.f;
+
+    // How long an actor is allowed to try to reach a target that sits in another
+    // cell before disengaging.
+    const float sCrossCellGiveUpTime = 20.f;
+
+    // How long an actor keeps trying to reach a target it has line of sight to
+    // but no navmesh path to, before ending combat instead of panicking.
+    const float sUnreachableGiveUpTime = 6.f;
+
+    // Distance at which an actor is considered to be standing in a doorway.
+    const float sDoorUseDistance = 110.f;
+
+    // Maximum number of teleport doors a single combat package may take the actor
+    // through. Keeps a city guard from chasing the player across half of Vvardenfell.
+    const int sMaxDoorTransitions = 2;
+
+    // Only look for an escape door within this radius while fleeing.
+    const float sFleeDoorSearchRadius = 1800.f;
+
+    // Health fraction below which an actor is considered wounded. This is the
+    // single gate for all flight decisions: level, gear and reputation gaps never
+    // make an NPC run away on their own.
+    const float sWoundedHealthRatio = 0.35f;
+
+    // Minimum delay between two self-heal attempts.
+    const float sHealCooldown = 6.f;
+
+    float healthRatio(const MWWorld::Ptr& actor)
+    {
+        const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+        const float maxHealth = stats.getHealth().getModified();
+        if (maxHealth <= 0.f)
+            return 1.f;
+        return std::max(0.f, std::min(1.f, stats.getHealth().getCurrent() / maxHealth));
+    }
+
+    /// Two actors can only be compared, aimed at or pathed to if their cells share
+    /// a coordinate space. All exterior cells do; every interior is its own space.
+    bool isSameCoordinateSpace(const MWWorld::Ptr& actor, const MWWorld::Ptr& other)
+    {
+        const MWWorld::CellStore* actorCell = actor.getCell();
+        const MWWorld::CellStore* otherCell = other.getCell();
+
+        if (actorCell == nullptr || otherCell == nullptr)
+            return false;
+        if (actorCell == otherCell)
+            return true;
+
+        return actorCell->isExterior() && otherCell->isExterior();
+    }
+
+    bool doorLeadsToCell(const MWWorld::Ptr& door, const ESM::Cell* destination)
+    {
+        if (destination == nullptr || !door.getCellRef().getTeleport())
+            return false;
+
+        const std::string& destName = door.getCellRef().getDestCell();
+
+        if (destName.empty())
+        {
+            if (!destination->isExterior())
+                return false;
+
+            const ESM::Position& doorDest = door.getCellRef().getDoorDest();
+            int cellX = 0;
+            int cellY = 0;
+            MWBase::Environment::get().getWorld()->positionToIndex(
+                doorDest.pos[0], doorDest.pos[1], cellX, cellY);
+            return cellX == destination->mData.mX && cellY == destination->mData.mY;
+        }
+
+        return !destination->isExterior() && Misc::StringUtils::ciEqual(destName, destination->mName);
+    }
+
+    void stopCrossCellMovement(const MWWorld::Ptr& actor)
+    {
+        MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
+        movement.mPosition[0] = 0.f;
+        movement.mPosition[1] = 0.f;
+    }
+
+    /// Walk the door list of the actor's own cell and return the nearest teleport
+    /// door matching \a predicate. Only doors in the actor's cell are considered,
+    /// so no cross-cell pointer ever escapes from here.
+    template <class Predicate>
+    MWWorld::Ptr findTeleportDoor(const MWWorld::Ptr& actor, float maxDistance, Predicate predicate)
+    {
+        MWWorld::CellStore* cell = actor.getCell();
+        if (cell == nullptr)
+            return MWWorld::Ptr();
+
+        const osg::Vec3f actorPos = actor.getRefData().getPosition().asVec3();
+        const MWWorld::CellRefList<ESM::Door>& doors = cell->getReadOnlyDoors();
+
+        MWWorld::Ptr best;
+        float bestDistance = maxDistance;
+
+        for (const auto& ref : doors.mList)
+        {
+            if (ref.mData.getCount() == 0)
+                continue;
+
+            // FIXME: cast, mirrors MWMechanics::getNearbyDoor()
+            const MWWorld::Ptr doorPtr(&const_cast<MWWorld::LiveCellRef<ESM::Door>&>(ref), cell);
+            if (!doorPtr.getCellRef().getTeleport())
+                continue;
+
+            const float distance = MWMechanics::distanceIgnoreZ(
+                actorPos, ref.mData.getPosition().asVec3());
+            if (distance > bestDistance)
+                continue;
+
+            if (!predicate(doorPtr))
+                continue;
+
+            bestDistance = distance;
+            best = doorPtr;
+        }
+
+        return best;
+    }
 }
 
 namespace MWMechanics
@@ -114,6 +258,7 @@ namespace MWMechanics
     {
         AiCombatStorage& storage = state.get<AiCombatStorage>();
         storage.mMeleeCommitTimer = std::max(0.f, storage.mMeleeCommitTimer - duration);
+        storage.mHealCooldown = std::max(0.f, storage.mHealCooldown - duration);
 
         if (actor.getClass().getCreatureStats(actor).isDead())
         {
@@ -121,12 +266,33 @@ namespace MWMechanics
             return true;
         }
 
+        // Must run before anything reads a cached position: a teleport door puts
+        // the actor into a completely unrelated coordinate space, and acting on
+        // the old path/last-seen position is exactly what makes an NPC stand
+        // still in a combat stance after walking through a door.
+        handleCellTransition(actor, storage);
+
         MWWorld::Ptr target = MWBase::Environment::get().getWorld()->searchPtrViaActorId(mTargetActorId);
         if (target.isEmpty())
         {
+            // The target is not present in any active cell. Vanilla keeps the
+            // package alive indefinitely, which leaves the actor frozen in combat
+            // mode doing nothing. Wait briefly for the target to come back, then
+            // disengage cleanly so the return-home package can take over.
             clearTacticalMovement(actor, storage);
-            return false;
+            storage.stopAttack();
+            storage.stopFleeing();
+            characterController.setAttackingOrSpell(false);
+            mPathFinder.clearPath();
+
+            MWMechanics::Movement& lostMovement = actor.getClass().getMovementSettings(actor);
+            lostMovement.mPosition[0] = 0.f;
+            lostMovement.mPosition[1] = 0.f;
+
+            storage.mTargetLostTimer += duration;
+            return storage.mTargetLostTimer >= sTargetLostTimeout;
         }
+        storage.mTargetLostTimer = 0.f;
 
         if (!target.getRefData().getCount() || !target.getRefData().isEnabled()
             || target.getClass().getCreatureStats(target).isDead())
@@ -140,6 +306,13 @@ namespace MWMechanics
             clearTacticalMovement(actor, storage);
             return true;
         }
+
+        // A different interior/exterior coordinate space cannot be fed into
+        // ordinary LOS/pathfinding. Handle the door chase separately.
+        if (!isSameCoordinateSpace(actor, target))
+            return updateCrossCellPursuit(actor, target, duration, storage, characterController);
+
+        storage.mCrossCellTimer = 0.f;
 
         // Crossing an exterior cell boundary replaces the player's CellStore
         // immediately, while LOS/pathfinding/actor processing can still be on
@@ -492,17 +665,236 @@ namespace MWMechanics
                     {
                         storage.stopAttack();
                         characterController.setAttackingOrSpell(false);
-                        currentAction.reset(new ActionFlee());
-                        actionCooldown = currentAction->getActionCooldown();
-                        storage.startFleeing();
-                        MWBase::Environment::get().getDialogueManager()->say(actor, "flee");
+
+                        // ArenaMW: failing to build a path is a navigation problem,
+                        // not a reason to panic. A healthy actor keeps trying for a
+                        // few seconds and then simply disengages, which looks far
+                        // more natural than sprinting away from an enemy it was
+                        // winning against. Only a wounded actor actually flees.
+                        if (healthRatio(actor) < sWoundedHealthRatio)
+                        {
+                            currentAction.reset(new ActionFlee());
+                            actionCooldown = currentAction->getActionCooldown();
+                            storage.startFleeing();
+                            MWBase::Environment::get().getDialogueManager()->say(actor, "flee");
+                        }
+                        else
+                        {
+                            storage.mUnreachableTimer += AI_REACTION_TIME;
+                            if (storage.mUnreachableTimer >= sUnreachableGiveUpTime)
+                                return true;
+                        }
                     }
                 }
+                else
+                    storage.mUnreachableTimer = 0.f;
             }
             else
             {
                 storage.mUseCustomDestination = false;
+                storage.mUnreachableTimer = 0.f;
             }
+        }
+
+        return false;
+    }
+
+    void AiCombat::handleCellTransition(const MWWorld::Ptr& actor, AiCombatStorage& storage)
+    {
+        MWWorld::CellStore* cell = actor.getCell();
+        if (cell == nullptr || storage.mLastActorCell == cell)
+            return;
+
+        const MWWorld::CellStore* previous = storage.mLastActorCell;
+        storage.mLastActorCell = cell;
+        storage.mCell = cell;
+
+        // Crossing an exterior cell border does not change the coordinate space,
+        // so a chase across the wilderness keeps its path and its memory of the
+        // target. Only a real interior/exterior transition invalidates them.
+        if (previous == nullptr || (previous->isExterior() && cell->isExterior()))
+            return;
+
+        mPathFinder.clearPath();
+        mObstacleCheck.clear();
+        clearTacticalMovement(actor, storage);
+
+        storage.mUseCustomDestination = false;
+        storage.mCustomDestination = osg::Vec3f();
+        storage.mFormationActive = false;
+        storage.mFormationUpdateTimer = 0.f;
+
+        storage.mSearchingLastKnown = false;
+        storage.mSearchPointsVisited = 0;
+        storage.mSearchElapsed = 0.f;
+        storage.mSearchDestination = osg::Vec3f();
+
+        storage.mHasLastSeenTarget = false;
+        storage.mLastSeenTargetPos = osg::Vec3f();
+        storage.mLastSeenTargetVelocity = osg::Vec3f();
+        storage.mLostSightTimer = 0.f;
+        storage.mLastTargetPos = osg::Vec3f();
+
+        storage.mLOS = false;
+        storage.mGeometricLOS = false;
+        storage.mUpdateLOSTimer = 0.f;
+
+        storage.mHasLastActorPos = false;
+        storage.mLastActorPos = osg::Vec3f();
+        storage.mStuckDuration = 0.f;
+        storage.mStuckCheckTimer = 0.f;
+
+        storage.mHasFleeDoor = false;
+        storage.mFleeDoorPos = osg::Vec3f();
+        storage.mFleeGuardActorId = -1;
+        storage.mUnreachableTimer = 0.f;
+
+        // Re-anchor the leash in the new cell, otherwise the actor compares an
+        // interior position against an exterior origin and immediately gives up.
+        storage.mCombatOrigin = actor.getRefData().getPosition().asVec3();
+        storage.mCombatOriginCell = cell;
+        storage.mCombatOriginSet = true;
+        storage.mLeashExceededTimer = 0.f;
+    }
+
+    void AiCombat::queueDoorTransition(const MWWorld::Ptr& actor, const MWWorld::Ptr& door, AiCombatStorage& storage)
+    {
+        if (door.isEmpty() || !door.getCellRef().getTeleport())
+            return;
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        const std::string destCellName = door.getCellRef().getDestCell();
+        const ESM::Position destPosition = door.getCellRef().getDoorDest();
+
+        // Feed the existing return-home breadcrumb trail, so that once combat is
+        // over AiInternalTravel can walk this actor back the same way instead of
+        // leaving it stranded in a cell it does not belong to.
+        try
+        {
+            MWWorld::CellStore* destCell = nullptr;
+            if (destCellName.empty())
+            {
+                int cellX = 0;
+                int cellY = 0;
+                world->positionToIndex(destPosition.pos[0], destPosition.pos[1], cellX, cellY);
+                destCell = world->getExterior(cellX, cellY);
+            }
+            else
+                destCell = world->getInterior(destCellName);
+
+            if (destCell != nullptr && actor.getCell() != nullptr)
+            {
+                actor.getClass().getCreatureStats(actor).getAiSequence().recordDoorTransition(
+                    actor.getCell()->getCell()->getCellId(),
+                    actor.getCell()->isExterior() ? std::string() : actor.getCell()->getCell()->mName,
+                    actor.getRefData().getPosition(),
+                    destCell->getCell()->getCellId(),
+                    destPosition);
+            }
+        }
+        catch (const std::exception& e)
+        {
+            // A door with a broken destination must not abort the AI update.
+            Log(Debug::Warning) << "AiCombat: could not record door transition: " << e.what();
+        }
+
+        // The move itself is deferred: relocating an actor in the middle of the
+        // mechanics update would invalidate the Ptr we are currently working with.
+        MWWorld::ActionTeleport::queueDelayedTeleport(actor, destCellName, destPosition, 0.f, mTargetActorId);
+        ++storage.mDoorTransitions;
+    }
+
+    bool AiCombat::updateCrossCellPursuit(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
+        AiCombatStorage& storage, CharacterController& characterController)
+    {
+        clearTacticalMovement(actor, storage);
+        storage.mFormationActive = false;
+        storage.mUseCustomDestination = false;
+        storage.mSearchingLastKnown = false;
+        storage.stopAttack();
+        storage.stopFleeing();
+        characterController.setAttackingOrSpell(false);
+
+        storage.mCrossCellTimer += duration;
+        if (storage.mCrossCellTimer >= sCrossCellGiveUpTime)
+            return true;
+
+        // Only an actor that is genuinely part of this fight follows the target
+        // through a door. A creature, or an NPC that merely became alarmed, stops
+        // at the threshold like it does in vanilla.
+        // Arena X010: CreatureStats::getActorId() is non-const in this 0.47-based
+        // branch, so keep mutable references here. No state is changed; this only
+        // avoids discarding qualifiers on MSVC while checking combat engagement.
+        CreatureStats& actorStats = actor.getClass().getCreatureStats(actor);
+        CreatureStats& targetStats = target.getClass().getCreatureStats(target);
+        const bool engaged = actorStats.getHitAttemptActorId() == targetStats.getActorId()
+            || targetStats.getHitAttemptActorId() == actorStats.getActorId();
+
+        if (!engaged || !actor.getClass().isBipedal(actor)
+            || storage.mDoorTransitions >= sMaxDoorTransitions)
+        {
+            stopCrossCellMovement(actor);
+            return false;
+        }
+
+        const ESM::Cell* targetCell = target.getCell() != nullptr ? target.getCell()->getCell() : nullptr;
+        const MWWorld::Ptr door = findTeleportDoor(actor, std::numeric_limits<float>::max(),
+            [targetCell](const MWWorld::Ptr& candidate) { return doorLeadsToCell(candidate, targetCell); });
+
+        if (door.isEmpty())
+        {
+            stopCrossCellMovement(actor);
+            return false;
+        }
+
+        actor.getClass().getCreatureStats(actor).setMovementFlag(CreatureStats::Flag_Run, true);
+
+        const osg::Vec3f doorPos = door.getRefData().getPosition().asVec3();
+        const float distToDoor = distanceIgnoreZ(actor.getRefData().getPosition().asVec3(), doorPos);
+        if (distToDoor > sDoorUseDistance && !pathTo(actor, doorPos, duration, sDoorUseDistance))
+            return false;
+
+        MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
+        movement.mPosition[0] = 0.f;
+        movement.mPosition[1] = 0.f;
+        mPathFinder.clearPath();
+
+        queueDoorTransition(actor, door, storage);
+        storage.mCrossCellTimer = 0.f;
+        return false;
+    }
+
+    bool AiCombat::tryDrinkHealingPotion(const MWWorld::Ptr& actor, AiCombatStorage& storage)
+    {
+        if (storage.mHealCooldown > 0.f)
+            return false;
+        if (!actor.getClass().hasInventoryStore(actor) || healthRatio(actor) >= sWoundedHealthRatio)
+            return false;
+
+        MWWorld::ContainerStore& store = actor.getClass().getContainerStore(actor);
+        for (MWWorld::ContainerStoreIterator it = store.begin(MWWorld::ContainerStore::Type_Potion);
+             it != store.end(); ++it)
+        {
+            const ESM::Potion* potion = it->get<ESM::Potion>()->mBase;
+            if (potion == nullptr)
+                continue;
+
+            bool restoresHealth = false;
+            for (const ESM::ENAMstruct& effect : potion->mEffects.mList)
+            {
+                if (effect.mEffectID == ESM::MagicEffect::RestoreHealth)
+                {
+                    restoresHealth = true;
+                    break;
+                }
+            }
+            if (!restoresHealth)
+                continue;
+
+            // ActionPotion applies the potion and removes exactly one item from the NPC inventory.
+            ActionPotion(*it).prepare(actor);
+            storage.mHealCooldown = sHealCooldown;
+            return true;
         }
 
         return false;
@@ -969,9 +1361,21 @@ namespace MWMechanics
         const float actorHealthMax = std::max(1.f, actorStats.getHealth().getModified());
         const float actorHpRatio = std::max(0.f, actorStats.getHealth().getCurrent() / actorHealthMax);
 
+        // ArenaMW: an NPC must not decide to run away before a single blow has
+        // landed. A level or equipment gap between the player and the NPC is not
+        // something the NPC can observe, and using it made low-level guards and
+        // bandits flee on sight from a high-level player. Threat estimation is
+        // therefore only allowed to trigger flight once the actor is wounded.
+        if (actorHpRatio >= sWoundedHealthRatio)
+        {
+            storage.mThreatFlee = false;
+            return false;
+        }
+
         auto power = [](const CreatureStats& stats) {
-            return std::max(1.f, static_cast<float>(stats.getLevel()) * 10.f
-                + stats.getHealth().getModified() * 0.34f
+            // Deliberately level-independent: only what is actually visible in
+            // the fight counts towards the estimate.
+            return std::max(1.f, stats.getHealth().getModified() * 0.34f
                 + stats.getMagicka().getModified() * 0.09f);
         };
 
@@ -998,8 +1402,7 @@ namespace MWMechanics
             Settings::Manager::getFloat("combat threat flee ratio", "Game"));
         threshold += (1.f - actorHpRatio) * 0.28f + flee * 0.18f - fight * 0.16f;
 
-        storage.mThreatFlee = ratio < threshold
-            && (actorHpRatio < 0.72f || ratio < threshold * 0.72f);
+        storage.mThreatFlee = ratio < threshold;
         return storage.mThreatFlee;
     }
 
@@ -1017,8 +1420,14 @@ namespace MWMechanics
 
             case AiCombatStorage::FleeState_Idle:
                 {
+                    // A wounded NPC that carries a healing potion should use it
+                    // before choosing a new escape movement.
+                    if (tryDrinkHealingPotion(actor, storage))
+                        break;
+
+                    const bool targetIsPlayer = target == MWMechanics::getPlayer();
                     if (!storage.mFleeAskedGuard && actor.getClass().isNpc()
-                        && target == MWMechanics::getPlayer()
+                        && targetIsPlayer
                         && Settings::Manager::getBool("combat flee seek guard", "Game")
                         && MWBase::Environment::get().getMechanicsManager()->isCombatInitiator(target, actor))
                     {
@@ -1050,6 +1459,35 @@ namespace MWMechanics
                             storage.mFleeGuardActorId
                                 = bestGuard.getClass().getCreatureStats(bestGuard).getActorId();
                             state = AiCombatStorage::FleeState_RunToGuard;
+                            mPathFinder.clearPath();
+                            break;
+                        }
+                    }
+
+                    // No help nearby: try to leave the cell altogether. Running
+                    // out into the street (or into the nearest building) reads far
+                    // better than sprinting into the corner of the same room, and
+                    // it actually breaks line of sight.
+                    if (!storage.mHasFleeDoor && actor.getClass().isBipedal(actor)
+                        && storage.mDoorTransitions < sMaxDoorTransitions)
+                    {
+                        const osg::Vec3f actorPos = actor.getRefData().getPosition().asVec3();
+                        const osg::Vec3f targetPos = target.getRefData().getPosition().asVec3();
+
+                        const MWWorld::Ptr exit = findTeleportDoor(actor, sFleeDoorSearchRadius,
+                            [&actorPos, &targetPos](const MWWorld::Ptr& candidate) {
+                                // Never escape through a door the enemy is standing
+                                // next to: that would be running straight at it.
+                                const osg::Vec3f doorPos = candidate.getRefData().getPosition().asVec3();
+                                return distanceIgnoreZ(doorPos, targetPos)
+                                    > distanceIgnoreZ(doorPos, actorPos);
+                            });
+
+                        if (!exit.isEmpty())
+                        {
+                            storage.mFleeDoorPos = exit.getRefData().getPosition().asVec3();
+                            storage.mHasFleeDoor = true;
+                            state = AiCombatStorage::FleeState_RunToDoor;
                             mPathFinder.clearPath();
                             break;
                         }
@@ -1160,6 +1598,48 @@ namespace MWMechanics
                         storage.mFleeBlindRunTimer = 0.f;
                         mPathFinder.clearPath();
                     }
+                }
+                break;
+            case AiCombatStorage::FleeState_RunToDoor:
+                {
+                    if (!storage.mHasFleeDoor)
+                    {
+                        state = AiCombatStorage::FleeState_Idle;
+                        break;
+                    }
+
+                    actor.getClass().getCreatureStats(actor).setMovementFlag(CreatureStats::Flag_Run, true);
+
+                    const osg::Vec3f actorPos = actor.getRefData().getPosition().asVec3();
+                    const float distToDoor = distanceIgnoreZ(actorPos, storage.mFleeDoorPos);
+                    if (distToDoor > sDoorUseDistance
+                        && !pathTo(actor, storage.mFleeDoorPos, duration, sDoorUseDistance))
+                        break;
+
+                    // Re-resolve the door from its position instead of holding on
+                    // to a Ptr: the cell may have been reloaded in the meantime.
+                    const osg::Vec3f doorPos = storage.mFleeDoorPos;
+                    const MWWorld::Ptr door = findTeleportDoor(actor, sFleeDoorSearchRadius,
+                        [&doorPos](const MWWorld::Ptr& candidate) {
+                            return distanceIgnoreZ(candidate.getRefData().getPosition().asVec3(), doorPos) < 8.f;
+                        });
+
+                    storage.mHasFleeDoor = false;
+                    mPathFinder.clearPath();
+
+                    MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
+                    movement.mPosition[0] = 0.f;
+                    movement.mPosition[1] = 0.f;
+
+                    if (door.isEmpty())
+                    {
+                        state = AiCombatStorage::FleeState_RunBlindly;
+                        storage.mFleeBlindRunTimer = 0.f;
+                        break;
+                    }
+
+                    queueDoorTransition(actor, door, storage);
+                    state = AiCombatStorage::FleeState_Idle;
                 }
                 break;
         };
@@ -1416,6 +1896,8 @@ namespace MWMechanics
         mFleeState = FleeState_None;
         mFleeDest = ESM::Pathgrid::Point(0, 0, 0);
         mFleeGuardActorId = -1;
+        mHasFleeDoor = false;
+        mFleeDoorPos = osg::Vec3f();
     }
 
     bool AiCombatStorage::isFleeing()

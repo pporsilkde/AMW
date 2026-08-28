@@ -14,6 +14,8 @@
 
 #include "../mwscript/interpretercontext.hpp"
 
+#include "topicrecovery.hpp"
+
 
 namespace MWDialogue
 {
@@ -49,61 +51,12 @@ namespace MWDialogue
     Entry::Entry (const ESM::JournalEntry& record)
         : mInfoId(record.mInfo), mText(record.mText), mActorName(record.mActorName)
     {
-        // Old and converted saves can contain a topic JOUR record whose cached
-        // TEXT is empty. If the INFO still exists, rebuild the text from the
-        // current dialogue database instead of exposing an empty topic page.
-        if (!mText.empty() || record.mTopic.empty())
-            return;
-
-        try
-        {
-            const ESM::Dialogue* dialogue = MWBase::Environment::get().getWorld()->getStore()
-                .get<ESM::Dialogue>().search(record.mTopic);
-            if (!dialogue)
-                return;
-
-            const ESM::DialInfo* recovered = nullptr;
-            if (!mInfoId.empty())
-            {
-                for (const ESM::DialInfo& info : dialogue->mInfo)
-                {
-                    if (Misc::StringUtils::ciEqual(info.mId, mInfoId))
-                    {
-                        recovered = &info;
-                        break;
-                    }
-                }
-            }
-
-            // Legacy/imported topic records may have neither cached TEXT nor a
-            // usable INFO id. In that case use only an unrestricted, generic
-            // response from the current DIAL as a conservative recovery path.
-            // We deliberately do not expose faction/actor/condition-specific
-            // alternatives here, which would reveal dialogue the player may
-            // never have heard.
-            if (!recovered)
-            {
-                for (const ESM::DialInfo& info : dialogue->mInfo)
-                {
-                    if (info.mResponse.empty())
-                        continue;
-                    if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
-                        || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
-                        || !info.mSelects.empty())
-                        continue;
-                    recovered = &info; // generic catch-all entries are usually last
-                }
-            }
-
-            if (recovered)
-            {
-                MWScript::InterpreterContext interpreterContext(nullptr, MWWorld::Ptr());
-                mText = Interpreter::fixDefinesDialog(recovered->mResponse, interpreterContext);
-            }
-        }
-        catch (...)
-        {
-        }
+        // Saved and network-replicated topic records can carry an empty cached
+        // TEXT field, and multiplayer clients often receive no INFO id either.
+        // Rebuild the response from the dialogue database that is loaded locally
+        // instead of exposing an empty topic page.
+        if (mText.empty() && !record.mTopic.empty())
+            mText = TopicRecovery::responseFor(record.mTopic, mInfoId);
     }
 
     std::string Entry::getText() const

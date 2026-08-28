@@ -56,6 +56,7 @@
 #include "aicombataction.hpp"
 #include "animationenhancements.hpp"
 #include "equipmentrequirements.hpp"
+#include "aiactivate.hpp"
 #include "aifollow.hpp"
 #include "aipursue.hpp"
 #include "aiwander.hpp"
@@ -87,6 +88,54 @@ bool keepsExteriorPlayerCombatActive(const MWWorld::Ptr& actor, const MWWorld::P
     const float range = std::max(normalProcessingRange, configuredRange);
     return distanceSquared <= range * range;
 }
+
+// How often an aggrieved NPC re-checks whether the goods stolen from it have
+// been returned or dropped, and how far it is willing to walk to reclaim them.
+constexpr float sStolenGoodsCheckInterval = 2.f;
+constexpr float sStolenGoodsSearchRadius = 2200.f;
+
+/// Finds the nearest loose item in a cell that belongs to a given NPC.
+///
+/// NOTE: this relies on MWWorld::CellStore::forEach(), which is the only way to
+/// enumerate arbitrary references in a cell. If that API is ever renamed, this
+/// visitor is the single place that needs adjusting.
+struct StolenGoodsVisitor
+{
+    StolenGoodsVisitor(const MWWorld::Ptr& owner, float maxDistance)
+        : mOwner(owner)
+        , mOwnerPos(owner.getRefData().getPosition().asVec3())
+        , mBestDistance(maxDistance)
+    {
+    }
+
+    bool operator()(MWWorld::Ptr ptr)
+    {
+        if (ptr.isEmpty() || ptr.getRefData().getCount() <= 0 || !ptr.getRefData().isEnabled())
+            return true;
+        if (ptr.getClass().isActor())
+            return true;
+
+        const float distance = (ptr.getRefData().getPosition().asVec3() - mOwnerPos).length();
+        if (distance > mBestDistance)
+            return true;
+
+        // Only the theft bookkeeping decides ownership here. Testing the CellRef
+        // owner instead would also match world fixtures the NPC happens to own,
+        // such as its own front door.
+        if (!MWBase::Environment::get().getMechanicsManager()->isItemStolenFrom(
+                ptr.getCellRef().getRefId(), mOwner))
+            return true;
+
+        mBestDistance = distance;
+        mBest = ptr;
+        return true;
+    }
+
+    MWWorld::Ptr mOwner;
+    osg::Vec3f mOwnerPos;
+    float mBestDistance;
+    MWWorld::Ptr mBest;
+};
 
 struct DynamicIdleAnimation
 {
@@ -2154,6 +2203,59 @@ namespace MWMechanics
         }
     }
 
+    bool Actors::updateStolenGoodsRecovery(const MWWorld::Ptr& ptr)
+    {
+        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+        NpcStats& npcStats = ptr.getClass().getNpcStats(ptr);
+
+        // Only settle an active witnessed crime. Once it has been forgiven the
+        // bookkeeping is cleared below, so a later unrelated fight cannot be
+        // cancelled by an old theft record.
+        if (npcStats.getCrimeId() == -1 || !mechanics->hasStolenItemsFrom(ptr))
+            return false;
+
+        const MWWorld::Ptr player = getPlayer();
+        MWWorld::ContainerStore& playerStore = player.getClass().getContainerStore(player);
+        for (MWWorld::ContainerStoreIterator it = playerStore.begin(); it != playerStore.end(); ++it)
+        {
+            // Still on the thief: no restitution has happened yet.
+            if (mechanics->isItemStolenFrom(it->getCellRef().getRefId(), ptr))
+                return false;
+        }
+
+        // The goods left the player's pockets. If they are lying around in this
+        // cell, walk over and take them back; either way, stop being hostile
+        // about a theft that has effectively been undone.
+        MWWorld::Ptr recovered;
+        if (ptr.getCell() != nullptr)
+        {
+            StolenGoodsVisitor visitor(ptr, sStolenGoodsSearchRadius);
+            ptr.getCell()->forEach(visitor);
+            recovered = visitor.mBest;
+        }
+
+        CreatureStats& creatureStats = ptr.getClass().getCreatureStats(ptr);
+
+        if (ptr.getClass().isClass(ptr, "Guard"))
+            creatureStats.getAiSequence().stopPursuit();
+        creatureStats.getAiSequence().stopCombat();
+
+        creatureStats.setAttacked(false);
+        creatureStats.setAlarmed(false);
+        creatureStats.setAiSetting(CreatureStats::AI_Fight, ptr.getClass().getBaseFightRating(ptr));
+        mechanics->clearStolenItemsFrom(ptr);
+        npcStats.setCrimeId(-1);
+
+        if (!recovered.isEmpty())
+        {
+            // Use the exact loose reference, not merely its refId, so the NPC
+            // walks to the item that was actually dropped.
+            creatureStats.getAiSequence().stack(AiActivate(recovered), ptr);
+        }
+
+        return true;
+    }
+
     void Actors::updateCrimePursuit(const MWWorld::Ptr& ptr, float duration)
     {
         MWWorld::Ptr player = getPlayer();
@@ -2164,6 +2266,12 @@ namespace MWMechanics
             NpcStats& npcStats = ptr.getClass().getNpcStats(ptr);
 
             if (player.getClass().getNpcStats(player).isWerewolf())
+                return;
+
+            // Returning or discarding the stolen goods settles the matter without
+            // a fine. Throttled, because it walks the player's inventory and the
+            // current cell.
+            if (mStolenGoodsCheckDue && updateStolenGoodsRecovery(ptr))
                 return;
 
             if (ptr.getClass().isClass(ptr, "Guard") && creatureStats.getAiSequence().getTypeId() != AiPackageTypeId::Pursue && !creatureStats.getAiSequence().isInCombat()
@@ -2718,6 +2826,11 @@ namespace MWMechanics
             std::map<const MWWorld::Ptr, const std::set<MWWorld::Ptr> > cachedAllies; // will be filled as engageCombat iterates
 
             bool aiActive = MWBase::Environment::get().getMechanicsManager()->isAIActive();
+
+            mStolenGoodsTimer -= duration;
+            mStolenGoodsCheckDue = mStolenGoodsTimer <= 0.f;
+            if (mStolenGoodsCheckDue)
+                mStolenGoodsTimer = sStolenGoodsCheckInterval;
             if (timerEquipmentRequirements == 0)
                 enforceEquipmentRequirements(player, true);
 

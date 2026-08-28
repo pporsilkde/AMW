@@ -259,6 +259,11 @@ namespace MWBase
             /// Has the player stolen this item from the given owner?
             virtual bool isItemStolenFrom(const std::string& itemid, const MWWorld::Ptr& ptr) = 0;
 
+            /// Does the theft bookkeeping still list anything as stolen from this owner?
+            /// Used to decide whether an NPC has any grudge to drop in the first place.
+            virtual bool hasStolenItemsFrom(const MWWorld::Ptr& owner) const = 0;
+            virtual void clearStolenItemsFrom(const MWWorld::Ptr& owner) = 0;
+
             virtual bool isBoundItem(const MWWorld::Ptr& item) = 0;
             virtual bool isAllowedToUse (const MWWorld::Ptr& ptr, const MWWorld::Ptr& target, MWWorld::Ptr& victim) = 0;
 

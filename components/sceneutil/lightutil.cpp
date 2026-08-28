@@ -94,36 +94,38 @@ namespace SceneUtil
     {
         osg::ref_ptr<SceneUtil::LightSource> lightSource (new SceneUtil::LightSource);
         osg::ref_ptr<osg::Light> light (new osg::Light);
-        lightSource->setNodeMask(lightMask);
+        // Arena X004: native, fixed Light Improvements policy.
+        //
+        // Negative lights are a legacy Morrowind trick that subtracts colour.
+        // That path is inconsistent with the modern shader/PBR pipeline (which
+        // clamps negative radiance) and can produce black halos or abrupt seams.
+        // Disable them at the scene-source level instead of mutating ESM data.
+        const bool negative = (esmLight->mData.mFlags & ESM::Light::Negative) != 0;
+        lightSource->setNodeMask(negative ? 0u : lightMask);
 
-        float radius = esmLight->mData.mRadius;
+        // Keep the authored radius unchanged. Arena's shader light coverage is
+        // already expanded independently, so multiplying the content radius here
+        // would cause light leaking and increase the number of overlapping lights.
+        const float radius = negative ? 0.f : esmLight->mData.mRadius;
         lightSource->setRadius(radius);
 
         configureLight(light, radius, isExterior);
 
-        osg::Vec4f diffuse = SceneUtil::colourFromRGB(esmLight->mData.mColor);
-        if (esmLight->mData.mFlags & ESM::Light::Negative)
-        {
-            diffuse *= -1;
-            diffuse.a() = 1;
-        }
+        const osg::Vec4f diffuse = negative
+            ? osg::Vec4f(0.f, 0.f, 0.f, 1.f)
+            : SceneUtil::colourFromRGB(esmLight->mData.mColor);
         light->setDiffuse(diffuse);
-        light->setAmbient(ambient);
+        light->setAmbient(negative ? osg::Vec4f(0.f, 0.f, 0.f, 1.f) : ambient);
         light->setSpecular(osg::Vec4f(0,0,0,0));
 
         lightSource->setLight(light);
 
+        // The original Light Improvements defaults disable all four brightness
+        // animations. Keep the controller in LT_Normal so both buffered osg::Light
+        // instances continue to receive the current colour every frame, but never
+        // opt into Flicker/FlickerSlow/Pulse/PulseSlow from content flags.
         osg::ref_ptr<SceneUtil::LightController> ctrl (new SceneUtil::LightController);
         ctrl->setDiffuse(light->getDiffuse());
-        if (esmLight->mData.mFlags & ESM::Light::Flicker)
-            ctrl->setType(SceneUtil::LightController::LT_Flicker);
-        if (esmLight->mData.mFlags & ESM::Light::FlickerSlow)
-            ctrl->setType(SceneUtil::LightController::LT_FlickerSlow);
-        if (esmLight->mData.mFlags & ESM::Light::Pulse)
-            ctrl->setType(SceneUtil::LightController::LT_Pulse);
-        if (esmLight->mData.mFlags & ESM::Light::PulseSlow)
-            ctrl->setType(SceneUtil::LightController::LT_PulseSlow);
-
         lightSource->addUpdateCallback(ctrl);
 
         return lightSource;

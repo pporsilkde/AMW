@@ -230,6 +230,14 @@ namespace MWInput
         if (xAxis == 0 && yAxis == 0)
             return;
 
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (world->isPhysicsGrabActive())
+        {
+            world->rotatePhysicsGrab(-xAxis, -yAxis, dt);
+            MWBase::Environment::get().getInputManager()->resetIdleTime();
+            return;
+        }
+
         float rot[3];
         rot[0] = -yAxis * dt * 1000.0f * mCameraSensitivity * (mInvertY ? -1 : 1) * mCameraYMultiplier / 256.f;
         rot[1] = 0.0f;

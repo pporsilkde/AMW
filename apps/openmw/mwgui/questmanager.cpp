@@ -33,6 +33,7 @@
 #include "../mwbase/world.hpp"
 #include "../mwdialogue/quest.hpp"
 #include "../mwdialogue/topic.hpp"
+#include "../mwdialogue/topicrecovery.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -137,42 +138,7 @@ namespace
 
     std::string fallbackTopicEntryText(const std::string& topicId, const std::string& infoId)
     {
-        if (topicId.empty())
-            return std::string();
-
-        try
-        {
-            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
-            const ESM::Dialogue* dialogue = store.get<ESM::Dialogue>().search(topicId);
-            if (!dialogue)
-                return std::string();
-
-            if (!infoId.empty())
-            {
-                for (const ESM::DialInfo& info : dialogue->mInfo)
-                    if (Misc::StringUtils::ciEqual(info.mId, infoId))
-                        return info.mResponse;
-            }
-
-            const ESM::DialInfo* generic = nullptr;
-            for (const ESM::DialInfo& info : dialogue->mInfo)
-            {
-                if (info.mResponse.empty())
-                    continue;
-                if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
-                    || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
-                    || !info.mSelects.empty())
-                    continue;
-                generic = &info;
-            }
-            if (generic)
-                return generic->mResponse;
-        }
-        catch (...)
-        {
-        }
-
-        return std::string();
+        return MWDialogue::TopicRecovery::responseFor(topicId, infoId);
     }
 }
 
@@ -1025,6 +991,20 @@ namespace MWGui
                 data.mOrder = topicOrder;
                 topic.mEntries.push_back(data);
             }
+
+            if (topic.mEntries.empty())
+            {
+                // Multiplayer clients are told which topics the player knows, but
+                // never receive the responses. Resolve the text from the locally
+                // loaded dialogue records so the topic is readable and searchable
+                // instead of reporting that it has no entries.
+                EntryData data;
+                data.mOrder = 0;
+                data.mText = MWDialogue::TopicRecovery::responseFor(topic.mId, std::string(), &data.mInfoId);
+                if (!data.mText.empty())
+                    topic.mEntries.push_back(data);
+            }
+
             mTopics.push_back(topic);
         }
         std::sort(mTopics.begin(), mTopics.end(), [](const TopicData& a, const TopicData& b)

@@ -38,7 +38,11 @@ namespace SceneUtil
 
         if (mType == LT_Normal)
         {
-            static_cast<SceneUtil::LightSource*>(node)->getLight(nv->getTraversalNumber())->setDiffuse(mDiffuseColor);
+            // Keep stable lights visually attached to actor fade just like the
+            // animated-light path below. This avoids a carried torch remaining
+            // fully bright for a frame sequence while its owner fades out.
+            auto* lightSource = static_cast<SceneUtil::LightSource*>(node);
+            lightSource->getLight(nv->getTraversalNumber())->setDiffuse(mDiffuseColor * lightSource->getActorFade());
             traverse(node, nv);
             return;
         }

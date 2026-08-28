@@ -65,6 +65,16 @@ namespace MWMechanics
 
             void updateCrimePursuit (const MWWorld::Ptr& ptr, float duration);
 
+            /// Let an NPC drop a theft grudge once the goods are no longer on the
+            /// player, and walk over to reclaim them if they are lying nearby.
+            /// @return true if the actor was calmed down during this call.
+            bool updateStolenGoodsRecovery (const MWWorld::Ptr& ptr);
+
+            // Throttle for the (comparatively expensive) stolen goods scan. Set
+            // once per interval in update() and read by every actor in that frame.
+            float mStolenGoodsTimer = 0.f;
+            bool mStolenGoodsCheckDue = false;
+
             void killDeadActors ();
             void startRagdoll(const MWWorld::Ptr& ptr);
             void stopRagdoll(const MWWorld::Ptr& ptr);

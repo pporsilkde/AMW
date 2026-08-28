@@ -1038,6 +1038,61 @@ namespace MWMechanics
         return false;
     }
 
+    bool MechanicsManager::hasStolenItemsFrom(const MWWorld::Ptr& owner) const
+    {
+        if (owner.isEmpty())
+            return false;
+
+        const std::string ownerId = Misc::StringUtils::lowerCase(owner.getCellRef().getRefId());
+        std::string factionId = owner.getClass().getPrimaryFaction(owner);
+        Misc::StringUtils::lowerCaseInPlace(factionId);
+
+        for (const auto& item : mStolenItems)
+        {
+            for (const auto& entry : item.second)
+            {
+                if (entry.second <= 0)
+                    continue;
+                if (!entry.first.second && entry.first.first == ownerId)
+                    return true;
+                if (entry.first.second && !factionId.empty() && entry.first.first == factionId)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    void MechanicsManager::clearStolenItemsFrom(const MWWorld::Ptr& owner)
+    {
+        if (owner.isEmpty())
+            return;
+
+        const std::string ownerId = Misc::StringUtils::lowerCase(owner.getCellRef().getRefId());
+        std::string factionId = owner.getClass().getPrimaryFaction(owner);
+        Misc::StringUtils::lowerCaseInPlace(factionId);
+
+        for (auto itemIt = mStolenItems.begin(); itemIt != mStolenItems.end(); )
+        {
+            OwnerMap& owners = itemIt->second;
+            for (auto ownerIt = owners.begin(); ownerIt != owners.end(); )
+            {
+                const bool matchesNpc = !ownerIt->first.second && ownerIt->first.first == ownerId;
+                const bool matchesFaction = ownerIt->first.second && !factionId.empty()
+                    && ownerIt->first.first == factionId;
+                if (matchesNpc || matchesFaction)
+                    ownerIt = owners.erase(ownerIt);
+                else
+                    ++ownerIt;
+            }
+
+            if (owners.empty())
+                itemIt = mStolenItems.erase(itemIt);
+            else
+                ++itemIt;
+        }
+    }
+
     void MechanicsManager::confiscateStolenItemToOwner(const MWWorld::Ptr &player, const MWWorld::Ptr &item, const MWWorld::Ptr& victim, int count)
     {
         if (player != getPlayer())
@@ -1679,6 +1734,15 @@ namespace MWMechanics
                             aiSeq.stopPursuit();
                             aiSeq.stack(MWMechanics::AiCombat(target), ptr);
                             iter->first.getClass().getCreatureStats(iter->first).setHitAttemptActorId(target.getClass().getCreatureStats(target).getActorId()); // Stops guard from ending combat if player is unreachable
+
+                            // Carry the crime id over to the guards that get dragged
+                            // into this fight. Without it they have nothing to match
+                            // against the paid bounty later, and keep attacking the
+                            // player forever after the fine has been settled.
+                            MWMechanics::NpcStats& joinerStats = iter->first.getClass().getNpcStats(iter->first);
+                            const int crimeId = ptr.getClass().getNpcStats(ptr).getCrimeId();
+                            if (joinerStats.getCrimeId() == -1 && crimeId != -1)
+                                joinerStats.setCrimeId(crimeId);
                         }
                     }
                 }

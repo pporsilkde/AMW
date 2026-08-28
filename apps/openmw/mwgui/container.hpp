@@ -34,6 +34,10 @@ namespace MWGui
     public:
         ContainerWindow(DragAndDrop* dragAndDrop);
 
+        // Arena X010: when a container mode opens, controller/keyboard selection
+        // starts on the container side rather than the player's inventory.
+        MyGUI::Widget* getDefaultKeyFocus() override;
+
         void setPtr(const MWWorld::Ptr& container) override;
         void onClose() override;
         void clear() override { resetReference(); }

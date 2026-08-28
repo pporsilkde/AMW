@@ -128,6 +128,7 @@ namespace MWWorld
                 osg::Vec3f mLastHoldTarget;
                 osg::Vec3f mLastSafeOrigin;
                 osg::Quat mLastSafeRotation;
+                osg::Vec3f mGrabStartOrigin;
                 osg::Quat mGrabStartRotation;
                 float mRadius = 4.f;
                 float mMass = 1.f;
@@ -140,11 +141,19 @@ namespace MWWorld
                 bool mLiquidContainer = false;
                 bool mGrabbed = false;
                 bool mPhysicsOnRelease = true;
+                bool mPlacementOnly = false;
+                // X007: suppress the real Bullet body while placement is active.
+                // Explicit OBB sweeps still block world geometry, but actors cannot
+                // stand on or be launched by the held object.
+                bool mHadWorldCollision = false;
                 int mMoveMode = 0;
                 bool mHadSurfaceContact = false;
                 bool mHasLastSafeTransform = false;
             };
             std::vector<PhysicsObjectState> mPhysicsObjects;
+
+            void suppressPhysicsGrabCollision(PhysicsObjectState& state);
+            void restorePhysicsGrabCollision(PhysicsObjectState& state);
 
             bool mTeleportEnabled;
             bool mLevitationEnabled;
@@ -409,13 +418,15 @@ namespace MWWorld
             bool isPhysicsGrabActive() const override;
             bool placePhysicsGrab() override;
             bool finishPhysicsGrab() override;
-            void rotatePhysicsGrab(float rollInput, float pitchInput, float duration) override;
+            void rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration) override;
             void translatePhysicsGrab(float firstAxisInput, float secondAxisInput, float duration) override;
             int cyclePhysicsGrabMoveMode() override;
             int getPhysicsGrabMoveMode() const override;
             bool togglePhysicsGrabPhysics() override;
             bool isPhysicsGrabPhysicsEnabled() const override;
             void resetPhysicsGrabTransform() override;
+            void stepPhysicsGrabRotation(float horizontalSteps, float verticalSteps) override;
+            bool cancelPhysicsGrab() override;
 
             /// Returns a pointer to the object the provided object would hit (if within the
             /// specified distance), and the point where the hit occurs. This will attempt to

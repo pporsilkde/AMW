@@ -89,6 +89,11 @@ namespace MWGui
     }
 
 
+    MyGUI::Widget* ContainerWindow::getDefaultKeyFocus()
+    {
+        return mItemView;
+    }
+
     void ContainerWindow::onItemSelected(int index)
     {
         if (!mSortModel || !mModel || index < 0 || index >= static_cast<int>(mSortModel->getItemCount()))
@@ -221,6 +226,10 @@ namespace MWGui
             mViewModeIcon->setImageTexture("icons/inventoryextender/Base/view_grid.dds");
         updateBottomBarLayout();
         mItemView->resetScrollBars();
+        // Focus the first actual container row immediately. This is separate from
+        // MyGUI key focus: ItemView keeps its own controller-selection index.
+        // forceItemFocused() is a no-op for an empty container.
+        mItemView->forceItemFocused(0);
         mDragAndDrop->setTransferTargetView(mItemView);
 
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mItemView);
