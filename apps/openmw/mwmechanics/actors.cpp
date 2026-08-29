@@ -234,12 +234,12 @@ void faceDialogueActorToPlayer(const MWWorld::Ptr& actor, const MWWorld::Ptr& pl
     if (delta.x() * delta.x() + delta.y() * delta.y() <= 1.f)
         return;
 
-    // Dialogue in ArenaMW does not pause AI globally. Keep writing the desired
-    // yaw into the movement controller every mechanics frame so a Wander/Travel
-    // package cannot win the facing direction on alternate frames.
+    // X027: this is the only dialogue actor-root turn controller. DialogueWindow
+    // no longer writes yaw, so third-person camera/UI updates cannot fight it.
+    // A 2-degree deadzone stops tiny corrections once the NPC is visually aligned.
     MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
     movement.mRotation[2] = 0.f;
-    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(1.f));
+    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(2.f));
 }
 
 bool isContextualGuard(const MWWorld::Ptr& ptr)

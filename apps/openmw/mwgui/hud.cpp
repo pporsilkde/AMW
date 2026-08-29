@@ -157,8 +157,11 @@ namespace
         // ------------------------------------------------------------------
         constexpr float sUnitsPerStep = 70.f;
 
-        constexpr float sDockEnterSteps = 15.f;  // closer than this -> docked stack
-        constexpr float sDockExitSteps = 18.f;   // hysteresis, must exceed the above
+        // X027: dock only at close conversation/combat range. This is exactly
+        // one third shorter than X025/X026a (15/18 -> 10/12 steps) while
+        // preserving the same hysteresis ratio so the bar does not flap at the edge.
+        constexpr float sDockEnterSteps = 10.f;  // closer than this -> docked stack
+        constexpr float sDockExitSteps = 12.f;   // hysteresis, must exceed the above
         constexpr float sVanishSteps = 40.f;     // beyond this the bar is gone
         constexpr float sFullSizeSteps = 3.5f;   // no shrinking closer than this
 

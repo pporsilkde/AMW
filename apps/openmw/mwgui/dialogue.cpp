@@ -76,15 +76,6 @@ namespace
     // the cinematic framing.
     constexpr float sDialogueCinematicMinDistance = 128.f;
 
-    float normalizeAngle(float angle)
-    {
-        while (angle > osg::PI)
-            angle -= static_cast<float>(osg::PI) * 2.f;
-        while (angle < -osg::PI)
-            angle += static_cast<float>(osg::PI) * 2.f;
-        return angle;
-    }
-
     float randomRange(float minimum, float maximum)
     {
         return minimum + (maximum - minimum) * Misc::Rng::rollProbability();
@@ -985,38 +976,11 @@ namespace MWGui
             return;
         }
 
-        const MWWorld::LiveCellRef<ESM::NPC>* dialogueNpc = mPtr.get<ESM::NPC>();
-        const bool preserveAuthoredSkeleton = dialogueNpc && !dialogueNpc->mBase->mModel.empty();
+        // X027: actor-root turning is owned exclusively by MWMechanics::Actors.
+        // DialogueWindow only drives dialogue gestures/camera. Having both this
+        // GUI update and Actors write yaw in the same frame caused visible micro-
+        // corrections, especially when dialogue was opened from third person.
 
-        if (!preserveAuthoredSkeleton
-            && Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
-        {
-            const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
-            if (!player.isEmpty())
-            {
-                const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
-                    - mPtr.getRefData().getPosition().asVec3();
-                if (delta.x() * delta.x() + delta.y() * delta.y() > 1.f)
-                {
-                    const float targetYaw = std::atan2(delta.x(), delta.y());
-                    const ESM::Position& position = mPtr.getRefData().getPosition();
-                    const float difference = normalizeAngle(targetYaw - position.rot[2]);
-                    if (std::abs(difference) <= osg::DegreesToRadians(1.5f))
-                    {
-                        MWBase::Environment::get().getWorld()->rotateObject(
-                            mPtr, position.rot[0], position.rot[1], targetYaw);
-                    }
-                    else
-                    {
-                        const float easedStep = difference * (1.f - std::exp(-7.f * dt));
-                        const float maxStep = osg::DegreesToRadians(150.f) * dt;
-                        const float step = std::max(-maxStep, std::min(maxStep, easedStep));
-                        MWBase::Environment::get().getWorld()->rotateObject(mPtr,
-                            position.rot[0], position.rot[1], normalizeAngle(position.rot[2] + step));
-                    }
-                }
-            }
-        }
 
         if (!Settings::Manager::getBool("dynamic dialogue actor animations", "GUI"))
         {
