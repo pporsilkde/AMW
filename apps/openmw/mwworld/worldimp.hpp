@@ -412,6 +412,9 @@ namespace MWWorld
 
             float getDistanceToFacedObject() override;
 
+            bool getObjectScreenBounds(const MWWorld::Ptr& object,
+                float& minX, float& minY, float& maxX, float& maxY) override;
+
             bool canPhysicsGrab(const MWWorld::ConstPtr& object) const override;
             bool beginPhysicsGrab(const MWWorld::Ptr& object) override;
             void releasePhysicsGrab() override;

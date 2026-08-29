@@ -1,0 +1,1 @@
+ArenaMW X020: номер синхронизирован с ArenaMP X020. Функциональных MP QuestIndex изменений в ArenaMW нет. Health-bars X014 не включены.

@@ -539,7 +539,7 @@ namespace MWRender
 
     void RaceSelectionPreview::setUserScale(float scale)
     {
-        mUserScale = std::max(0.85f, std::min(1.15f, scale));
+        mUserScale = std::max(0.85f, std::min(1.08f, scale));
         applyView();
     }
 
@@ -648,7 +648,7 @@ namespace MWRender
         mAnimation->runAnimation(0.f);
 
         // ArenaMW CharGen: render the complete actor instead of the historical
-        // head-only portrait.  Race proportions and the user 0.85..1.15 scale
+        // head-only portrait.  Race proportions and the user 0.85..1.08 scale
         // are visible immediately, while the actor keeps a live idle animation.
         if (mUpdateCameraCallback)
         {

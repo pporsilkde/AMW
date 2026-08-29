@@ -123,8 +123,8 @@ namespace MWGui
         getWidget(mFaceValue, "FaceValue");
         getWidget(mHairValue, "HairValue");
 
-        // 61 integer steps -> 0.85 .. 1.15 in 0.005 increments.
-        mScale->setScrollRange(61);
+        // 47 integer steps -> 0.85 .. 1.08 in 0.005 increments.
+        mScale->setScrollRange(47);
         mScale->setScrollPosition(30);
         mScale->setScrollViewPage(1);
         mScale->setScrollPage(1);
@@ -221,7 +221,7 @@ namespace MWGui
 
     void RaceDialog::setPlayerScale(float value)
     {
-        mPlayerScale = std::max(0.85f, std::min(1.15f, value));
+        mPlayerScale = std::max(0.85f, std::min(1.08f, value));
         if (mScale)
         {
             const size_t position = static_cast<size_t>(std::lround((mPlayerScale - 0.85f) / 0.005f));

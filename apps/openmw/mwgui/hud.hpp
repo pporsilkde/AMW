@@ -105,6 +105,62 @@ namespace MWGui
         };
 
         std::vector<HorizontalCompassMarkerState> mHorizontalCompassMarkers;
+
+        struct CombatHealthBarState
+        {
+            MyGUI::ProgressBar* mWidget = nullptr;
+            // X025: name caption. It belongs to the docked presentation only, so it
+            // lives next to the bar rather than inside it and is faded in separately.
+            MyGUI::TextBox* mName = nullptr;
+            MWWorld::Ptr mActor;
+            bool mAlly = false;
+            // Skin the widget is actually wearing right now. Kept apart from mAlly:
+            // clearing a slot resets mAlly but must not claim the widget went back to
+            // the red skin, otherwise the next enemy inherits a green bar.
+            bool mSkinAlly = false;
+
+            // X024: presentation state. The raw per-frame anchor produced by
+            // getObjectScreenBounds follows the animated bounding box, so a running
+            // NPC made the bar jump up and down every stride. Everything below is
+            // smoothed in screen space and faded in time, so a bar never appears,
+            // moves or disappears instantly.
+            bool mHasScreenState = false;
+            float mCentreX = 0.f;       // smoothed bar centre, pixels
+            float mCentreY = 0.f;
+            float mWidth = 0.f;         // smoothed bar size, pixels
+            float mHeight = 0.f;
+            float mAlpha = 0.f;
+            float mTargetAlpha = 0.f;
+            float mDisplayHealth = -1.f;
+            float mLingerTimer = 0.f;   // grace before a lost bar starts fading
+
+            // X025: docking. Inside the melee radius the bar leaves the actor's head
+            // and joins a stack above the stamina bar; outside it, it goes back over
+            // the head. mDockBlend is the animated 0..1 position between the two.
+            bool mDocked = false;
+            float mDockBlend = 0.f;
+            float mDockSwitchTimer = 0.f;   // dwell before a dock/undock is honoured
+            unsigned int mDockSequence = 0; // join order, decides the row
+            int mDockRow = -1;
+            std::string mNameCaption;
+
+            // X025: per-frame scratch filled by pass 1 of updateCombatHealthBars and
+            // consumed by pass 3. Meaningless outside that function.
+            bool mFrameResolved = false;
+            bool mFrameDrop = false;
+            float mFrameDistance = 0.f;
+            float mFrameAlpha = 1.f;
+            float mHeadCentreX = 0.f;
+            float mHeadCentreY = 0.f;
+            float mHeadWidth = 0.f;
+            float mHeadHeight = 0.f;
+        };
+
+        std::vector<CombatHealthBarState> mCombatHealthBars;
+        float mCombatHealthBarScanTimer = 0.f;
+        // Monotonic counter handing out mDockSequence, so stack rows keep their order.
+        unsigned int mCombatDockSequenceCounter = 0;
+
         MyGUI::Widget *mDrowningFrame, *mDrowningFlash;
 
         // bottom left elements
@@ -194,6 +250,12 @@ namespace MWGui
 
         void updateEnemyHealthBar();
         void updateFocusedTargetPanel(float dt);
+        void updateCombatHealthBars(float dt);
+        void hideCombatHealthBars();
+        // X024: drive one slot's opacity/geometry towards its target and push the
+        // result into the widget. Called for both live and fading-out slots.
+        // X025: also places and fades the name caption that rides on the bar.
+        void applyCombatHealthBar(CombatHealthBarState& state, float dt);
 
         void updatePositions();
         void updateGameTimeAndCellName(float dt);

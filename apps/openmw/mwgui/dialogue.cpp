@@ -90,6 +90,17 @@ namespace
         return minimum + (maximum - minimum) * Misc::Rng::rollProbability();
     }
 
+    // X023: dialogue pose changes are deliberately slow and independent of
+    // topic/answer clicks. A pose may be replaced only when this timer expires
+    // (apart from hard safety changes such as equipment/combat state).
+    constexpr float sDialoguePoseMinInterval = 30.f;
+    constexpr float sDialoguePoseMaxInterval = 60.f;
+
+    float randomDialoguePoseInterval()
+    {
+        return randomRange(sDialoguePoseMinInterval, sDialoguePoseMaxInterval);
+    }
+
     std::string gameSettingString(const std::string& id, const std::string& fallback)
     {
         return MWBase::Environment::get().getWindowManager()->getGameSettingString(id, fallback);
@@ -634,7 +645,7 @@ namespace MWGui
             // Preserve authored Animated-Morrowind-style controllers. Their
             // actor-root facing is also left untouched during dialogue; only the
             // cinematic camera is allowed to reframe them.
-            mDynamicDialogueActorAnimationTimer = 2.f;
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -671,7 +682,7 @@ namespace MWGui
             && Misc::Rng::rollDice(100) < 35)
         {
             mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 2.5f);
-            mDynamicDialogueActorAnimationTimer = randomRange(2.5f, 4.5f);
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -838,7 +849,7 @@ namespace MWGui
 
         if (available.empty())
         {
-            mDynamicDialogueActorAnimationTimer = speaking ? 2.f : 6.f;
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -898,9 +909,7 @@ namespace MWGui
             {
                 if (mDynamicDialogueActorOpening)
                     mDynamicDialogueActorOpening = false;
-                mDynamicDialogueActorAnimationTimer
-                    = selectedClosedPose ? randomRange(3.5f, 6.f)
-                    : (speaking ? randomRange(2.5f, 4.5f) : randomRange(4.f, 7.f));
+                mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
                 if (speaking)
                     mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 3.f);
                 return;
@@ -937,7 +946,7 @@ namespace MWGui
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = speaking ? 2.5f : 6.f;
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -951,9 +960,7 @@ namespace MWGui
         mDynamicDialogueActorPendingSpeaking = false;
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
-        mDynamicDialogueActorAnimationTimer
-            = selectedClosedPose ? randomRange(3.5f, 6.f)
-            : (speaking ? randomRange(2.5f, 4.5f) : randomRange(4.f, 7.f));
+        mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
         if (speaking)
             mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 3.f);
     }
@@ -1076,40 +1083,23 @@ namespace MWGui
         if (!mDynamicDialogueActorAnimation.empty()
             && !animation->isPlaying(mDynamicDialogueActorAnimation))
         {
+            // Keep the original 30-60 s schedule even if a finite animation clip
+            // reaches its end. With persist=true its final pose remains blended;
+            // restarting the timer here would postpone the next pose unnecessarily.
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = randomRange(1.5f, 3.f);
         }
 
-        if (speaking)
-        {
-            if (!mDynamicDialogueActorWasSpeaking)
-            {
-                mDynamicDialogueActorWasSpeaking = true;
-                playDynamicDialogueAnimation(true);
-            }
-            return;
-        }
-
-        if (mDynamicDialogueActorWasSpeaking)
-        {
-            mDynamicDialogueActorWasSpeaking = false;
-            if (mDynamicDialogueActorAnimationSpeech && !mDynamicDialogueActorAnimation.empty()
-                && animation->isPlaying(mDynamicDialogueActorAnimation))
-            {
-                animation->disable(mDynamicDialogueActorAnimation);
-                mDynamicDialogueActorAnimation.clear();
-                mDynamicDialogueActorLeftArmProtected = false;
-                mDynamicDialogueActorAnimationSpeech = false;
-                playDynamicDialogueAnimation(false, true);
-                return;
-            }
-        }
+        // X023: speech beginning/ending must not replace the current pose. Clicking
+        // a topic normally starts a new voiced response, so the old speech-edge
+        // logic made the NPC visibly snap to a fresh pose on nearly every click.
+        // Keep speech state only as context for the *next timed* pose selection.
+        mDynamicDialogueActorWasSpeaking = speaking;
 
         mDynamicDialogueActorAnimationTimer -= dt;
         if (mDynamicDialogueActorAnimationTimer <= 0.f)
-            playDynamicDialogueAnimation(false);
+            playDynamicDialogueAnimation(speaking);
     }
 
     void DialogueWindow::stopDynamicDialogueActor()
@@ -1777,7 +1767,8 @@ namespace MWGui
     {
         mHistoryContents.push_back(new Response(text, title, needMargin));
         updateHistory();
-        playDynamicDialogueAnimation(true);
+        // X023: adding a response is UI/dialogue state only. Do not use it as an
+        // animation trigger; pose rotation is handled exclusively by the 30-60 s timer.
     }
 
     void DialogueWindow::addMessageBox(const std::string& text)

@@ -120,7 +120,7 @@ namespace MWGui
 
     void ReviewDialog::setPlayerScale(float scale)
     {
-        mPlayerScale = std::max(0.85f, std::min(1.15f, scale));
+        mPlayerScale = std::max(0.85f, std::min(1.08f, scale));
         if (mPreview)
             mPreview->setUserScale(mPlayerScale);
     }

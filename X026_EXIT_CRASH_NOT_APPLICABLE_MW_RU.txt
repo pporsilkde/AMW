@@ -1,0 +1,12 @@
+ArenaMW X026 — синхронизация номера ветки
+
+X026_EXIT_CRASH_FIX из ArenaMP НЕ переносится в ArenaMW по коду.
+
+Причина: исправление защищает обращения к mwmp::Main / mwmp::GUIController
+в apps/openmw/mwgui/mapwindow.cpp во время shutdown TES3MP. В ArenaMW нет
+mwmp::Main, mPlayerMarkers и соответствующего порядка уничтожения multiplayer
+подсистемы, поэтому перенос этого кода был бы неправильным.
+
+Исходники ArenaMW в этом кумулятиве идентичны ArenaMW X025. Добавлен только
+этот файл-описание и обновлён SHA256_MANIFEST.txt, чтобы версии веток можно
+было вести синхронно.

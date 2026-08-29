@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <iomanip>
 #include <map>
 #include <set>
@@ -80,10 +81,153 @@ namespace
 
     std::string getNpcBarMode()
     {
-        const std::string mode = Settings::Manager::getString("npc bar mode", "HUD");
+        // Settings::Manager throws for keys that are absent from settings-default.cfg,
+        // and this runs once per frame. Never let a missing key take the HUD down.
+        std::string mode;
+        try
+        {
+            mode = Settings::Manager::getString("npc bar mode", "HUD");
+        }
+        catch (const std::exception&)
+        {
+            mode.clear();
+        }
+
         if (mode == "off" || mode == "combat" || mode == "hover" || mode == "both")
             return mode;
-        return Settings::Manager::getBool("target info panel", "GUI") ? "both" : "combat";
+
+        try
+        {
+            return Settings::Manager::getBool("target info panel", "GUI") ? "both" : "combat";
+        }
+        catch (const std::exception&)
+        {
+            return "both";
+        }
+    }
+
+    /// Exterior cells stream their neighbours in, so a fight legitimately spans more
+    /// than one cell. Only interiors are a hard boundary for overhead bars.
+    bool sharesCombatSpace(const MWWorld::Ptr& actor, const MWWorld::Ptr& player)
+    {
+        if (!actor.isInCell() || !player.isInCell())
+            return false;
+        if (actor.getCell() == player.getCell())
+            return true;
+        return actor.getCell()->isExterior() && player.getCell()->isExterior();
+    }
+
+    // X024/X025 combat bar presentation constants.
+    //
+    // X025 replaced the X024 "lowered panel" behaviour with a docked stack above
+    // the stamina bar; the sLowered*/sFront* constants are gone with it.
+    //
+    // The bar used to be placed straight from getObjectScreenBounds every frame.
+    // That box is animated, so a running NPC bobbed the bar by several pixels per
+    // stride, and every "not visible right now" branch hid the widget outright,
+    // which read as a hard blink whenever line of sight or the 10 Hz participant
+    // scan flickered. Both are now filtered.
+    namespace CombatBar
+    {
+        // Horizontal tracking has to stay tight or the bar lags behind a strafing
+        // target; vertical is filtered much harder because that is where the run
+        // animation bob lives.
+        constexpr float sSmoothTauX = 0.055f;
+        constexpr float sSmoothTauY = 0.140f;
+        constexpr float sSmoothTauSize = 0.200f;
+        // The head/stack transition is deliberately slow so it reads as the bar
+        // travelling into place rather than snapping to a second position.
+        constexpr float sSmoothTauDock = 0.280f;
+        constexpr float sSmoothTauHealth = 0.220f;
+
+        constexpr float sFadeInTime = 0.12f;
+        constexpr float sFadeOutTime = 0.30f;
+        // How long a bar keeps its last good position after the actor stops being
+        // resolvable. Covers the 100 ms scan period plus a short LOS flicker.
+        constexpr float sLingerTime = 0.35f;
+
+        // Beyond this jump the smoothing is skipped: a camera cut or a teleport
+        // must not drag the bar across the whole screen.
+        constexpr float sSnapFraction = 0.35f;
+
+        // ------------------------------------------------------------------
+        // X025 distances. Everything is expressed in paces and converted once,
+        // so the thresholds below can be read straight off the design.
+        // A pace is taken as one metre; OpenMW's world scale is ~70 units/metre.
+        // ------------------------------------------------------------------
+        constexpr float sUnitsPerStep = 70.f;
+
+        constexpr float sDockEnterSteps = 15.f;  // closer than this -> docked stack
+        constexpr float sDockExitSteps = 18.f;   // hysteresis, must exceed the above
+        constexpr float sVanishSteps = 40.f;     // beyond this the bar is gone
+        constexpr float sFullSizeSteps = 3.5f;   // no shrinking closer than this
+
+        constexpr float sDockEnterDistance = sDockEnterSteps * sUnitsPerStep;
+        constexpr float sDockExitDistance = sDockExitSteps * sUnitsPerStep;
+        constexpr float sVanishDistance = sVanishSteps * sUnitsPerStep;
+        constexpr float sFullSizeDistance = sFullSizeSteps * sUnitsPerStep;
+        // The last stretch before vanishing is spent fading, so a bar never pops
+        // out of existence at exactly 40 paces.
+        constexpr float sFadeOutStartDistance = sVanishDistance * 0.90f;
+
+        // Overhead bar geometry at full size, and how small it is allowed to get
+        // just before it disappears. Deliberately small: the overhead bar is a
+        // glance-value readout, the docked stack is where the detail lives.
+        constexpr float sHeadWidthMax = 92.f;
+        constexpr float sHeadHeightMax = 7.f;
+        constexpr float sHeadScaleMin = 0.28f;
+        // Gap between the top of the actor's hit box and the bar. Kept tight so
+        // the bar reads as belonging to that actor and not as floating above the
+        // scene; the second term shrinks the gap along with the bar itself.
+        constexpr float sHeadClearance = 2.f;
+        // Smallest the widget is ever drawn at. Has to stay below the size the
+        // distance ramp produces at the vanishing distance, otherwise the bar
+        // would stop shrinking early and the falloff would look truncated.
+        constexpr int sHeadMinWidthPixels = 22;
+        constexpr int sHeadMinHeightPixels = 2;
+        constexpr int sScreenMargin = 6;
+
+        // ------------------------------------------------------------------
+        // X025 docked stack: a fixed-width list that grows upwards from just
+        // above the stamina bar. One row is a name with its bar underneath.
+        // ------------------------------------------------------------------
+        constexpr int sDockWidth = 196;
+        constexpr int sDockBarHeight = 9;
+        constexpr int sDockNameHeight = 18;
+        constexpr int sDockNameFontHeight = 16;
+        constexpr int sDockNameGap = 2;      // between the caption and its bar
+        constexpr int sDockRowStride = 31;   // name + gap + bar + breathing room
+        constexpr int sDockGap = 10;         // between the stack and the stamina bar
+        constexpr std::size_t sDockMaxRows = 5;
+
+        // An actor has to hold the new side of the threshold this long before the
+        // bar actually moves. Without it an enemy circling at ~15 paces would make
+        // its bar hop between the head and the stack.
+        constexpr float sDockSwitchDelay = 0.25f;
+        // The name only becomes readable once the bar is essentially in the stack.
+        constexpr float sNameFadeStart = 0.55f;
+
+        // Progress bars are driven at a fixed resolution so a smoothed value is
+        // still visible on an actor with very few hit points.
+        constexpr int sProgressResolution = 1000;
+
+        inline float clamp01(float value)
+        {
+            return std::max(0.f, std::min(1.f, value));
+        }
+
+        /// Framerate-independent exponential approach.
+        inline float approach(float current, float target, float tau, float dt)
+        {
+            if (tau <= 0.f || dt <= 0.f)
+                return target;
+            return current + (target - current) * (1.f - std::exp(-dt / tau));
+        }
+
+        inline float lerp(float from, float to, float t)
+        {
+            return from + (to - from) * t;
+        }
     }
 
     bool npcBarShowsHover(const std::string& mode)
@@ -280,6 +424,36 @@ namespace MWGui
         getWidget(mEnemyHealth, "EnemyHealth");
         getWidget(mEnemyName, "EnemyName");
         getWidget(mEnemySummary, "EnemySummary");
+
+        // X014: fixed widget pool for world-space combat health bars. Reusing
+        // widgets avoids GUI allocations while fights are running.
+        constexpr std::size_t combatHealthBarPoolSize = 24;
+        mCombatHealthBars.reserve(combatHealthBarPoolSize);
+        for (std::size_t i = 0; i < combatHealthBarPoolSize; ++i)
+        {
+            CombatHealthBarState state;
+            state.mWidget = mGameplayHud->createWidget<MyGUI::ProgressBar>(
+                "MW_Progress_Red", MyGUI::IntCoord(0, 0, 118, 9),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "CombatHealthBar" + MyGUI::utility::toString(i));
+            state.mWidget->setNeedMouseFocus(false);
+            state.mWidget->setVisible(false);
+
+            // X025: one caption per slot, created here so no layout file has to
+            // change. It is only shown while the bar sits in the docked stack.
+            state.mName = mGameplayHud->createWidget<MyGUI::TextBox>(
+                "SandBrightText",
+                MyGUI::IntCoord(0, 0, CombatBar::sDockWidth, CombatBar::sDockNameHeight),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "CombatHealthBarName" + MyGUI::utility::toString(i));
+            state.mName->setNeedMouseFocus(false);
+            state.mName->setFontHeight(CombatBar::sDockNameFontHeight);
+            state.mName->setTextAlign(MyGUI::Align::Left | MyGUI::Align::VCenter);
+            state.mName->setVisible(false);
+
+            mCombatHealthBars.push_back(state);
+        }
+
         getWidget(mHealthText, "HealthText");
         getWidget(mMagickaText, "MagickaText");
         getWidget(mStaminaText, "StaminaText");
@@ -648,23 +822,19 @@ namespace MWGui
             mFpsFrameCount = 0;
         }
 
+        updateCombatHealthBars(dt);
         updateFocusedTargetPanel(dt);
 
         const std::string npcBarMode = getNpcBarMode();
         const bool showHoverNpcBar = npcBarShowsHover(npcBarMode);
-        const bool showCombatNpcBar = npcBarShowsCombat(npcBarMode);
         const bool focusedTargetAlive = !mFocusActor.isEmpty()
             && !mFocusActor.getClass().getCreatureStats(mFocusActor).isDead();
         const bool dialogueOpen = MWBase::Environment::get().getWindowManager()->containsMode(GM_Dialogue);
         const bool focusedTargetPanel = showHoverNpcBar && focusedTargetAlive && !dialogueOpen
             && mFocusActorPanelAlpha >= 0.5f;
-        const bool combatTargetPanel = showCombatNpcBar && mEnemyActorId != -1;
-
         mEnemyHealthTimer -= dt;
-        if (mEnemyHealth->getVisible() && mEnemyHealthTimer < 0 && !focusedTargetPanel)
-        {
+        if (mEnemyHealth->getVisible() && !focusedTargetPanel)
             mEnemyHealth->setVisible(false);
-        }
 
         if (mIsDrowning)
             mDrowningFlashTheta += dt * osg::PI*2;
@@ -675,10 +845,8 @@ namespace MWGui
                 && Settings::Manager::getBool("show status effects", "HUD")
                 && mEffectBox->getChildCount() > 0);
 
-        if ((focusedTargetPanel || combatTargetPanel) && mEnemyHealth->getVisible())
-        {
+        if (focusedTargetPanel && mEnemyHealth->getVisible())
             updateEnemyHealthBar();
-        }
 
         if (focusedTargetPanel)
         {
@@ -702,7 +870,7 @@ namespace MWGui
         if (!player.isEmpty())
             drawState = player.getClass().getCreatureStats(player).getDrawState();
 
-        if ((!showHoverNpcBar && !showCombatNpcBar) || (dialogueOpen && mEnemyActorId == -1))
+        if (!showHoverNpcBar || dialogueOpen)
             mEnemyHealth->setVisible(false);
 
         const bool showFocusedTargetInfo = focusedTargetPanel && mEnemyHealth->getVisible();
@@ -1584,8 +1752,22 @@ namespace MWGui
         float desiredAlpha = 0.f;
         bool fastPeacefulPointBlankHide = false;
 
+        bool focusActorInCombat = false;
+        if (actorAlive)
+        {
+            for (const CombatHealthBarState& state : mCombatHealthBars)
+            {
+                if (!state.mActor.isEmpty() && state.mActor == mFocusActor)
+                {
+                    focusActorInCombat = true;
+                    break;
+                }
+            }
+        }
+
         const MyGUI::IntSize& viewSize = MyGUI::RenderManager::getInstance().getViewSize();
-        if (actorAlive && mFocusActorCurrentlyFaced && hoverEnabled && !dialogueOpen)
+        if (actorAlive && !focusActorInCombat
+            && mFocusActorCurrentlyFaced && hoverEnabled && !dialogueOpen)
         {
             // Binary visibility: the panel is either fully visible or completely
             // hidden. Keep a generous centre band for large animated actors.
@@ -1660,6 +1842,622 @@ namespace MWGui
         }
     }
 
+    void HUD::hideCombatHealthBars()
+    {
+        mCombatHealthBarScanTimer = 0.f;
+        for (CombatHealthBarState& state : mCombatHealthBars)
+        {
+            state.mActor = MWWorld::Ptr();
+            state.mAlly = false;
+            // X024: clear the smoothed geometry too. Keeping it would make the next
+            // actor to land in this slot start its fade-in at the previous actor's
+            // screen position and slide across the view.
+            state.mHasScreenState = false;
+            state.mAlpha = 0.f;
+            state.mTargetAlpha = 0.f;
+            state.mDisplayHealth = -1.f;
+            state.mLingerTimer = 0.f;
+            state.mDocked = false;
+            state.mDockBlend = 0.f;
+            state.mDockSwitchTimer = 0.f;
+            state.mDockRow = -1;
+            state.mNameCaption.clear();
+            if (state.mWidget)
+                state.mWidget->setVisible(false);
+            if (state.mName)
+                state.mName->setVisible(false);
+        }
+    }
+
+    void HUD::applyCombatHealthBar(CombatHealthBarState& state, float dt)
+    {
+        MyGUI::ProgressBar* bar = state.mWidget;
+        if (!bar)
+            return;
+
+        const float fadeTau = state.mTargetAlpha > state.mAlpha
+            ? CombatBar::sFadeInTime : CombatBar::sFadeOutTime;
+        state.mAlpha = CombatBar::approach(state.mAlpha, state.mTargetAlpha, fadeTau, dt);
+
+        if (state.mAlpha <= 0.004f || !state.mHasScreenState)
+        {
+            state.mAlpha = std::max(0.f, state.mAlpha);
+            if (state.mTargetAlpha <= 0.f)
+            {
+                state.mAlpha = 0.f;
+                state.mHasScreenState = false;
+                // A fully faded slot must not keep a place in the stack, otherwise
+                // it would hold a row open for an actor that is no longer there.
+                state.mDocked = false;
+                state.mDockBlend = 0.f;
+                state.mDockRow = -1;
+            }
+            bar->setVisible(false);
+            if (state.mName)
+                state.mName->setVisible(false);
+            return;
+        }
+
+        const int width = std::max(CombatBar::sHeadMinWidthPixels,
+            static_cast<int>(std::lround(state.mWidth)));
+        const int height = std::max(CombatBar::sHeadMinHeightPixels,
+            static_cast<int>(std::lround(state.mHeight)));
+        const int left = static_cast<int>(std::lround(state.mCentreX - width * 0.5f));
+        const int top = static_cast<int>(std::lround(state.mCentreY - height * 0.5f));
+
+        const float alpha = std::min(1.f, state.mAlpha);
+        bar->setCoord(left, top, width, height);
+        bar->setAlpha(alpha);
+        bar->setVisible(true);
+
+        // X025: the caption rides directly on top of the bar for the whole trip, so
+        // it never detaches or slides in from somewhere else. It is invisible over
+        // the head (unreadable at range, and it would clutter a busy fight) and
+        // fades in over the last part of the dock transition.
+        if (state.mName)
+        {
+            const float nameReveal = CombatBar::clamp01(
+                (state.mDockBlend - CombatBar::sNameFadeStart)
+                / std::max(0.001f, 1.f - CombatBar::sNameFadeStart));
+            const float nameAlpha = alpha * nameReveal;
+
+            if (nameAlpha <= 0.01f || state.mNameCaption.empty())
+            {
+                state.mName->setVisible(false);
+            }
+            else
+            {
+                const int nameWidth = std::max(width, CombatBar::sDockWidth);
+                state.mName->setCoord(left,
+                    top - CombatBar::sDockNameGap - CombatBar::sDockNameHeight,
+                    nameWidth, CombatBar::sDockNameHeight);
+                state.mName->setAlpha(nameAlpha);
+                state.mName->setVisible(true);
+            }
+        }
+    }
+
+    void HUD::updateCombatHealthBars(float dt)
+    {
+        dt = std::max(0.f, dt);
+
+        const bool enabled = npcBarShowsCombat(getNpcBarMode())
+            && mGameplayHud && mGameplayHud->getVisible()
+            && !MWBase::Environment::get().getWindowManager()->containsMode(GM_Dialogue);
+        if (!enabled)
+        {
+            hideCombatHealthBars();
+            return;
+        }
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+        if (!world || !mechanics)
+        {
+            hideCombatHealthBars();
+            return;
+        }
+
+        const MWWorld::Ptr player = world->getPlayerPtr();
+        if (player.isEmpty() || !player.isInCell())
+        {
+            hideCombatHealthBars();
+            return;
+        }
+
+        // Rebuild only the participant list at 10 Hz. Projection, distance scaling
+        // and health values still update every frame, so bars stay attached to heads.
+        mCombatHealthBarScanTimer -= dt;
+        if (mCombatHealthBarScanTimer <= 0.f)
+        {
+            mCombatHealthBarScanTimer = 0.10f;
+
+            struct Candidate
+            {
+                MWWorld::Ptr mActor;
+                bool mAlly = false;
+                float mDistanceSquared = 0.f;
+            };
+
+            std::map<MWWorld::Ptr, bool> participants; // false = enemy, true = ally
+            for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(player))
+            {
+                if (!enemy.isEmpty())
+                    participants[enemy] = false;
+            }
+
+            std::set<MWWorld::Ptr> allies;
+            mechanics->getActorsSidingWith(player, allies);
+            for (const MWWorld::Ptr& ally : allies)
+            {
+                if (ally.isEmpty() || participants.count(ally) || !ally.getClass().isActor())
+                    continue;
+
+                const MWMechanics::CreatureStats& stats = ally.getClass().getCreatureStats(ally);
+                if (!stats.isDead() && stats.getAiSequence().isInCombat())
+                    participants[ally] = true;
+            }
+
+            const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+            constexpr float maximumBarDistanceSquared
+                = CombatBar::sVanishDistance * CombatBar::sVanishDistance;
+
+            std::vector<Candidate> candidates;
+            candidates.reserve(participants.size());
+            for (const auto& participant : participants)
+            {
+                const MWWorld::Ptr& actor = participant.first;
+                if (actor == player || !sharesCombatSpace(actor, player))
+                    continue;
+                if (actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
+                    || actor.getRefData().isDeleted() || !actor.getClass().isActor())
+                    continue;
+
+                const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+                if (stats.isDead() || stats.getHealth().getCurrent() <= 0.f)
+                    continue;
+                if (!world->getLOS(player, actor))
+                    continue;
+
+                const osg::Vec3f delta = actor.getRefData().getPosition().asVec3() - playerPosition;
+                const float distanceSquared = delta.length2();
+                if (distanceSquared > maximumBarDistanceSquared)
+                    continue;
+
+                Candidate candidate;
+                candidate.mActor = actor;
+                candidate.mAlly = participant.second;
+                candidate.mDistanceSquared = distanceSquared;
+                candidates.push_back(candidate);
+            }
+
+            std::sort(candidates.begin(), candidates.end(),
+                [](const Candidate& left, const Candidate& right)
+                {
+                    return left.mDistanceSquared < right.mDistanceSquared;
+                });
+
+            const std::size_t capacity = mCombatHealthBars.size();
+            if (candidates.size() > capacity)
+                candidates.resize(capacity);
+
+            // Keep every actor on the widget it already owns. Re-filling the pool in
+            // distance order made two participants swap widgets whenever they traded
+            // places, which swapped their colours for a frame and reset the progress
+            // bar in the middle of a fight.
+            std::vector<bool> slotTaken(capacity, false);
+            std::vector<bool> candidatePlaced(candidates.size(), false);
+
+            for (std::size_t i = 0; i < capacity; ++i)
+            {
+                CombatHealthBarState& state = mCombatHealthBars[i];
+                if (state.mActor.isEmpty())
+                    continue;
+
+                bool stillFighting = false;
+                for (std::size_t c = 0; c < candidates.size(); ++c)
+                {
+                    if (candidatePlaced[c] || candidates[c].mActor != state.mActor)
+                        continue;
+
+                    state.mAlly = candidates[c].mAlly;
+                    candidatePlaced[c] = true;
+                    slotTaken[i] = true;
+                    stillFighting = true;
+                    break;
+                }
+
+                if (!stillFighting)
+                {
+                    // X025: the widget is no longer switched off here. Leaving combat
+                    // goes through the same fade as everything else, and the row this
+                    // actor held in the stack is released at once so the entries above
+                    // it start sliding down immediately.
+                    state.mActor = MWWorld::Ptr();
+                    state.mDocked = false;
+                    state.mDockRow = -1;
+                }
+            }
+
+            // X025: prefer whichever free slot is furthest through its fade-out.
+            // Dropping a new actor onto a slot that is still visibly fading would
+            // otherwise make the bar slide in from the previous owner's position.
+            std::vector<std::size_t> freeSlots;
+            freeSlots.reserve(capacity);
+            for (std::size_t i = 0; i < capacity; ++i)
+            {
+                if (!slotTaken[i])
+                    freeSlots.push_back(i);
+            }
+
+            std::sort(freeSlots.begin(), freeSlots.end(),
+                [this](std::size_t left, std::size_t right)
+                {
+                    return mCombatHealthBars[left].mAlpha < mCombatHealthBars[right].mAlpha;
+                });
+
+            std::size_t nextFree = 0;
+            for (std::size_t c = 0; c < candidates.size(); ++c)
+            {
+                if (candidatePlaced[c])
+                    continue;
+                if (nextFree >= freeSlots.size())
+                    break;
+
+                CombatHealthBarState& state = mCombatHealthBars[freeSlots[nextFree]];
+                state.mActor = candidates[c].mActor;
+                state.mAlly = candidates[c].mAlly;
+                // A fresh occupant starts from scratch: no inherited screen position,
+                // no inherited row in the stack, no inherited health reading.
+                state.mHasScreenState = false;
+                state.mAlpha = 0.f;
+                state.mTargetAlpha = 0.f;
+                state.mDisplayHealth = -1.f;
+                state.mLingerTimer = 0.f;
+                state.mDocked = false;
+                state.mDockBlend = 0.f;
+                state.mDockSwitchTimer = 0.f;
+                state.mDockRow = -1;
+                state.mNameCaption.clear();
+                slotTaken[freeSlots[nextFree]] = true;
+                ++nextFree;
+            }
+
+            // Re-skin against what the widget is actually wearing, not against the
+            // previous ally flag: a slot cleared by hideCombatHealthBars resets that
+            // flag to "enemy" while the widget still carries the green skin.
+            for (CombatHealthBarState& state : mCombatHealthBars)
+            {
+                if (state.mActor.isEmpty() || !state.mWidget || state.mSkinAlly == state.mAlly)
+                    continue;
+
+                state.mWidget->changeWidgetSkin(state.mAlly ? "MW_Progress_Green" : "MW_Progress_Red");
+                state.mWidget->setNeedMouseFocus(false);
+                state.mSkinAlly = state.mAlly;
+            }
+        }
+
+        const MyGUI::IntSize& viewSize = MyGUI::RenderManager::getInstance().getViewSize();
+        const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+        const float viewWidth = static_cast<float>(std::max(1, viewSize.width));
+        const float viewHeight = static_cast<float>(std::max(1, viewSize.height));
+
+        // ------------------------------------------------------------------
+        // X025 pass 1 - resolve every slot and work out its overhead anchor.
+        //
+        // Nothing is pushed into a widget yet: the docked placement of one bar
+        // depends on how many other bars are docked, so the geometry can only be
+        // finished once every slot has stated what it wants.
+        // ------------------------------------------------------------------
+        std::size_t dockedCount = 0;
+        for (const CombatHealthBarState& state : mCombatHealthBars)
+        {
+            if (state.mDocked)
+                ++dockedCount;
+        }
+
+        for (CombatHealthBarState& state : mCombatHealthBars)
+        {
+            state.mFrameResolved = false;
+            state.mFrameDrop = false;
+            state.mFrameAlpha = 1.f;
+            state.mFrameDistance = 0.f;
+
+            MyGUI::ProgressBar* bar = state.mWidget;
+            if (!bar)
+                continue;
+
+            // A slot that cannot be drawn right now is not switched off on the spot.
+            // It keeps its last smoothed placement for a short grace period and then
+            // fades, so a momentary LOS break, a scan boundary or a participant
+            // leaving combat never produces a blink.
+            const MWWorld::Ptr& actor = state.mActor;
+            if (actor.isEmpty()
+                || !sharesCombatSpace(actor, player)
+                || actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
+                || actor.getRefData().isDeleted() || !actor.getClass().isActor())
+            {
+                state.mFrameDrop = true;
+                continue;
+            }
+
+            MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+            const float maximumHealth = stats.getHealth().getModified();
+            const float currentHealth = stats.getHealth().getCurrent();
+            if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
+            {
+                // Death still fades rather than blinking, but without the grace
+                // period: there is nothing left to track.
+                state.mLingerTimer = 0.f;
+                continue;
+            }
+
+            const float distance
+                = (actor.getRefData().getPosition().asVec3() - playerPosition).length();
+            if (distance >= CombatBar::sVanishDistance)
+                continue;
+
+            // Size falls off with distance: full size inside the melee radius,
+            // shrinking towards sHeadScaleMin as the actor walks away, with the
+            // alpha ramp below finishing the job at the vanishing distance.
+            const float distanceT = CombatBar::clamp01(
+                (distance - CombatBar::sFullSizeDistance)
+                / (CombatBar::sVanishDistance - CombatBar::sFullSizeDistance));
+            const float scale = std::max(CombatBar::sHeadScaleMin,
+                1.f - (1.f - CombatBar::sHeadScaleMin) * distanceT);
+
+            state.mHeadWidth = CombatBar::sHeadWidthMax * scale;
+            state.mHeadHeight = CombatBar::sHeadHeightMax * scale;
+
+            float minX = 0.f;
+            float minY = 0.f;
+            float maxX = 0.f;
+            float maxY = 0.f;
+            bool anchorUsable = false;
+
+            if (world->getObjectScreenBounds(actor, minX, minY, maxX, maxY))
+            {
+                // Sit on top of the hit box, and stay there: instead of culling the
+                // bar once the head leaves the top of the view, clamp it to the
+                // edge. That is exactly the case of a tall or very close actor,
+                // where losing the bar would be worst.
+                const float headCentreX = (minX + maxX) * 0.5f * viewWidth;
+                float headCentreY = minY * viewHeight - state.mHeadHeight * 0.5f
+                    - (CombatBar::sHeadClearance + CombatBar::sHeadClearance * scale);
+                headCentreY = std::max(headCentreY,
+                    state.mHeadHeight * 0.5f + CombatBar::sScreenMargin);
+
+                anchorUsable = headCentreX > -state.mHeadWidth
+                    && headCentreX < viewWidth + state.mHeadWidth
+                    && headCentreY < viewHeight + state.mHeadHeight;
+
+                if (anchorUsable)
+                {
+                    state.mHeadCentreX = headCentreX;
+                    state.mHeadCentreY = headCentreY;
+                }
+            }
+
+            // A docked bar survives without a usable anchor. Turning your back on
+            // the enemy you are trading blows with must not empty the stack.
+            if (!anchorUsable && !state.mDocked)
+                continue;
+
+            state.mFrameDistance = distance;
+            state.mFrameResolved = true;
+
+            if (distance > CombatBar::sFadeOutStartDistance)
+                state.mFrameAlpha = CombatBar::clamp01(
+                    (CombatBar::sVanishDistance - distance)
+                    / (CombatBar::sVanishDistance - CombatBar::sFadeOutStartDistance));
+
+            // Dock decision: two thresholds plus a dwell timer. An actor pacing
+            // around the 15 pace mark holds the new side for sDockSwitchDelay before
+            // anything moves, and only gives the row back at 18 paces.
+            const bool wantsDock = state.mDocked
+                ? distance < CombatBar::sDockExitDistance
+                : distance < CombatBar::sDockEnterDistance;
+
+            if (wantsDock == state.mDocked)
+            {
+                state.mDockSwitchTimer = 0.f;
+            }
+            else
+            {
+                state.mDockSwitchTimer += dt;
+                if (state.mDockSwitchTimer >= CombatBar::sDockSwitchDelay)
+                {
+                    state.mDockSwitchTimer = 0.f;
+                    if (!wantsDock)
+                    {
+                        state.mDocked = false;
+                        state.mDockRow = -1;
+                        if (dockedCount > 0)
+                            --dockedCount;
+                    }
+                    else if (dockedCount < CombatBar::sDockMaxRows)
+                    {
+                        // The stack is capped on purpose. Anything that does not fit
+                        // simply keeps its overhead bar instead of covering the view.
+                        state.mDocked = true;
+                        state.mDockSequence = ++mCombatDockSequenceCounter;
+                        ++dockedCount;
+                    }
+                }
+            }
+
+            // Health is smoothed too, so a hit slides the bar down instead of
+            // snapping it. A near-full swing is treated as a heal or a respawn and
+            // is applied at once.
+            if (state.mDisplayHealth < 0.f
+                || std::abs(state.mDisplayHealth - currentHealth) > maximumHealth * 0.9f)
+                state.mDisplayHealth = currentHealth;
+            else
+                state.mDisplayHealth = CombatBar::approach(
+                    state.mDisplayHealth, currentHealth, CombatBar::sSmoothTauHealth, dt);
+
+            const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
+            bar->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
+            bar->setProgressPosition(static_cast<std::size_t>(
+                std::lround(healthFraction * CombatBar::sProgressResolution)));
+
+            if (state.mName)
+            {
+                const std::string caption = actor.getClass().getName(actor);
+                if (caption != state.mNameCaption)
+                {
+                    state.mNameCaption = caption;
+                    state.mName->setCaption(caption);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // X025 pass 2 - order the stack and find where it starts.
+        //
+        // Rows are handed out by the order in which actors joined, never by
+        // distance: sorting a live list by distance makes entries swap places every
+        // time two enemies trade positions, which is the single most unstable thing
+        // such a panel can do. When an entry leaves, the ones above it slide down
+        // under the ordinary position smoothing.
+        // ------------------------------------------------------------------
+        std::vector<std::size_t> dockedSlots;
+        dockedSlots.reserve(CombatBar::sDockMaxRows);
+        for (std::size_t i = 0; i < mCombatHealthBars.size(); ++i)
+        {
+            if (mCombatHealthBars[i].mDocked)
+                dockedSlots.push_back(i);
+        }
+
+        std::sort(dockedSlots.begin(), dockedSlots.end(),
+            [this](std::size_t left, std::size_t right)
+            {
+                return mCombatHealthBars[left].mDockSequence
+                    < mCombatHealthBars[right].mDockSequence;
+            });
+
+        for (std::size_t row = 0; row < dockedSlots.size(); ++row)
+            mCombatHealthBars[dockedSlots[row]].mDockRow = static_cast<int>(row);
+
+        // Anchor: the bottom left corner of the stack, sitting directly above the
+        // stamina bar and growing upwards. Read from the widget rather than
+        // hardcoded, so it follows the HUD layout and any GUI scaling.
+        float dockLeft = static_cast<float>(CombatBar::sScreenMargin);
+        float dockBottom = viewHeight * 0.5f;
+        {
+            MyGUI::IntPoint origin;
+            if (mGameplayHud)
+                origin = mGameplayHud->getAbsolutePosition();
+            if (mFatigueFrame)
+            {
+                const MyGUI::IntCoord frame = mFatigueFrame->getAbsoluteCoord();
+                dockLeft = static_cast<float>(frame.left - origin.left);
+                dockBottom = static_cast<float>(frame.top - origin.top) - CombatBar::sDockGap;
+            }
+        }
+        dockLeft = std::max(static_cast<float>(CombatBar::sScreenMargin),
+            std::min(dockLeft, viewWidth - CombatBar::sDockWidth - CombatBar::sScreenMargin));
+
+        // ------------------------------------------------------------------
+        // X025 pass 3 - blend head anchor against stack row, smooth, draw.
+        // ------------------------------------------------------------------
+        for (CombatHealthBarState& state : mCombatHealthBars)
+        {
+            if (!state.mWidget)
+                continue;
+
+            if (state.mFrameResolved)
+            {
+                const float dockTarget = state.mDocked ? 1.f : 0.f;
+                state.mDockBlend = CombatBar::approach(
+                    state.mDockBlend, dockTarget, CombatBar::sSmoothTauDock, dt);
+                if (state.mDockBlend < 0.002f)
+                    state.mDockBlend = 0.f;
+                else if (state.mDockBlend > 0.998f)
+                    state.mDockBlend = 1.f;
+
+                float targetCentreX = state.mHeadCentreX;
+                float targetCentreY = state.mHeadCentreY;
+                float targetWidth = state.mHeadWidth;
+                float targetHeight = state.mHeadHeight;
+
+                if (state.mDockBlend > 0.f)
+                {
+                    const int row = std::max(0, state.mDockRow);
+                    const float rowBottom
+                        = dockBottom - row * static_cast<float>(CombatBar::sDockRowStride);
+                    const float dockCentreX = dockLeft + CombatBar::sDockWidth * 0.5f;
+                    const float dockCentreY = rowBottom - CombatBar::sDockBarHeight * 0.5f;
+
+                    targetCentreX = CombatBar::lerp(targetCentreX, dockCentreX, state.mDockBlend);
+                    targetCentreY = CombatBar::lerp(targetCentreY, dockCentreY, state.mDockBlend);
+                    targetWidth = CombatBar::lerp(targetWidth,
+                        static_cast<float>(CombatBar::sDockWidth), state.mDockBlend);
+                    targetHeight = CombatBar::lerp(targetHeight,
+                        static_cast<float>(CombatBar::sDockBarHeight), state.mDockBlend);
+                }
+
+                state.mLingerTimer = CombatBar::sLingerTime;
+                state.mTargetAlpha = state.mFrameAlpha;
+
+                if (!state.mHasScreenState)
+                {
+                    // First frame for this actor: start where it belongs and fade in.
+                    state.mCentreX = targetCentreX;
+                    state.mCentreY = targetCentreY;
+                    state.mWidth = targetWidth;
+                    state.mHeight = targetHeight;
+                    state.mHasScreenState = true;
+                }
+                else
+                {
+                    // The teleport guard is suspended mid-transition: the dock target
+                    // is already an interpolation, and letting it snap would defeat
+                    // the whole point of the travel animation.
+                    const float snapDistance = viewWidth * CombatBar::sSnapFraction;
+                    const bool travelling = state.mDockBlend > 0.f && state.mDockBlend < 1.f;
+
+                    if (!travelling
+                        && (std::abs(targetCentreX - state.mCentreX) > snapDistance
+                            || std::abs(targetCentreY - state.mCentreY) > snapDistance))
+                    {
+                        // Camera cut or teleport: never drag the bar across the view.
+                        state.mCentreX = targetCentreX;
+                        state.mCentreY = targetCentreY;
+                    }
+                    else
+                    {
+                        state.mCentreX = CombatBar::approach(
+                            state.mCentreX, targetCentreX, CombatBar::sSmoothTauX, dt);
+                        state.mCentreY = CombatBar::approach(
+                            state.mCentreY, targetCentreY, CombatBar::sSmoothTauY, dt);
+                    }
+
+                    state.mWidth = CombatBar::approach(
+                        state.mWidth, targetWidth, CombatBar::sSmoothTauSize, dt);
+                    state.mHeight = CombatBar::approach(
+                        state.mHeight, targetHeight, CombatBar::sSmoothTauSize, dt);
+                }
+            }
+            else
+            {
+                if (state.mFrameDrop)
+                    state.mLingerTimer = 0.f;
+                else
+                    state.mLingerTimer = std::max(0.f, state.mLingerTimer - dt);
+
+                // Hold the last good placement while the grace period runs, then fade.
+                if (state.mLingerTimer <= 0.f)
+                {
+                    state.mTargetAlpha = 0.f;
+                    state.mDisplayHealth = -1.f;
+                }
+            }
+
+            applyCombatHealthBar(state, dt);
+        }
+    }
+
     void HUD::updateEnemyHealthBar()
     {
         const std::string npcBarMode = getNpcBarMode();
@@ -1672,8 +2470,6 @@ namespace MWGui
         MWWorld::Ptr enemy;
         if (usingFocusActor)
             enemy = mFocusActor;
-        else if (npcBarShowsCombat(npcBarMode) && mEnemyActorId != -1)
-            enemy = MWBase::Environment::get().getWorld()->searchPtrViaActorId(mEnemyActorId);
 
         if (enemy.isEmpty())
         {
@@ -1705,12 +2501,7 @@ namespace MWGui
         mEnemyHealth->setProgressRange(static_cast<size_t>(maximumHealthPoints));
         mEnemyHealth->setProgressPosition(static_cast<size_t>(currentHealthPoints));
 
-        static const float fNPCHealthBarFade = MWBase::Environment::get().getWorld()->getStore()
-            .get<ESM::GameSetting>().find("fNPCHealthBarFade")->mValue.getFloat();
-        const float alpha = usingFocusActor ? 1.f
-            : (fNPCHealthBarFade > 0.f
-                ? std::max(0.f, std::min(1.f, mEnemyHealthTimer / fNPCHealthBarFade))
-                : 1.f);
+        const float alpha = 1.f;
         mEnemyHealth->setAlpha(alpha);
 
         if (usingFocusActor)
@@ -1779,17 +2570,6 @@ namespace MWGui
             if (mEnemySummary)
                 mEnemySummary->setPosition(barLeft, baseY + nameHeight + 2);
         }
-        else
-        {
-            // Combat feedback when the compact target panel is disabled: a thin red bar above player health.
-            if (mEnemyName)
-                mEnemyName->setVisible(false);
-            if (mEnemySummary)
-                mEnemySummary->setVisible(false);
-
-            const MyGUI::IntCoord playerHealth = mHealth->getAbsoluteCoord();
-            mEnemyHealth->setCoord(playerHealth.left, std::max(0, playerHealth.top - 9), playerHealth.width, 7);
-        }
     }
 
     void HUD::setEnemy(const MWWorld::Ptr &enemy)
@@ -1800,10 +2580,8 @@ namespace MWGui
         if (mEnemySummary)
             mEnemySummary->setVisible(false);
         mEnemyHealthTimer = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fNPCHealthBarTime")->mValue.getFloat();
-        const bool showCombatBar = npcBarShowsCombat(getNpcBarMode());
-        mEnemyHealth->setVisible(showCombatBar);
-        if (showCombatBar)
-            updateEnemyHealthBar();
+        // X014: persistent combat health is rendered in world space above
+        // the actual actor. Keep the actor id only for compatibility with callbacks.
     }
 
     void HUD::resetEnemy()
@@ -1824,6 +2602,7 @@ namespace MWGui
         mFocusActorDistance = -1.f;
         mFocusActorPanelAlpha = 0.f;
         mTargetPanelPositionInitialized = false;
+        hideCombatHealthBars();
         if (mEnemyName)
             mEnemyName->setVisible(false);
         if (mEnemySummary)

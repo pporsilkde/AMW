@@ -269,6 +269,11 @@ namespace MWBase
 
             virtual float getDistanceToFacedObject() = 0;
 
+            /// Project an object bounding box to normalized screen coordinates for world-space HUD markers.
+            /// Returns false when the object is invalid, behind the camera or fully outside the viewport.
+            virtual bool getObjectScreenBounds(const MWWorld::Ptr& object,
+                float& minX, float& minY, float& maxX, float& maxY) = 0;
+
             /// ArenaMW ownerless-world-item placement / physics-grab mode.
             virtual bool canPhysicsGrab(const MWWorld::ConstPtr& object) const = 0;
             virtual bool beginPhysicsGrab(const MWWorld::Ptr& object) = 0;

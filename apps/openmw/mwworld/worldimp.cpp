@@ -1495,6 +1495,86 @@ namespace MWWorld
         return mDistanceToFacedObject;
    }
 
+
+    bool World::getObjectScreenBounds(const MWWorld::Ptr& object,
+        float& minX, float& minY, float& maxX, float& maxY)
+    {
+        minX = minY = maxX = maxY = 0.f;
+
+        if (object.isEmpty() || !object.isInCell() || object.getRefData().getCount() <= 0
+            || !object.getRefData().isEnabled() || object.getRefData().isDeleted())
+            return false;
+
+        osg::BoundingBox bb = mPhysics->getBoundingBox(object);
+        if (!bb.valid() && object.getRefData().getBaseNode())
+        {
+            osg::ComputeBoundsVisitor computeBoundsVisitor;
+            computeBoundsVisitor.setTraversalMask(~(MWRender::Mask_ParticleSystem | MWRender::Mask_Effect));
+            object.getRefData().getBaseNode()->accept(computeBoundsVisitor);
+            bb = computeBoundsVisitor.getBoundingBox();
+        }
+        if (!bb.valid())
+            return false;
+
+        // getScreenBounds itself is intentionally lightweight and does not reject
+        // geometry behind the camera. Do that here so overhead bars never appear
+        // mirrored on the opposite side of the screen.
+        const osg::Vec3f eye = mRendering->getCameraPosition();
+
+        osg::Vec3f forward(0.f, 0.f, 0.f);
+        {
+            osg::Vec3d focal;
+            osg::Vec3d camera;
+            mRendering->getCamera()->getPosition(focal, camera);
+            const osg::Vec3d viewVector = focal - camera;
+            if (viewVector.length2() > 1.0e-6)
+            {
+                forward = osg::Vec3f(static_cast<float>(viewVector.x()),
+                    static_cast<float>(viewVector.y()), static_cast<float>(viewVector.z()));
+            }
+            else if (mPlayer)
+            {
+                // In first person the focal point and the camera collapse onto the same
+                // position, so focal - camera carries no direction at all. Fall back to
+                // the player's own view vector, which in that mode is the camera's.
+                const ESM::Position& refpos = mPlayer->getPlayer().getRefData().getPosition();
+                const osg::Quat orientation = osg::Quat(refpos.rot[1], osg::Vec3f(0, -1, 0))
+                    * osg::Quat(refpos.rot[0], osg::Vec3f(-1, 0, 0))
+                    * osg::Quat(refpos.rot[2], osg::Vec3f(0, 0, -1));
+                forward = orientation * osg::Vec3f(0, 1, 0);
+            }
+        }
+
+        if (forward.length2() <= 1.0e-6f)
+            return false;
+
+        const osg::Vec3f center = bb.center();
+        if ((center - eye) * forward <= 0.f)
+            return false;
+
+        const osg::Vec4f bounds = mRendering->getScreenBounds(bb);
+        minX = bounds.x();
+        minY = bounds.y();
+        maxX = bounds.z();
+        maxY = bounds.w();
+
+        if (!std::isfinite(minX) || !std::isfinite(minY)
+            || !std::isfinite(maxX) || !std::isfinite(maxY))
+            return false;
+
+        // A partly visible actor may legitimately extend beyond [0,1]. Reject only
+        // actors whose complete projected box is outside the viewport.
+        //
+        // getScreenBounds seeds its extents with min = 1 and max = 0, so an object
+        // that lies completely off screen comes back clamped onto the border rather
+        // than reported as invisible: maxX == 0 for anything fully to the left,
+        // minX == 1 for anything fully to the right, and likewise on Y. Comparing
+        // with >= / <= therefore accepted every off-screen object. Strict comparisons
+        // reject exactly those degenerate boxes, because a genuinely visible object
+        // always overlaps [0,1] by a non-zero amount on both axes.
+        return maxX > 0.f && minX < 1.f && maxY > 0.f && minY < 1.f;
+    }
+
     void World::suppressPhysicsGrabCollision(PhysicsObjectState& state)
     {
         state.mHadWorldCollision = false;
