@@ -856,6 +856,11 @@ namespace MWRender
         {
             mTerrainOccluder.reset(new Terrain::TerrainOccluder(mTerrainStorage.get(), ESM::Land::REAL_SIZE));
             mTerrainOccluder->setLodLevel(std::max(0, Settings::Manager::getInt("occlusion terrain lod", "Camera")));
+            // X029: cap how many new terrain cells a single build may decode, so
+            // the first exterior assembly is spread over frames instead of
+            // decoding the whole 17x17 region in one cull.
+            mTerrainOccluder->setCellBuildBudget(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
+            mTerrainOccluder->setFrustumCulling(Settings::Manager::getBool("occlusion terrain frustum cull", "Camera"));
             sceneRoot->addCullCallback(new SceneOcclusionCallback(
                 mOcclusionCuller.get(),
                 mTerrainOccluder.get(),
@@ -1789,9 +1794,17 @@ namespace MWRender
 
         if (mShadowManager)
         {
-            const float shadowDistance = mLandOptimizationEnabled
-                ? mConfiguredViewDistance * sLandOptimizationShadowDistanceRatio
-                : std::max(0.f, Settings::Manager::getFloat("maximum shadow map distance", "Shadows"));
+            // X030: optional hard link between draw distance and shadow reach.
+            // Use the configured view distance as the stable ceiling, then let
+            // adaptive land optimization scale both together. Shadows are never
+            // allowed beyond 16384 while the link is enabled.
+            const bool linkShadowDistance
+                = Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows");
+            const float shadowDistance = linkShadowDistance
+                ? std::min(16384.f, std::max(0.f, mConfiguredViewDistance))
+                : (mLandOptimizationEnabled
+                    ? mConfiguredViewDistance * sLandOptimizationShadowDistanceRatio
+                    : std::max(0.f, Settings::Manager::getFloat("maximum shadow map distance", "Shadows")));
             mShadowManager->setMaximumShadowMapDistance(shadowDistance * adaptiveDistanceScale);
         }
     }
@@ -2000,6 +2013,27 @@ namespace MWRender
             stats->setAttribute(frameNumber, "UnrefQueue", mUnrefQueue->getNumItems());
 
             mTerrain->reportStats(frameNumber, stats);
+
+            // X029: the occlusion counters already existed and were read by nothing.
+            // Values are sampled from the last completed cull, so they can lag the
+            // displayed frame by one - fine for a profiler, not a correctness signal.
+            if (mOcclusionCuller.valid())
+            {
+                stats->setAttribute(frameNumber, "Occl Tested", mOcclusionCuller->getNumTested());
+                stats->setAttribute(frameNumber, "Occl Culled", mOcclusionCuller->getNumOccluded());
+                stats->setAttribute(frameNumber, "Occl Occluders", mOcclusionCuller->getNumBuildingOccluders());
+                stats->setAttribute(frameNumber, "Occl Tris", mOcclusionCuller->getNumBuildingTris());
+            }
+
+            if (mTerrainOccluder)
+            {
+                stats->setAttribute(frameNumber, "Occl Terrain Cells", mTerrainOccluder->getCachedCellCount());
+                stats->setAttribute(frameNumber, "Occl Terrain Built", mTerrainOccluder->getLastBuiltCellCount());
+                stats->setAttribute(frameNumber, "Occl Terrain Rast", mTerrainOccluder->getLastVisibleCellCount());
+            }
+
+            if (mObjects)
+                mObjects->reportStats(frameNumber, stats);
         }
     }
 

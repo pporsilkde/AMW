@@ -48,6 +48,15 @@ namespace SceneUtil
         for (int i = 0; i < 16; ++i)
             mVPFloat[i] = static_cast<float>(vpDouble[i]);
 
+        // X029-safe: publish the counters from the completed cull before
+        // resetting the hot-path accumulators for this frame. Stats readers can
+        // safely sample these atomics from another OSG thread.
+        mPublishedNumOccluded.store(mNumOccluded, std::memory_order_relaxed);
+        mPublishedNumTested.store(mNumTested, std::memory_order_relaxed);
+        mPublishedNumBuildingOccluders.store(mNumBuildingOccluders, std::memory_order_relaxed);
+        mPublishedNumBuildingTris.store(mNumBuildingTris, std::memory_order_relaxed);
+        mPublishedNumBuildingVerts.store(mNumBuildingVerts, std::memory_order_relaxed);
+
         mNumOccluded = 0;
         mNumTested = 0;
         mNumBuildingOccluders = 0;

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <ui version="4.0">
  <class>AdvancedPage</class>
  <widget class="QWidget" name="AdvancedPage">
@@ -1667,6 +1667,298 @@ True: In non-combat mode camera is positioned behind the character's shoulder. C
           </layout>
          </widget>
         </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="ArenaSettings">
+      <attribute name="title">
+       <string>Arena Settings</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="arenaSettingsLayout">
+       <item>
+        <widget class="QGroupBox" name="xpLevelingGroupBox">
+         <property name="title">
+          <string>XP progression</string>
+         </property>
+         <layout class="QGridLayout" name="xpLevelingLayout">
+          <item row="0" column="0" colspan="1">
+           <widget class="QLabel" name="xpAuthorityLabel">
+            <property name="text">
+             <string>Controls ArenaMW native XP progression. The speed preset changes the overall reward multiplier without rewriting individual reward values.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="3">
+           <widget class="QCheckBox" name="xpLevelingEnabledCheckBox">
+            <property name="text">
+             <string>Enable Arena XP leveling</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="xpRatePresetLabel">
+            <property name="text">
+             <string>XP speed preset:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1" colspan="2">
+           <widget class="QComboBox" name="xpRatePresetComboBox">
+            <property name="toolTip">
+             <string>Convenience profile for the overall XP multiplier. Custom is selected automatically when you enter another value.</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Very Slow (0.50x)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Slow (0.75x)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Normal (1.00x)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Fast (1.50x)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Very Fast (2.00x)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Custom</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="xpGainMultiplierLabel">
+            <property name="text">
+             <string>Overall XP rate:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QDoubleSpinBox" name="xpGainMultiplierSpinBox">
+            <property name="minimum">
+             <double>0.25</double>
+            </property>
+            <property name="maximum">
+             <double>4.0</double>
+            </property>
+            <property name="singleStep">
+             <double>0.05</double>
+            </property>
+            <property name="decimals">
+             <number>2</number>
+            </property>
+            <property name="suffix">
+             <string> x</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="2">
+           <layout class="QHBoxLayout" name="skillXpRateLayout">
+            <item>
+             <widget class="QLabel" name="skillXpMultiplierLabel">
+              <property name="text">
+               <string>Skill-use rate:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QDoubleSpinBox" name="skillXpMultiplierSpinBox">
+              <property name="minimum">
+               <double>0.25</double>
+              </property>
+              <property name="maximum">
+               <double>4.0</double>
+              </property>
+              <property name="singleStep">
+               <double>0.05</double>
+              </property>
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="suffix">
+               <string> x</string>
+              </property>
+              <property name="toolTip">
+               <string>Additional multiplier only for XP generated from normal skill-use actions.</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="baseXpToLevelLabel">
+            <property name="text">
+             <string>Base XP to next level:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QSpinBox" name="baseXpToLevelSpinBox">
+            <property name="minimum">
+             <number>100</number>
+            </property>
+            <property name="maximum">
+             <number>10000</number>
+            </property>
+            <property name="singleStep">
+             <number>100</number>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="2">
+           <layout class="QHBoxLayout" name="skillPointsLayout">
+            <item>
+             <widget class="QLabel" name="skillPointsPerLevelLabel">
+              <property name="text">
+               <string>Skill points / level:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="skillPointsPerLevelSpinBox">
+              <property name="minimum">
+               <number>1</number>
+              </property>
+              <property name="maximum">
+               <number>50</number>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="5" column="0">
+           <widget class="QLabel" name="deathXpLossLabel">
+            <property name="text">
+             <string>Death XP loss:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1">
+           <widget class="QDoubleSpinBox" name="deathXpLossSpinBox">
+            <property name="minimum">
+             <double>0.0</double>
+            </property>
+            <property name="maximum">
+             <double>100.0</double>
+            </property>
+            <property name="singleStep">
+             <double>5.0</double>
+            </property>
+            <property name="decimals">
+             <number>0</number>
+            </property>
+            <property name="suffix">
+             <string> %</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="0">
+           <widget class="QCheckBox" name="difficultyXpScalingCheckBox">
+            <property name="text">
+             <string>Difficulty scales XP rewards</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1">
+           <widget class="QCheckBox" name="progressiveXpCurveCheckBox">
+            <property name="text">
+             <string>Progressive XP curve</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="2">
+           <widget class="QCheckBox" name="showXpNotificationsCheckBox">
+            <property name="text">
+             <string>Show XP notifications</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="arenaOptimizationGroupBox">
+         <property name="title">
+          <string>Streaming / occlusion</string>
+         </property>
+         <layout class="QGridLayout" name="arenaOptimizationLayout">
+          <item row="0" column="0">
+           <widget class="QLabel" name="occlusionTerrainBudgetLabel">
+            <property name="text">
+             <string>Terrain occluder build budget:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="occlusionTerrainBudgetSpinBox">
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>128</number>
+            </property>
+            <property name="singleStep">
+             <number>4</number>
+            </property>
+            <property name="suffix">
+             <string> cell(s)</string>
+            </property>
+            <property name="toolTip">
+             <string>Maximum newly decoded LAND cells per terrain-occluder rebuild. 0 builds the whole region at once; lower values reduce cell-transition spikes.</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QCheckBox" name="occlusionTerrainFrustumCullCheckBox">
+            <property name="text">
+             <string>Frustum-cull terrain occluder cells</string>
+            </property>
+            <property name="toolTip">
+             <string>Skip cached terrain occluder cells outside the camera side planes before software rasterization. Recommended on all presets.</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <widget class="QLabel" name="occlusionTerrainBudgetHintLabel">
+            <property name="text">
+             <string>Recommended: 12–16 on weak CPUs, 24 balanced, 32–40 on fast desktop CPUs.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="arenaSettingsVerticalSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
        </item>
       </layout>
      </widget>

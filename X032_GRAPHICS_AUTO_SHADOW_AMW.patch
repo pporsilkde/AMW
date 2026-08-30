@@ -1,0 +1,210 @@
+--- a/apps/launcher/graphicspage.cpp
++++ b/apps/launcher/graphicspage.cpp
+@@ -11,6 +11,7 @@
+ #include <QOpenGLContext>
+ #include <QOpenGLFunctions>
+ #include <QScreen>
++#include <QSignalBlocker>
+ #include <QThread>
+ 
+ #ifdef _WIN32
+@@ -74,6 +75,11 @@
+     connect(screenComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(screenChanged(int)));
+     connect(framerateLimitCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotFramerateLimitToggled(bool)));
+     connect(shadowDistanceCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotShadowDistLimitToggled(bool)));
++    const auto updateShadowUi = [this](bool) { updateShadowControls(); };
++    connect(playerShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
++    connect(actorShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
++    connect(objectShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
++    connect(terrainShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
+     connect(linkShadowDistanceCheckBox, &QCheckBox::toggled, this, [this](bool linked)
+     {
+         if (linked)
+@@ -82,10 +88,14 @@
+             const int viewDistance = Settings::Manager::getInt("viewing distance", "Camera");
+             shadowDistanceSpinBox->setValue(std::max(512, std::min(16384, viewDistance)));
+         }
+-        shadowDistanceCheckBox->setEnabled(!linked);
+-        slotShadowDistLimitToggled(shadowDistanceCheckBox->isChecked());
++        updateShadowControls();
+     });
+     connect(qualityPresetComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotQualityPresetChanged(int)));
++    connect(autoSelectQualityCheckBox, &QCheckBox::toggled, this, [this](bool)
++    {
++        if (!mInitializingQuality)
++            updateQualityDescription();
++    });
+     connect(terrainDetailComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotTerrainDetailChanged(int)));
+     connect(pbrQualityComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotPbrQualityChanged(int)));
+     connect(applyQualityButton, SIGNAL(clicked()), this, SLOT(slotApplyQualityPreset()));
+@@ -200,12 +210,16 @@
+         lightingMethod = 1;
+     lightingMethodComboBox->setCurrentIndex(lightingMethod);
+ 
+-    // Shadows
+-    actorShadowsCheckBox->setChecked(Settings::Manager::getBool("actor shadows", "Shadows"));
+-    playerShadowsCheckBox->setChecked(Settings::Manager::getBool("player shadows", "Shadows"));
+-    terrainShadowsCheckBox->setChecked(Settings::Manager::getBool("terrain shadows", "Shadows"));
+-    objectShadowsCheckBox->setChecked(Settings::Manager::getBool("object shadows", "Shadows"));
+-    indoorShadowsCheckBox->setChecked(Settings::Manager::getBool("enable indoor shadows", "Shadows"));
++    // X032: the individual shadow flags are meaningful only when the master
++    // switch is enabled. Older settings.cfg files can retain stale actor/object
++    // flags after a Minimum/Auto preset disabled shadows globally; showing those
++    // stale flags as checked made the automatic preset look broken.
++    const bool shadowsEnabled = Settings::Manager::getBool("enable shadows", "Shadows");
++    actorShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("actor shadows", "Shadows"));
++    playerShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("player shadows", "Shadows"));
++    terrainShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("terrain shadows", "Shadows"));
++    objectShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("object shadows", "Shadows"));
++    indoorShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("enable indoor shadows", "Shadows"));
+ 
+     const QString computeBounds = QString::fromStdString(
+         Settings::Manager::getString("compute scene bounds", "Shadows"));
+@@ -216,7 +230,7 @@
+     const bool linkShadowDistance = Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows");
+     linkShadowDistanceCheckBox->setChecked(linkShadowDistance);
+     const int shadowDistLimit = Settings::Manager::getInt("maximum shadow map distance", "Shadows");
+-    shadowDistanceCheckBox->setChecked(linkShadowDistance || shadowDistLimit > 0);
++    shadowDistanceCheckBox->setChecked(shadowsEnabled && (linkShadowDistance || shadowDistLimit > 0));
+     if (linkShadowDistance)
+     {
+         const int viewDistance = Settings::Manager::getInt("viewing distance", "Camera");
+@@ -238,7 +252,7 @@
+     slotFullScreenChanged(fullScreenCheckBox->checkState());
+     slotStandardToggled(standardRadioButton->isChecked());
+     slotFramerateLimitToggled(framerateLimitCheckBox->isChecked());
+-    slotShadowDistLimitToggled(shadowDistanceCheckBox->isChecked());
++    updateShadowControls();
+ }
+ 
+ void Launcher::GraphicsPage::saveSettings()
+@@ -678,12 +692,17 @@
+ 
+ int Launcher::GraphicsPage::recommendQuality(const HardwareInfo& info) const
+ {
+-    if (info.softwareRenderer || info.vendor == QLatin1String("microsoft")
+-        || info.vendor == QLatin1String("unknown"))
++    if (info.softwareRenderer || info.vendor == QLatin1String("microsoft"))
+         return 0;
+ 
+     const QString model = info.renderer.toLower();
+-    int level = 2;
++    // X032: an unknown hardware vendor is not the same thing as a software
++    // renderer. Off-screen OpenGL probing can legitimately fail on hybrid or
++    // remote-desktop systems. Start from Balanced and let CPU/display pressure
++    // lower it instead of silently disabling shadows/water at Minimum.
++    int level = info.vendor == QLatin1String("unknown")
++        ? (info.logicalCores <= 4 ? 1 : 2)
++        : 2;
+ 
+     if (info.vendor == QLatin1String("intel"))
+     {
+@@ -802,13 +821,27 @@
+ 
+     if (initialPresetPending && reloadUserSettingsFromDisk())
+     {
+-        applyQualityLevel(mRecommendedQuality);
++        int initialLevel = mRecommendedQuality;
++        QString persistedMode = mode;
++        if (mode != QLatin1String("auto"))
++        {
++            bool ok = false;
++            const int storedLevel = mode.toInt(&ok);
++            if (ok)
++                initialLevel = std::max(0, std::min(5, storedLevel));
++            else
++                persistedMode = QStringLiteral("auto");
++        }
++        else if (!autoSelect)
++            initialLevel = 2;
++
++        applyQualityLevel(initialLevel);
+         if (vendorOptimizations)
+-            applyVendorOptimizations(mRecommendedQuality);
++            applyVendorOptimizations(initialLevel);
+ 
+         if (saveUserSettingsToDisk())
+         {
+-            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("auto"));
++            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), persistedMode);
+             storeLauncherValue(QStringLiteral("General/Graphics/hardwareSignature"), mHardwareInfo.signature());
+             storeLauncherValue(pendingKey, QStringLiteral("false"));
+             storeLauncherValue(QStringLiteral("General/Graphics/initialQualityPresetApplied"),
+@@ -822,10 +855,15 @@
+ void Launcher::GraphicsPage::updateQualityDescription()
+ {
+     const int index = qualityPresetComboBox->currentIndex();
+-    const int level = index == 0 ? mRecommendedQuality : index - 1;
++    const int automaticLevel = autoSelectQualityCheckBox->isChecked() ? mRecommendedQuality : 2;
++    const int level = index == 0 ? automaticLevel : index - 1;
+     QString text;
+     if (index == 0)
+-        text = tr("Automatic recommendation: %1. ").arg(qualityName(level));
++    {
++        text = autoSelectQualityCheckBox->isChecked()
++            ? tr("Automatic recommendation: %1. ").arg(qualityName(level))
++            : tr("Automatic hardware selection is disabled; using Balanced fallback. ");
++    }
+     text += qualityDescription(level);
+     text += tr(" Resolution, screen, fullscreen mode, GUI scale and field of view are not changed.");
+     qualityDescriptionLabel->setText(text);
+@@ -874,7 +912,8 @@
+         return;
+ 
+     const int index = qualityPresetComboBox->currentIndex();
+-    const int level = index == 0 ? mRecommendedQuality : index - 1;
++    const int automaticLevel = autoSelectQualityCheckBox->isChecked() ? mRecommendedQuality : 2;
++    const int level = index == 0 ? automaticLevel : index - 1;
+     applyQualityLevel(level);
+ 
+     if (vendorOptimizationsCheckBox->isChecked())
+@@ -1231,8 +1270,36 @@
+     framerateLimitSpinBox->setEnabled(checked);
+ }
+ 
+-void Launcher::GraphicsPage::slotShadowDistLimitToggled(bool checked)
++void Launcher::GraphicsPage::slotShadowDistLimitToggled(bool)
+ {
+-    shadowDistanceSpinBox->setEnabled(checked && !linkShadowDistanceCheckBox->isChecked());
+-    fadeStartSpinBox->setEnabled(checked);
++    updateShadowControls();
++}
++
++void Launcher::GraphicsPage::updateShadowControls()
++{
++    const bool anyCaster = playerShadowsCheckBox->isChecked()
++        || actorShadowsCheckBox->isChecked()
++        || objectShadowsCheckBox->isChecked()
++        || terrainShadowsCheckBox->isChecked();
++    const bool linked = linkShadowDistanceCheckBox->isChecked();
++
++    if (!anyCaster && shadowDistanceCheckBox->isChecked())
++    {
++        const QSignalBlocker blocker(shadowDistanceCheckBox);
++        shadowDistanceCheckBox->setChecked(false);
++    }
++    else if (anyCaster && linked && !shadowDistanceCheckBox->isChecked())
++    {
++        const QSignalBlocker blocker(shadowDistanceCheckBox);
++        shadowDistanceCheckBox->setChecked(true);
++    }
++
++    linkShadowDistanceCheckBox->setEnabled(anyCaster);
++    shadowDistanceCheckBox->setEnabled(anyCaster && !linked);
++    const bool distanceEnabled = anyCaster && shadowDistanceCheckBox->isChecked();
++    shadowDistanceSpinBox->setEnabled(distanceEnabled && !linked);
++    fadeStartSpinBox->setEnabled(distanceEnabled);
++    shadowResolutionComboBox->setEnabled(anyCaster);
++    shadowComputeSceneBoundsComboBox->setEnabled(anyCaster);
++    indoorShadowsCheckBox->setEnabled(playerShadowsCheckBox->isChecked() || actorShadowsCheckBox->isChecked());
+ }
+--- a/apps/launcher/graphicspage.hpp
++++ b/apps/launcher/graphicspage.hpp
+@@ -63,6 +63,7 @@
+ 
+         bool setupSDL();
+         void syncGraphicsControls();
++        void updateShadowControls();
+         void initializeQualityPage();
+         HardwareInfo detectHardware() const;
+         int recommendQuality(const HardwareInfo& info) const;

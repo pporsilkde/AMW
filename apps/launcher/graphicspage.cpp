@@ -11,6 +11,7 @@
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QScreen>
+#include <QSignalBlocker>
 #include <QThread>
 
 #ifdef _WIN32
@@ -74,9 +75,37 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
     connect(screenComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(screenChanged(int)));
     connect(framerateLimitCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotFramerateLimitToggled(bool)));
     connect(shadowDistanceCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotShadowDistLimitToggled(bool)));
+    const auto updateShadowUi = [this](bool) { updateShadowControls(); };
+    connect(playerShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
+    connect(actorShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
+    connect(objectShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
+    connect(terrainShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
+    connect(linkShadowDistanceCheckBox, &QCheckBox::toggled, this, [this](bool linked)
+    {
+        if (linked)
+        {
+            shadowDistanceCheckBox->setChecked(true);
+            const int viewDistance = Settings::Manager::getInt("viewing distance", "Camera");
+            shadowDistanceSpinBox->setValue(std::max(512, std::min(16384, viewDistance)));
+        }
+        updateShadowControls();
+    });
     connect(qualityPresetComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotQualityPresetChanged(int)));
+    connect(autoSelectQualityCheckBox, &QCheckBox::toggled, this, [this](bool)
+    {
+        if (!mInitializingQuality)
+            updateQualityDescription();
+    });
     connect(terrainDetailComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotTerrainDetailChanged(int)));
     connect(pbrQualityComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotPbrQualityChanged(int)));
+    // X033: the quick water selector on Quality and the full Water tab are two
+    // views of the same setting. Keep them synchronized without involving the
+    // multiplayer CO-OP/MMO preset.
+    connect(waterModeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+        waterModeAdvancedComboBox, &QComboBox::setCurrentIndex);
+    connect(waterModeAdvancedComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+        waterModeComboBox, &QComboBox::setCurrentIndex);
+    connect(waterRefractionCheckBox, &QCheckBox::toggled, waterRefractionScaleComboBox, &QWidget::setEnabled);
     connect(applyQualityButton, SIGNAL(clicked()), this, SLOT(slotApplyQualityPreset()));
     connect(detectHardwareButton, SIGNAL(clicked()), this, SLOT(slotDetectHardware()));
 
@@ -176,6 +205,32 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     terrainDetailComboBox->setCurrentIndex(terrainIndex);
     pbrQualityComboBox->setCurrentIndex(pbrIndex);
 
+    const std::string waterMode = Settings::Manager::getString("shader mode", "Water");
+    const int waterModeIndex = waterMode == "simple" ? 0 : 1;
+    waterModeComboBox->setCurrentIndex(waterModeIndex);
+    waterModeAdvancedComboBox->setCurrentIndex(waterModeIndex);
+
+    const int waterTextureSize = Settings::Manager::getInt("rtt size", "Water");
+    waterTextureSizeComboBox->setCurrentIndex(waterTextureSize >= 2048 ? 3 : waterTextureSize >= 1024 ? 2 : waterTextureSize >= 512 ? 1 : 0);
+    const bool waterRefraction = Settings::Manager::getBool("refraction", "Water");
+    waterRefractionCheckBox->setChecked(waterRefraction);
+    waterRefractionScaleComboBox->setEnabled(waterRefraction);
+    waterReflectionDetailComboBox->setCurrentIndex(std::max(0, std::min(5, Settings::Manager::getInt("reflection detail", "Water"))));
+    const float refractionScale = Settings::Manager::getFloat("refraction scale", "Water");
+    waterRefractionScaleComboBox->setCurrentIndex(refractionScale <= 1.5f ? 3 : refractionScale <= 2.5f ? 2 : refractionScale <= 3.5f ? 1 : 0);
+    waterSmallFeatureSpinBox->setValue(Settings::Manager::getFloat("small feature culling pixel size", "Water"));
+    waterCausticsSpinBox->setValue(Settings::Manager::getFloat("caustics intensity", "Water"));
+    waterTintSpinBox->setValue(Settings::Manager::getFloat("underwater tint", "Water"));
+    waterWaveSpinBox->setValue(Settings::Manager::getFloat("wave strength", "Water"));
+    waterRoughnessSpinBox->setValue(Settings::Manager::getFloat("surface roughness", "Water"));
+    waterTransparencySpinBox->setValue(Settings::Manager::getFloat("transparency", "Water"));
+    waterFoamSpinBox->setValue(Settings::Manager::getFloat("foam intensity", "Water"));
+    waterHighlightSpinBox->setValue(Settings::Manager::getFloat("highlight intensity", "Water"));
+    waterRippleDetailComboBox->setCurrentIndex(std::max(0, std::min(2, Settings::Manager::getInt("rain ripple detail", "Water"))));
+    waterShaderRipplesCheckBox->setChecked(Settings::Manager::getBool("shader water ripples", "Water"));
+    waterIdleRipplesCheckBox->setChecked(Settings::Manager::getBool("idle actor ripples", "Water"));
+    waterMaxRipplesSpinBox->setValue(std::max(0, std::min(16, Settings::Manager::getInt("max shader ripples", "Water"))));
+
     // Lighting
     int lightingMethod = 1;
     if (Settings::Manager::getString("lighting method", "Shaders") == "legacy")
@@ -186,12 +241,16 @@ void Launcher::GraphicsPage::syncGraphicsControls()
         lightingMethod = 1;
     lightingMethodComboBox->setCurrentIndex(lightingMethod);
 
-    // Shadows
-    actorShadowsCheckBox->setChecked(Settings::Manager::getBool("actor shadows", "Shadows"));
-    playerShadowsCheckBox->setChecked(Settings::Manager::getBool("player shadows", "Shadows"));
-    terrainShadowsCheckBox->setChecked(Settings::Manager::getBool("terrain shadows", "Shadows"));
-    objectShadowsCheckBox->setChecked(Settings::Manager::getBool("object shadows", "Shadows"));
-    indoorShadowsCheckBox->setChecked(Settings::Manager::getBool("enable indoor shadows", "Shadows"));
+    // X032: the individual shadow flags are meaningful only when the master
+    // switch is enabled. Older settings.cfg files can retain stale actor/object
+    // flags after a Minimum/Auto preset disabled shadows globally; showing those
+    // stale flags as checked made the automatic preset look broken.
+    const bool shadowsEnabled = Settings::Manager::getBool("enable shadows", "Shadows");
+    actorShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("actor shadows", "Shadows"));
+    playerShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("player shadows", "Shadows"));
+    terrainShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("terrain shadows", "Shadows"));
+    objectShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("object shadows", "Shadows"));
+    indoorShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("enable indoor shadows", "Shadows"));
 
     const QString computeBounds = QString::fromStdString(
         Settings::Manager::getString("compute scene bounds", "Shadows"));
@@ -199,10 +258,18 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     if (computeIndex != -1)
         shadowComputeSceneBoundsComboBox->setCurrentIndex(computeIndex);
 
+    const bool linkShadowDistance = Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows");
+    linkShadowDistanceCheckBox->setChecked(linkShadowDistance);
     const int shadowDistLimit = Settings::Manager::getInt("maximum shadow map distance", "Shadows");
-    shadowDistanceCheckBox->setChecked(shadowDistLimit > 0);
-    if (shadowDistLimit > 0)
-        shadowDistanceSpinBox->setValue(shadowDistLimit);
+    shadowDistanceCheckBox->setChecked(shadowsEnabled && (linkShadowDistance || shadowDistLimit > 0));
+    if (linkShadowDistance)
+    {
+        const int viewDistance = Settings::Manager::getInt("viewing distance", "Camera");
+        shadowDistanceSpinBox->setValue(std::max(512, std::min(16384, viewDistance)));
+        shadowDistanceCheckBox->setEnabled(false);
+    }
+    else if (shadowDistLimit > 0)
+        shadowDistanceSpinBox->setValue(std::min(16384, shadowDistLimit));
 
     const float shadowFadeStart = Settings::Manager::getFloat("shadow fade start", "Shadows");
     if (shadowFadeStart != 0.f)
@@ -216,7 +283,7 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     slotFullScreenChanged(fullScreenCheckBox->checkState());
     slotStandardToggled(standardRadioButton->isChecked());
     slotFramerateLimitToggled(framerateLimitCheckBox->isChecked());
-    slotShadowDistLimitToggled(shadowDistanceCheckBox->isChecked());
+    updateShadowControls();
 }
 
 void Launcher::GraphicsPage::saveSettings()
@@ -285,6 +352,30 @@ void Launcher::GraphicsPage::saveSettings()
     applyTerrainDetail(terrainIndex);
     applyPbrQuality(pbrIndex);
 
+    // X033: full launcher-side water controls. The graphics preset chooses a
+    // sensible backend/texture tier, but manual water tuning remains independent.
+    static const int waterTextureSizes[] = { 256, 512, 1024, 2048 };
+    static const float waterRefractionScales[] = { 4.f, 3.f, 2.f, 1.f };
+    Settings::Manager::setString("shader mode", "Water",
+        waterModeAdvancedComboBox->currentIndex() == 0 ? "simple" : "new");
+    Settings::Manager::setBool("shader", "Water", true);
+    Settings::Manager::setInt("rtt size", "Water", waterTextureSizes[std::max(0, std::min(3, waterTextureSizeComboBox->currentIndex()))]);
+    Settings::Manager::setBool("refraction", "Water", waterRefractionCheckBox->isChecked());
+    Settings::Manager::setInt("reflection detail", "Water", std::max(0, std::min(5, waterReflectionDetailComboBox->currentIndex())));
+    Settings::Manager::setFloat("refraction scale", "Water", waterRefractionScales[std::max(0, std::min(3, waterRefractionScaleComboBox->currentIndex()))]);
+    Settings::Manager::setFloat("small feature culling pixel size", "Water", static_cast<float>(waterSmallFeatureSpinBox->value()));
+    Settings::Manager::setFloat("caustics intensity", "Water", static_cast<float>(waterCausticsSpinBox->value()));
+    Settings::Manager::setFloat("underwater tint", "Water", static_cast<float>(waterTintSpinBox->value()));
+    Settings::Manager::setFloat("wave strength", "Water", static_cast<float>(waterWaveSpinBox->value()));
+    Settings::Manager::setFloat("surface roughness", "Water", static_cast<float>(waterRoughnessSpinBox->value()));
+    Settings::Manager::setFloat("transparency", "Water", static_cast<float>(waterTransparencySpinBox->value()));
+    Settings::Manager::setFloat("foam intensity", "Water", static_cast<float>(waterFoamSpinBox->value()));
+    Settings::Manager::setFloat("highlight intensity", "Water", static_cast<float>(waterHighlightSpinBox->value()));
+    Settings::Manager::setInt("rain ripple detail", "Water", std::max(0, std::min(2, waterRippleDetailComboBox->currentIndex())));
+    Settings::Manager::setBool("shader water ripples", "Water", waterShaderRipplesCheckBox->isChecked());
+    Settings::Manager::setBool("idle actor ripples", "Water", waterIdleRipplesCheckBox->isChecked());
+    Settings::Manager::setInt("max shader ripples", "Water", waterMaxRipplesSpinBox->value());
+
     // Lighting. PBR material maps require the shader-compatible backend.
     static std::array<std::string, 3> lightingMethodMap = {"legacy", "shaders compatibility", "shaders"};
     int lightingMethodIndex = lightingMethodComboBox->currentIndex();
@@ -296,7 +387,18 @@ void Launcher::GraphicsPage::saveSettings()
     Settings::Manager::setString("lighting method", "Shaders", lightingMethodMap[lightingMethodIndex]);
 
     // Shadows
-    int cShadowDist = shadowDistanceCheckBox->checkState() != Qt::Unchecked ? shadowDistanceSpinBox->value() : 0;
+    const bool cLinkShadowDistance = linkShadowDistanceCheckBox->isChecked();
+    if (Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows") != cLinkShadowDistance)
+        Settings::Manager::setBool("link shadow distance to viewing distance", "Shadows", cLinkShadowDistance);
+
+    int cShadowDist = 0;
+    if (cLinkShadowDistance)
+    {
+        cShadowDist = std::max(512, std::min(16384, Settings::Manager::getInt("viewing distance", "Camera")));
+        shadowDistanceSpinBox->setValue(cShadowDist);
+    }
+    else if (shadowDistanceCheckBox->checkState() != Qt::Unchecked)
+        cShadowDist = std::min(16384, shadowDistanceSpinBox->value());
     if (Settings::Manager::getInt("maximum shadow map distance", "Shadows") != cShadowDist)
         Settings::Manager::setInt("maximum shadow map distance", "Shadows", cShadowDist);
     float cFadeStart = fadeStartSpinBox->value();
@@ -416,6 +518,7 @@ void Launcher::GraphicsPage::applyPbrQuality(int requestedIndex)
     Settings::Manager::setBool("auto use terrain normal maps", "Shaders", normalMaps);
     Settings::Manager::setBool("auto use object specular maps", "Shaders", specularMaps);
     Settings::Manager::setBool("auto use terrain specular maps", "Shaders", specularMaps);
+    Settings::Manager::setBool("enhanced pbr lighting", "Shaders", index >= 2);
     if (index > 0)
     {
         Settings::Manager::setBool("force shaders", "Shaders", true);
@@ -499,8 +602,8 @@ QString Launcher::GraphicsPage::qualityName(int level) const
 QString Launcher::GraphicsPage::qualityDescription(int level) const
 {
     static const std::array<const char*, 6> descriptions = {
-        "Maximum performance for software renderers and very old integrated graphics. Distant land stays enabled with conservative terrain LOD, shadows and grass.",
-        "For older integrated GPUs. Uses simple lighting, modest view distance and lightweight grass without expensive object shadows.",
+        "Maximum performance for software renderers and very old integrated graphics. Uses simple non-PBR water, shorter view distance, small terrain budget and no realtime shadows.",
+        "For older integrated GPUs. Uses simple non-PBR water, modest view distance, actor shadows and lightweight grass without expensive object shadows.",
         "A stable default for entry-level hardware. Enables distant terrain, normal maps, actor shadows and conservative paging.",
         "Balanced visual quality for modern integrated graphics and mainstream discrete GPUs. Enables object shadows, improved water and denser grass.",
         "For powerful discrete GPUs. Uses longer view distance, detailed terrain, terrain shadows, higher anisotropy and larger shadow maps.",
@@ -637,12 +740,17 @@ Launcher::GraphicsPage::HardwareInfo Launcher::GraphicsPage::detectHardware() co
 
 int Launcher::GraphicsPage::recommendQuality(const HardwareInfo& info) const
 {
-    if (info.softwareRenderer || info.vendor == QLatin1String("microsoft")
-        || info.vendor == QLatin1String("unknown"))
+    if (info.softwareRenderer || info.vendor == QLatin1String("microsoft"))
         return 0;
 
     const QString model = info.renderer.toLower();
-    int level = 2;
+    // X032: an unknown hardware vendor is not the same thing as a software
+    // renderer. Off-screen OpenGL probing can legitimately fail on hybrid or
+    // remote-desktop systems. Start from Balanced and let CPU/display pressure
+    // lower it instead of silently disabling shadows/water at Minimum.
+    int level = info.vendor == QLatin1String("unknown")
+        ? (info.logicalCores <= 4 ? 1 : 2)
+        : 2;
 
     if (info.vendor == QLatin1String("intel"))
     {
@@ -761,13 +869,27 @@ void Launcher::GraphicsPage::initializeQualityPage()
 
     if (initialPresetPending && reloadUserSettingsFromDisk())
     {
-        applyQualityLevel(mRecommendedQuality);
+        int initialLevel = mRecommendedQuality;
+        QString persistedMode = mode;
+        if (mode != QLatin1String("auto"))
+        {
+            bool ok = false;
+            const int storedLevel = mode.toInt(&ok);
+            if (ok)
+                initialLevel = std::max(0, std::min(5, storedLevel));
+            else
+                persistedMode = QStringLiteral("auto");
+        }
+        else if (!autoSelect)
+            initialLevel = 2;
+
+        applyQualityLevel(initialLevel);
         if (vendorOptimizations)
-            applyVendorOptimizations(mRecommendedQuality);
+            applyVendorOptimizations(initialLevel);
 
         if (saveUserSettingsToDisk())
         {
-            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("auto"));
+            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), persistedMode);
             storeLauncherValue(QStringLiteral("General/Graphics/hardwareSignature"), mHardwareInfo.signature());
             storeLauncherValue(pendingKey, QStringLiteral("false"));
             storeLauncherValue(QStringLiteral("General/Graphics/initialQualityPresetApplied"),
@@ -781,10 +903,15 @@ void Launcher::GraphicsPage::initializeQualityPage()
 void Launcher::GraphicsPage::updateQualityDescription()
 {
     const int index = qualityPresetComboBox->currentIndex();
-    const int level = index == 0 ? mRecommendedQuality : index - 1;
+    const int automaticLevel = autoSelectQualityCheckBox->isChecked() ? mRecommendedQuality : 2;
+    const int level = index == 0 ? automaticLevel : index - 1;
     QString text;
     if (index == 0)
-        text = tr("Automatic recommendation: %1. ").arg(qualityName(level));
+    {
+        text = autoSelectQualityCheckBox->isChecked()
+            ? tr("Automatic recommendation: %1. ").arg(qualityName(level))
+            : tr("Automatic hardware selection is disabled; using Balanced fallback. ");
+    }
     text += qualityDescription(level);
     text += tr(" Resolution, screen, fullscreen mode, GUI scale and field of view are not changed.");
     qualityDescriptionLabel->setText(text);
@@ -833,7 +960,8 @@ void Launcher::GraphicsPage::slotApplyQualityPreset()
         return;
 
     const int index = qualityPresetComboBox->currentIndex();
-    const int level = index == 0 ? mRecommendedQuality : index - 1;
+    const int automaticLevel = autoSelectQualityCheckBox->isChecked() ? mRecommendedQuality : 2;
+    const int level = index == 0 ? automaticLevel : index - 1;
     applyQualityLevel(level);
 
     if (vendorOptimizationsCheckBox->isChecked())
@@ -865,7 +993,7 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     // turns that default into an explicit user override. That was the reason
     // resolution, fullscreen mode and GUI scaling were reset after Play.
 
-    static const int viewDistance[] = { 5000, 6000, 8192, 10000, 12288, 16384 };
+    static const int viewDistance[] = { 4096, 6144, 8192, 10240, 12288, 16384 };
     // Conservative cutoffs reduce visible popping of thin geometry and distant details.
     // Lower values cull fewer small projected features.
     static const int cullingPixels[] = { 12, 11, 10, 8, 7, 6 };
@@ -883,12 +1011,11 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     static const int maxLights[] = { 8, 12, 16, 24, 32, 48 };
     static const int anisotropy[] = { 0, 2, 4, 8, 12, 16 };
     static const int antialiasing[] = { 0, 0, 2, 2, 4, 4 };
-    static const int waterRtt[] = { 256, 256, 256, 512, 512, 512 };
+    static const int waterRtt[] = { 256, 256, 512, 512, 1024, 2048 };
     // Minimum already reflects world objects. Higher presets progressively add
     // actors and groundcover; the limited 0..5 setting range means adjacent
     // presets intentionally share a detail tier.
-    static const int waterReflectionDetail[] = { 3, 3, 4, 4, 5, 5 };
-    static const int shadowDistance[] = { 0, 2048, 4096, 6144, 8192, 12288 };
+    static const int waterReflectionDetail[] = { 2, 3, 3, 4, 5, 5 };
     // Shadow-map sizes below 512 are intentionally not used by any quality preset.
     static const int shadowResolution[] = { 512, 512, 1024, 2048, 4096, 8192 };
     static const float grassDensity[] = { 0.30f, 0.45f, 0.65f, 0.80f, 0.90f, 1.00f };
@@ -900,6 +1027,7 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     static const int occlusionWidth[] = { 384, 384, 512, 512, 640, 768 };
     static const int occlusionHeight[] = { 192, 192, 256, 256, 320, 384 };
     static const int occlusionTerrainRadius[] = { 4, 4, 6, 8, 10, 12 };
+    static const int occlusionTerrainCellBudget[] = { 12, 16, 20, 24, 32, 40 };
     static const float occlusionMinRadius[] = { 650.f, 600.f, 550.f, 500.f, 450.f, 400.f };
     static const float occlusionMaxRadius[] = { 3200.f, 3600.f, 4000.f, 4400.f, 4800.f, 5000.f };
     static const float occlusionShrinkFactor[] = { 0.70f, 0.72f, 0.74f, 0.76f, 0.78f, 0.80f };
@@ -910,7 +1038,6 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
 
     int effectiveAa = antialiasing[level];
     int effectiveShadowResolution = shadowResolution[level];
-    int effectiveShadowDistance = shadowDistance[level];
     int effectiveMaxLights = maxLights[level];
     static const int materialQuality[] = { 0, 1, 1, 2, 3, 4 };
     int effectiveMaterialQuality = materialQuality[level];
@@ -921,7 +1048,6 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     {
         effectiveAa = std::min(effectiveAa, 2);
         effectiveShadowResolution = std::min(effectiveShadowResolution, 1024);
-        effectiveShadowDistance = std::min(effectiveShadowDistance, 4096);
         effectiveMaxLights = std::min(effectiveMaxLights, 16);
         effectiveMaterialQuality = std::min(effectiveMaterialQuality, 1);
     }
@@ -937,6 +1063,8 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     Settings::Manager::setInt("occlusion buffer width", "Camera", occlusionWidth[level]);
     Settings::Manager::setInt("occlusion buffer height", "Camera", occlusionHeight[level]);
     Settings::Manager::setInt("occlusion terrain radius", "Camera", occlusionTerrainRadius[level]);
+    Settings::Manager::setInt("occlusion terrain cell budget", "Camera", occlusionTerrainCellBudget[level]);
+    Settings::Manager::setBool("occlusion terrain frustum cull", "Camera", true);
     Settings::Manager::setFloat("occlusion occluder min radius", "Camera", occlusionMinRadius[level]);
     Settings::Manager::setFloat("occlusion occluder max radius", "Camera", occlusionMaxRadius[level]);
     Settings::Manager::setFloat("occlusion occluder shrink factor", "Camera", occlusionShrinkFactor[level]);
@@ -976,6 +1104,7 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     const bool normalMaps = effectiveMaterialQuality >= 1;
     const bool specularMaps = effectiveMaterialQuality >= 2;
     Settings::Manager::setString("material quality", "Shaders", materialModes[effectiveMaterialQuality]);
+    Settings::Manager::setBool("enhanced pbr lighting", "Shaders", level >= 2);
     Settings::Manager::setBool("force shaders", "Shaders", true);
     Settings::Manager::setBool("force per pixel lighting", "Shaders", level >= 2);
     Settings::Manager::setBool("clamp lighting", "Shaders", level <= 1);
@@ -988,22 +1117,31 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     // lighting is never selected by a preset, including the minimum profile.
     Settings::Manager::setString("lighting method", "Shaders", "shaders compatibility");
 
-    // Every preset uses shader water so its reflection/refraction tier is
-    // applied even when an older user profile explicitly disabled the shader.
+    // X030 quality-aware water. Minimum and Low deliberately avoid the PBR
+    // water path; Balanced and above use the new renderer. Both remain shader
+    // backed so reflection detail and RTT scaling continue to work.
+    Settings::Manager::setString("shader mode", "Water", level <= 1 ? "simple" : "new");
     Settings::Manager::setBool("shader", "Water", true);
     Settings::Manager::setInt("rtt size", "Water", waterRtt[level]);
-    // Low and every higher preset use refraction. Minimum keeps it disabled,
-    // while still reflecting objects as requested.
-    Settings::Manager::setBool("refraction", "Water", level >= 1);
+    Settings::Manager::setBool("refraction", "Water", level >= 2);
     Settings::Manager::setInt("reflection detail", "Water", waterReflectionDetail[level]);
+    Settings::Manager::setInt("rain ripple detail", "Water", level >= 4 ? 2 : (level >= 2 ? 1 : 0));
+    Settings::Manager::setBool("shader water ripples", "Water", level >= 1);
+    Settings::Manager::setBool("idle actor ripples", "Water", level >= 2);
+    Settings::Manager::setInt("max shader ripples", "Water", level == 0 ? 1 : (level == 1 ? 2 : (level <= 3 ? 4 : (level == 4 ? 6 : 8))));
+    Settings::Manager::setFloat("small feature culling pixel size", "Water",
+        level == 0 ? 32.f : (level == 1 ? 28.f : (level == 2 ? 20.f : (level == 3 ? 18.f : (level == 4 ? 14.f : 10.f))));
+    Settings::Manager::setFloat("refraction scale", "Water",
+        level <= 1 ? 4.f : (level <= 3 ? 3.f : (level == 4 ? 2.f : 1.f)));
 
     Settings::Manager::setBool("enable shadows", "Shadows", level >= 1);
     Settings::Manager::setBool("player shadows", "Shadows", level >= 1);
     Settings::Manager::setBool("actor shadows", "Shadows", level >= 1);
-    Settings::Manager::setBool("object shadows", "Shadows", level >= 2);
-    Settings::Manager::setBool("terrain shadows", "Shadows", level >= 3);
+    Settings::Manager::setBool("object shadows", "Shadows", level >= 3);
+    Settings::Manager::setBool("terrain shadows", "Shadows", level >= 4);
     Settings::Manager::setBool("enable indoor shadows", "Shadows", level >= 2);
-    Settings::Manager::setInt("maximum shadow map distance", "Shadows", effectiveShadowDistance);
+    Settings::Manager::setBool("link shadow distance to viewing distance", "Shadows", true);
+    Settings::Manager::setInt("maximum shadow map distance", "Shadows", std::min(16384, viewDistance[level]));
     Settings::Manager::setInt("shadow map resolution", "Shadows", effectiveShadowResolution);
     Settings::Manager::setString("compute scene bounds", "Shadows", level >= 5 ? "primitives" : "bounds");
 
@@ -1181,8 +1319,36 @@ void Launcher::GraphicsPage::slotFramerateLimitToggled(bool checked)
     framerateLimitSpinBox->setEnabled(checked);
 }
 
-void Launcher::GraphicsPage::slotShadowDistLimitToggled(bool checked)
+void Launcher::GraphicsPage::slotShadowDistLimitToggled(bool)
 {
-    shadowDistanceSpinBox->setEnabled(checked);
-    fadeStartSpinBox->setEnabled(checked);
+    updateShadowControls();
+}
+
+void Launcher::GraphicsPage::updateShadowControls()
+{
+    const bool anyCaster = playerShadowsCheckBox->isChecked()
+        || actorShadowsCheckBox->isChecked()
+        || objectShadowsCheckBox->isChecked()
+        || terrainShadowsCheckBox->isChecked();
+    const bool linked = linkShadowDistanceCheckBox->isChecked();
+
+    if (!anyCaster && shadowDistanceCheckBox->isChecked())
+    {
+        const QSignalBlocker blocker(shadowDistanceCheckBox);
+        shadowDistanceCheckBox->setChecked(false);
+    }
+    else if (anyCaster && linked && !shadowDistanceCheckBox->isChecked())
+    {
+        const QSignalBlocker blocker(shadowDistanceCheckBox);
+        shadowDistanceCheckBox->setChecked(true);
+    }
+
+    linkShadowDistanceCheckBox->setEnabled(anyCaster);
+    shadowDistanceCheckBox->setEnabled(anyCaster && !linked);
+    const bool distanceEnabled = anyCaster && shadowDistanceCheckBox->isChecked();
+    shadowDistanceSpinBox->setEnabled(distanceEnabled && !linked);
+    fadeStartSpinBox->setEnabled(distanceEnabled);
+    shadowResolutionComboBox->setEnabled(anyCaster);
+    shadowComputeSceneBoundsComboBox->setEnabled(anyCaster);
+    indoorShadowsCheckBox->setEnabled(playerShadowsCheckBox->isChecked() || actorShadowsCheckBox->isChecked());
 }

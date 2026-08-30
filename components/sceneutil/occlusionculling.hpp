@@ -6,6 +6,7 @@
 #include <osg/Referenced>
 #include <osg/Vec3f>
 
+#include <atomic>
 #include <vector>
 
 class MaskedOcclusionCulling;
@@ -41,11 +42,15 @@ namespace SceneUtil
         const osg::Matrixd& getInverseViewMatrix() const { return mInverseView; }
         const osg::Vec3f& getEyeWorld() const { return mEyeWorld; }
 
-        unsigned int getNumOccluded() const { return mNumOccluded; }
-        unsigned int getNumTested() const { return mNumTested; }
-        unsigned int getNumBuildingOccluders() const { return mNumBuildingOccluders; }
-        unsigned int getNumBuildingTris() const { return mNumBuildingTris; }
-        unsigned int getNumBuildingVerts() const { return mNumBuildingVerts; }
+        // X029-safe: stats are published once per cull frame. This avoids data
+        // races with the update-thread stats reader without adding atomics to the
+        // per-AABB hot path. Values intentionally describe the previous completed
+        // cull frame.
+        unsigned int getNumOccluded() const { return mPublishedNumOccluded.load(std::memory_order_relaxed); }
+        unsigned int getNumTested() const { return mPublishedNumTested.load(std::memory_order_relaxed); }
+        unsigned int getNumBuildingOccluders() const { return mPublishedNumBuildingOccluders.load(std::memory_order_relaxed); }
+        unsigned int getNumBuildingTris() const { return mPublishedNumBuildingTris.load(std::memory_order_relaxed); }
+        unsigned int getNumBuildingVerts() const { return mPublishedNumBuildingVerts.load(std::memory_order_relaxed); }
         void incrementBuildingOccluders(unsigned int tris, unsigned int verts)
         {
             ++mNumBuildingOccluders;
@@ -71,6 +76,12 @@ namespace SceneUtil
         unsigned int mNumBuildingOccluders = 0;
         unsigned int mNumBuildingTris = 0;
         unsigned int mNumBuildingVerts = 0;
+
+        std::atomic<unsigned int> mPublishedNumOccluded{0};
+        std::atomic<unsigned int> mPublishedNumTested{0};
+        std::atomic<unsigned int> mPublishedNumBuildingOccluders{0};
+        std::atomic<unsigned int> mPublishedNumBuildingTris{0};
+        std::atomic<unsigned int> mPublishedNumBuildingVerts{0};
     };
 }
 

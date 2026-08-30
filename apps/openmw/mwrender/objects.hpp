@@ -30,9 +30,15 @@ namespace SceneUtil
     class OcclusionCuller;
 }
 
+namespace osg
+{
+    class Stats;
+}
+
 namespace MWRender{
 
 class Animation;
+class OccluderTemplateCache;
 
 class PtrHolder : public osg::Object
 {
@@ -69,8 +75,16 @@ class Objects{
 
     osg::ref_ptr<SceneUtil::UnrefQueue> mUnrefQueue;
     osg::ref_ptr<SceneUtil::OcclusionCuller> mOcclusionCuller;
+    // X029: shared across every cell, so identical models build their occluder
+    // hull once instead of once per instance per cell load.
+    osg::ref_ptr<OccluderTemplateCache> mOccluderTemplateCache;
 
     void insertBegin(const MWWorld::Ptr& ptr);
+
+    // X029: single place that builds a cell root. Previously updatePtr() created
+    // one without the occlusion cull callback, so objects that moved into a cell
+    // whose node did not exist yet were silently excluded from occlusion culling.
+    osg::ref_ptr<osg::Group> createCellNode();
 
 public:
     Objects(Resource::ResourceSystem* resourceSystem, osg::ref_ptr<osg::Group> rootNode, SceneUtil::UnrefQueue* unrefQueue, SceneUtil::OcclusionCuller* occlusionCuller = nullptr);
@@ -96,6 +110,9 @@ public:
 
     /// Updates containing cell for object rendering data
     void updatePtr(const MWWorld::Ptr &old, const MWWorld::Ptr &cur);
+
+    /// X029: occluder template cache counters for the resource stats page.
+    void reportStats(unsigned int frameNumber, osg::Stats* stats) const;
 
 private:
     void operator = (const Objects&);

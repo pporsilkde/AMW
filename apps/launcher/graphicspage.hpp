@@ -63,6 +63,7 @@ namespace Launcher
 
         bool setupSDL();
         void syncGraphicsControls();
+        void updateShadowControls();
         void initializeQualityPage();
         HardwareInfo detectHardware() const;
         int recommendQuality(const HardwareInfo& info) const;

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <ui version="4.0">
  <class>GraphicsPage</class>
  <widget class="QWidget" name="GraphicsPage">
@@ -36,70 +36,182 @@
           </item>
           <item row="0" column="1" colspan="2">
            <widget class="QComboBox" name="qualityPresetComboBox">
-            <item><property name="text"><string>Auto (recommended)</string></property></item>
-            <item><property name="text"><string>Minimum</string></property></item>
-            <item><property name="text"><string>Low</string></property></item>
-            <item><property name="text"><string>Balanced</string></property></item>
-            <item><property name="text"><string>Medium</string></property></item>
-            <item><property name="text"><string>High</string></property></item>
-            <item><property name="text"><string>Ultra</string></property></item>
+            <item>
+             <property name="text">
+              <string>Auto (recommended)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Minimum</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Low</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Balanced</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Medium</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>High</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Ultra</string>
+             </property>
+            </item>
            </widget>
           </item>
           <item row="1" column="0">
            <widget class="QLabel" name="terrainDetailLabel">
-            <property name="text"><string>Terrain detail:</string></property>
+            <property name="text">
+             <string>Terrain detail:</string>
+            </property>
            </widget>
           </item>
           <item row="1" column="1" colspan="2">
            <widget class="QComboBox" name="terrainDetailComboBox">
-            <property name="toolTip"><string>Maximum PBR is available only with High or Ultra terrain detail.</string></property>
-            <item><property name="text"><string>Minimum</string></property></item>
-            <item><property name="text"><string>Low</string></property></item>
-            <item><property name="text"><string>Balanced</string></property></item>
-            <item><property name="text"><string>Medium</string></property></item>
-            <item><property name="text"><string>High</string></property></item>
-            <item><property name="text"><string>Ultra</string></property></item>
+            <property name="toolTip">
+             <string>Maximum PBR is available only with High or Ultra terrain detail.</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Minimum</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Low</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Balanced</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Medium</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>High</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Ultra</string>
+             </property>
+            </item>
            </widget>
           </item>
           <item row="2" column="0">
            <widget class="QLabel" name="pbrQualityLabel">
-            <property name="text"><string>PBR quality:</string></property>
+            <property name="text">
+             <string>PBR quality:</string>
+            </property>
            </widget>
           </item>
           <item row="2" column="1" colspan="2">
            <widget class="QComboBox" name="pbrQualityComboBox">
-            <property name="toolTip"><string>Maximum PBR automatically selects High terrain detail. Lower terrain settings automatically use Quality PBR.</string></property>
-            <item><property name="text"><string>Disabled</string></property></item>
-            <item><property name="text"><string>Simple</string></property></item>
-            <item><property name="text"><string>Balanced</string></property></item>
-            <item><property name="text"><string>Quality</string></property></item>
-            <item><property name="text"><string>Maximum</string></property></item>
+            <property name="toolTip">
+             <string>Maximum PBR automatically selects High terrain detail. Lower terrain settings automatically use Quality PBR.</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Disabled</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Simple</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Balanced</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Quality</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Maximum</string>
+             </property>
+            </item>
            </widget>
           </item>
-          <item row="3" column="0" colspan="3">
+          <item row="4" column="0" colspan="3">
            <widget class="QCheckBox" name="autoSelectQualityCheckBox">
             <property name="text">
              <string>Use the detected hardware recommendation when Automatic is selected</string>
             </property>
-            <property name="checked"><bool>true</bool></property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
            </widget>
           </item>
-          <item row="4" column="0" colspan="3">
+          <item row="5" column="0" colspan="3">
            <widget class="QCheckBox" name="vendorOptimizationsCheckBox">
             <property name="text">
              <string>Apply safe vendor-specific OpenGL and OpenSceneGraph optimizations</string>
             </property>
-            <property name="checked"><bool>true</bool></property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
            </widget>
           </item>
-          <item row="5" column="1">
+          <item row="6" column="1">
            <widget class="QPushButton" name="applyQualityButton">
-            <property name="text"><string>Apply preset</string></property>
+            <property name="text">
+             <string>Apply preset</string>
+            </property>
            </widget>
           </item>
-          <item row="5" column="2">
+          <item row="6" column="2">
            <widget class="QPushButton" name="detectHardwareButton">
-            <property name="text"><string>Detect hardware again</string></property>
+            <property name="text">
+             <string>Detect hardware again</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="waterModeLabel">
+            <property name="text">
+             <string>Water rendering:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1" colspan="2">
+           <widget class="QComboBox" name="waterModeComboBox">
+            <property name="toolTip">
+             <string>Simple uses the lightweight legacy shader water. PBR / New uses the current physically-based water path.</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Simple (faster)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>PBR / New</string>
+             </property>
+            </item>
            </widget>
           </item>
          </layout>
@@ -107,27 +219,79 @@
        </item>
        <item>
         <widget class="QGroupBox" name="detectedHardwareGroupBox">
-         <property name="title"><string>Detected hardware</string></property>
+         <property name="title">
+          <string>Detected hardware</string>
+         </property>
          <layout class="QGridLayout" name="detectedHardwareLayout">
-          <item row="0" column="0"><widget class="QLabel" name="qualityGpuTitleLabel"><property name="text"><string>Graphics adapter:</string></property></widget></item>
-          <item row="0" column="1"><widget class="QLabel" name="qualityGpuLabel"><property name="text"><string>Not detected</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
-          <item row="1" column="0"><widget class="QLabel" name="qualityCpuTitleLabel"><property name="text"><string>Processor:</string></property></widget></item>
-          <item row="1" column="1"><widget class="QLabel" name="qualityCpuLabel"><property name="text"><string>Not detected</string></property></widget></item>
-          <item row="2" column="0"><widget class="QLabel" name="qualityRecommendationTitleLabel"><property name="text"><string>Recommendation:</string></property></widget></item>
-          <item row="2" column="1"><widget class="QLabel" name="qualityRecommendationLabel"><property name="text"><string>Balanced</string></property></widget></item>
+          <item row="0" column="0">
+           <widget class="QLabel" name="qualityGpuTitleLabel">
+            <property name="text">
+             <string>Graphics adapter:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLabel" name="qualityGpuLabel">
+            <property name="text">
+             <string>Not detected</string>
+            </property>
+            <property name="textInteractionFlags">
+             <set>Qt::TextSelectableByMouse</set>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="qualityCpuTitleLabel">
+            <property name="text">
+             <string>Processor:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLabel" name="qualityCpuLabel">
+            <property name="text">
+             <string>Not detected</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="qualityRecommendationTitleLabel">
+            <property name="text">
+             <string>Recommendation:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLabel" name="qualityRecommendationLabel">
+            <property name="text">
+             <string>Balanced</string>
+            </property>
+           </widget>
+          </item>
          </layout>
         </widget>
        </item>
        <item>
         <widget class="QLabel" name="qualityDescriptionLabel">
-         <property name="wordWrap"><bool>true</bool></property>
-         <property name="text"><string>Select a preset to configure rendering distance, terrain detail, lighting, water, shadows, grass, paging and worker threads together. Display resolution and window mode are preserved.</string></property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+         <property name="text">
+          <string>Select a preset to configure rendering distance, terrain detail, lighting, water, shadows, grass, paging and worker threads together. Display resolution and window mode are preserved.</string>
+         </property>
         </widget>
        </item>
        <item>
         <spacer name="qualityVerticalSpacer">
-         <property name="orientation"><enum>Qt::Vertical</enum></property>
-         <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>20</height>
+          </size>
+         </property>
         </spacer>
        </item>
       </layout>
@@ -199,7 +363,7 @@
              </widget>
             </item>
             <item row="0" column="2">
-             <widget class="QComboBox" name="resolutionComboBox"/>
+             <widget class="QComboBox" name="resolutionComboBox" />
             </item>
            </layout>
           </item>
@@ -253,7 +417,7 @@
            </widget>
           </item>
           <item row="4" column="1">
-           <widget class="QComboBox" name="screenComboBox"/>
+           <widget class="QComboBox" name="screenComboBox" />
           </item>
           <item row="4" column="0">
            <widget class="QLabel" name="screenLabel">
@@ -300,6 +464,86 @@
           </item>
          </layout>
         </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="WaterWrapper">
+      <attribute name="title">
+       <string>Water</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="waterPageLayout">
+       <item>
+        <layout class="QHBoxLayout" name="waterColumnsLayout">
+         <item>
+          <widget class="QGroupBox" name="waterRendererGroupBox">
+           <property name="title"><string>Renderer &amp; textures</string></property>
+           <layout class="QGridLayout" name="waterRendererLayout">
+            <item row="0" column="0"><widget class="QLabel" name="waterModeAdvancedLabel"><property name="text"><string>Rendering:</string></property></widget></item>
+            <item row="0" column="1"><widget class="QComboBox" name="waterModeAdvancedComboBox">
+             <item><property name="text"><string>Simple shader (faster)</string></property></item>
+             <item><property name="text"><string>PBR / New</string></property></item>
+            </widget></item>
+            <item row="1" column="0"><widget class="QLabel" name="waterTextureSizeLabel"><property name="text"><string>Texture quality:</string></property></widget></item>
+            <item row="1" column="1"><widget class="QComboBox" name="waterTextureSizeComboBox">
+             <item><property name="text"><string>Low (256)</string></property></item>
+             <item><property name="text"><string>Medium (512)</string></property></item>
+             <item><property name="text"><string>High (1024)</string></property></item>
+             <item><property name="text"><string>Ultra (2048)</string></property></item>
+            </widget></item>
+            <item row="2" column="0" colspan="2"><widget class="QCheckBox" name="waterRefractionCheckBox"><property name="text"><string>Enable refraction</string></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="waterReflectionDetailLabel"><property name="text"><string>Reflection detail:</string></property></widget></item>
+            <item row="3" column="1"><widget class="QComboBox" name="waterReflectionDetailComboBox">
+             <item><property name="text"><string>Level 0</string></property></item><item><property name="text"><string>Level 1</string></property></item>
+             <item><property name="text"><string>Level 2</string></property></item><item><property name="text"><string>Level 3</string></property></item>
+             <item><property name="text"><string>Level 4</string></property></item><item><property name="text"><string>Level 5</string></property></item>
+            </widget></item>
+            <item row="4" column="0"><widget class="QLabel" name="waterRefractionScaleLabel"><property name="text"><string>Refraction resolution:</string></property></widget></item>
+            <item row="4" column="1"><widget class="QComboBox" name="waterRefractionScaleComboBox">
+             <item><property name="text"><string>Quarter (4x downscale)</string></property></item>
+             <item><property name="text"><string>Third (3x downscale)</string></property></item>
+             <item><property name="text"><string>Half (2x downscale)</string></property></item>
+             <item><property name="text"><string>Full (1x)</string></property></item>
+            </widget></item>
+            <item row="5" column="0"><widget class="QLabel" name="waterSmallFeatureLabel"><property name="text"><string>RTT small feature culling:</string></property></widget></item>
+            <item row="5" column="1"><widget class="QDoubleSpinBox" name="waterSmallFeatureSpinBox"><property name="decimals"><number>1</number></property><property name="maximum"><double>64.000000000000000</double></property><property name="singleStep"><double>1.000000000000000</double></property><property name="suffix"><string> px</string></property></widget></item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="waterSurfaceGroupBox">
+           <property name="title"><string>Surface / PBR</string></property>
+           <layout class="QGridLayout" name="waterSurfaceLayout">
+            <item row="0" column="0"><widget class="QLabel" name="waterCausticsLabel"><property name="text"><string>Caustics:</string></property></widget></item>
+            <item row="0" column="1"><widget class="QDoubleSpinBox" name="waterCausticsSpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>3.000000000000000</double></property><property name="singleStep"><double>0.100000000000000</double></property></widget></item>
+            <item row="1" column="0"><widget class="QLabel" name="waterTintLabel"><property name="text"><string>Underwater tint:</string></property></widget></item>
+            <item row="1" column="1"><widget class="QDoubleSpinBox" name="waterTintSpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>2.000000000000000</double></property><property name="singleStep"><double>0.100000000000000</double></property></widget></item>
+            <item row="2" column="0"><widget class="QLabel" name="waterWaveLabel"><property name="text"><string>Wave strength:</string></property></widget></item>
+            <item row="2" column="1"><widget class="QDoubleSpinBox" name="waterWaveSpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>1.000000000000000</double></property><property name="singleStep"><double>0.050000000000000</double></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="waterRoughnessLabel"><property name="text"><string>Surface roughness:</string></property></widget></item>
+            <item row="3" column="1"><widget class="QDoubleSpinBox" name="waterRoughnessSpinBox"><property name="decimals"><number>2</number></property><property name="minimum"><double>0.020000000000000</double></property><property name="maximum"><double>1.000000000000000</double></property><property name="singleStep"><double>0.020000000000000</double></property></widget></item>
+            <item row="4" column="0"><widget class="QLabel" name="waterTransparencyLabel"><property name="text"><string>Transparency:</string></property></widget></item>
+            <item row="4" column="1"><widget class="QDoubleSpinBox" name="waterTransparencySpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>1.400000000000000</double></property><property name="singleStep"><double>0.050000000000000</double></property></widget></item>
+            <item row="5" column="0"><widget class="QLabel" name="waterFoamLabel"><property name="text"><string>Foam:</string></property></widget></item>
+            <item row="5" column="1"><widget class="QDoubleSpinBox" name="waterFoamSpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>2.000000000000000</double></property><property name="singleStep"><double>0.100000000000000</double></property></widget></item>
+            <item row="6" column="0"><widget class="QLabel" name="waterHighlightLabel"><property name="text"><string>Sun highlights:</string></property></widget></item>
+            <item row="6" column="1"><widget class="QDoubleSpinBox" name="waterHighlightSpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>2.000000000000000</double></property><property name="singleStep"><double>0.100000000000000</double></property></widget></item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="waterRipplesGroupBox">
+           <property name="title"><string>Ripples &amp; performance</string></property>
+           <layout class="QGridLayout" name="waterRipplesLayout">
+            <item row="0" column="0"><widget class="QLabel" name="waterRippleDetailLabel"><property name="text"><string>Rain ripple detail:</string></property></widget></item>
+            <item row="0" column="1"><widget class="QComboBox" name="waterRippleDetailComboBox"><item><property name="text"><string>Low</string></property></item><item><property name="text"><string>Normal</string></property></item><item><property name="text"><string>High</string></property></item></widget></item>
+            <item row="1" column="0" colspan="2"><widget class="QCheckBox" name="waterShaderRipplesCheckBox"><property name="text"><string>Actor/object shader ripples</string></property></widget></item>
+            <item row="2" column="0" colspan="2"><widget class="QCheckBox" name="waterIdleRipplesCheckBox"><property name="text"><string>Idle actor ripples</string></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="waterMaxRipplesLabel"><property name="text"><string>Maximum ripple sources:</string></property></widget></item>
+            <item row="3" column="1"><widget class="QSpinBox" name="waterMaxRipplesSpinBox"><property name="maximum"><number>16</number></property></widget></item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
@@ -367,7 +611,6 @@
           </sizepolicy>
          </property>
          <layout class="QGridLayout" name="shadowsLayout" columnstretch="0,0">
-
           <item row="0" column="0">
            <widget class="QCheckBox" name="playerShadowsCheckBox">
             <property name="toolTip">
@@ -516,7 +759,7 @@
              <number>512</number>
             </property>
             <property name="maximum">
-             <number>81920</number>
+             <number>16384</number>
             </property>
             <property name="value">
              <number>8192</number>
@@ -552,7 +795,6 @@
             </property>
            </widget>
           </item>
-
          </layout>
         </widget>
        </item>
@@ -560,8 +802,21 @@
      </widget>
     </widget>
    </item>
+   <item row="8" column="0" colspan="2">
+    <widget class="QCheckBox" name="linkShadowDistanceCheckBox">
+     <property name="text">
+      <string>Link shadow distance to viewing distance (max 16384)</string>
+     </property>
+     <property name="checked">
+      <bool>true</bool>
+     </property>
+     <property name="toolTip">
+      <string>When enabled, the launcher keeps shadow distance equal to the current viewing distance, clamped to 16384 game units.</string>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
- <resources/>
- <connections/>
+ <resources />
+ <connections />
 </ui>

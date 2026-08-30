@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <typeinfo>
 
 #include <osg/BoundingSphere>
 #include <osg/ComputeBoundsVisitor>
@@ -11,10 +12,16 @@
 #include <osg/Matrix>
 #include <osg/NodeVisitor>
 #include <osg/Transform>
+#include <osg/UserDataContainer>
 #include <osgUtil/CullVisitor>
 
+#include <components/esm/loadstat.hpp>
 #include <components/sceneutil/occlusionculling.hpp>
 #include <components/terrain/terrainoccluder.hpp>
+
+#include "../mwworld/class.hpp"
+
+#include "objects.hpp"
 
 namespace
 {
@@ -109,16 +116,22 @@ namespace
 
 namespace MWRender
 {
-    OccluderMesh buildSimplifiedMesh(osg::Node* node, int gridRes, float shrinkFactor)
+    // X029: the simplification itself, split out so both the per-instance and the
+    // shared model-space builders can use it. boundsFallback may be null, which is
+    // what the model-space builder wants: a degenerate model must not report a
+    // bounding box measured in the wrong space.
+    static OccluderMesh simplifyCollected(const CollectMeshVisitor& v, osg::Node* boundsFallback,
+        int gridRes, float shrinkFactor)
     {
         OccluderMesh mesh;
-        CollectMeshVisitor v;
-        node->accept(v);
         if (v.mIndices.empty() || v.mVertices.size() < 3)
         {
-            osg::ComputeBoundsVisitor cbv;
-            node->accept(cbv);
-            mesh.aabb = cbv.getBoundingBox();
+            if (boundsFallback)
+            {
+                osg::ComputeBoundsVisitor cbv;
+                boundsFallback->accept(cbv);
+                mesh.aabb = cbv.getBoundingBox();
+            }
             return mesh;
         }
 
@@ -177,6 +190,72 @@ namespace MWRender
         return mesh;
     }
 
+    OccluderMesh buildSimplifiedMesh(osg::Node* node, int gridRes, float shrinkFactor)
+    {
+        CollectMeshVisitor v;
+        node->accept(v);
+        return simplifyCollected(v, node, gridRes, shrinkFactor);
+    }
+
+    OccluderMesh buildSimplifiedMeshLocal(osg::Node* node, int gridRes, float shrinkFactor)
+    {
+        CollectMeshVisitor v;
+        if (osg::Group* group = node->asGroup())
+        {
+            // Skip the node itself so its own placement transform stays out of the
+            // hull. Everything below it is the model.
+            const unsigned int count = group->getNumChildren();
+            for (unsigned int i = 0; i < count; ++i)
+                group->getChild(i)->accept(v);
+        }
+        else
+        {
+            node->accept(v);
+        }
+        return simplifyCollected(v, nullptr, gridRes, shrinkFactor);
+    }
+
+    bool OccluderTemplateCache::getOrCreate(const std::string& key, osg::Node* node,
+        int gridRes, float shrinkFactor, OccluderMesh& out)
+    {
+        {
+            const std::lock_guard<std::mutex> lock(mMutex);
+            const std::map<std::string, OccluderMesh>::const_iterator found = mTemplates.find(key);
+            if (found != mTemplates.end())
+            {
+                mHits.fetch_add(1, std::memory_order_relaxed);
+                if (found->second.indices.empty())
+                    return false;
+                out = found->second;
+                return true;
+            }
+        }
+
+        // Built outside the lock: this is the expensive subtree walk, and holding
+        // the mutex across it would serialise unrelated first-sightings.
+        OccluderMesh built = buildSimplifiedMeshLocal(node, gridRes, shrinkFactor);
+
+        const std::lock_guard<std::mutex> lock(mMutex);
+        if (mTemplates.size() >= sMaxEntries)
+            mTemplates.clear();
+
+        mMisses.fetch_add(1, std::memory_order_relaxed);
+        // A racing thread may have inserted the same key meanwhile; emplace keeps
+        // whichever landed first, and both are equivalent by construction.
+        const OccluderMesh& stored = mTemplates.emplace(key, std::move(built)).first->second;
+        if (stored.indices.empty())
+            return false;
+
+        out = stored;
+        return true;
+    }
+
+    unsigned int OccluderTemplateCache::getSize() const
+    {
+        const std::lock_guard<std::mutex> lock(mMutex);
+        return static_cast<unsigned int>(mTemplates.size());
+    }
+
     SceneOcclusionCallback::SceneOcclusionCallback(SceneUtil::OcclusionCuller* culler, Terrain::TerrainOccluder* occluder,
         int radiusCells, bool enableTerrainOccluder)
         : mCuller(culler), mTerrainOccluder(occluder), mRadiusCells(radiusCells), mEnableTerrainOccluder(enableTerrainOccluder), mLastFrameNumber(~0u)
@@ -200,10 +279,20 @@ namespace MWRender
         mCuller->beginFrame(cam->getViewMatrix(), cam->getProjectionMatrix());
         if (mEnableTerrainOccluder && mTerrainOccluder->hasTerrainData())
         {
-            mPositions.clear(); mIndices.clear();
-            mTerrainOccluder->build(cv->getEyePoint(), mRadiusCells, mPositions, mIndices);
-            if (!mPositions.empty() && !mIndices.empty())
-                mCuller->rasterizeOccluder(mPositions, mIndices);
+            // X031: side planes only. The desired transform is inverse(view*proj),
+            // so transformProvidingInverse receives view*proj directly. Near/far
+            // are intentionally omitted: this rejects cells behind/off-axis while
+            // remaining independent of normal/reversed depth conventions.
+            mFrustum.setToUnitFrustum(false, false);
+            mFrustum.transformProvidingInverse(cam->getViewMatrix() * cam->getProjectionMatrix());
+
+            mTerrainOccluder->collectVisibleCells(cv->getEyePoint(), mRadiusCells, mFrustum, mVisibleCells);
+            for (std::vector<Terrain::OccluderCellMesh>::const_iterator it = mVisibleCells.begin();
+                 it != mVisibleCells.end(); ++it)
+            {
+                if (it->mPositions && it->mIndices && !it->mPositions->empty() && !it->mIndices->empty())
+                    mCuller->rasterizeOccluder(*it->mPositions, *it->mIndices);
+            }
         }
         traverse(node, nv);
     }
@@ -252,19 +341,63 @@ namespace MWRender
     CellOcclusionCallback::CellOcclusionCallback(SceneUtil::OcclusionCuller* culler, float occluderMinRadius,
         float occluderMaxRadius, float occluderShrinkFactor, int occluderMeshResolution,
         int occluderMaxMeshResolution, float occluderInsideThreshold,
-        float occluderMaxDistance, bool enableStaticOccluders)
+        float occluderMaxDistance, bool enableStaticOccluders, OccluderTemplateCache* templateCache)
         : mCuller(culler), mOccluderMinRadius(occluderMinRadius), mOccluderMaxRadius(occluderMaxRadius),
           mOccluderShrinkFactor(occluderShrinkFactor), mOccluderMeshResolution(occluderMeshResolution),
           mOccluderMaxMeshResolution(occluderMaxMeshResolution), mOccluderInsideThreshold(occluderInsideThreshold),
-          mOccluderMaxDistanceSq(occluderMaxDistance * occluderMaxDistance), mEnableStaticOccluders(enableStaticOccluders)
+          mOccluderMaxDistanceSq(occluderMaxDistance * occluderMaxDistance), mEnableStaticOccluders(enableStaticOccluders),
+          mTemplateCache(templateCache)
     {
+    }
+
+    std::string CellOcclusionCallback::templateKey(osg::Node* node, int gridRes) const
+    {
+        std::string key;
+        osg::UserDataContainer* udc = node->getUserDataContainer();
+        if (!udc)
+            return key;
+
+        for (unsigned int i = 0; i < udc->getNumUserObjects(); ++i)
+        {
+            PtrHolder* holder = dynamic_cast<PtrHolder*>(udc->getUserObject(i));
+            if (!holder || holder->mPtr.isEmpty())
+                continue;
+
+            // X029-safe: share templates only for true ESM::Static records. Doors,
+            // activators, containers and other non-actor objects may contain
+            // per-instance animated child transforms; sharing a hull captured from
+            // another animation state could become an oversized occluder.
+            if (holder->mPtr.getTypeName() != typeid(ESM::Static).name())
+                return key;
+
+            const std::string model = holder->mPtr.getClass().getModel(holder->mPtr);
+            if (model.empty())
+                return key;
+
+            key = model;
+            key += '|';
+            key += std::to_string(gridRes);
+            key += '|';
+            key += std::to_string(mOccluderShrinkFactor);
+            return key;
+        }
+
+        return key;
     }
 
     const OccluderMesh& CellOcclusionCallback::getOccluderMesh(osg::Node* node)
     {
-        std::unordered_map<osg::Node*, OccluderMesh>::iterator it = mMeshCache.find(node);
+        std::unordered_map<osg::Node*, InstanceEntry>::iterator it = mMeshCache.find(node);
         if (it != mMeshCache.end())
-            return it->second;
+        {
+            if (it->second.mNode.get() == node)
+                return it->second.mMesh;
+
+            // The node this entry was built for is gone and the address has been
+            // handed out again. Drop it rather than occlude with a stale hull.
+            mMeshCache.erase(it);
+        }
+
         int meshRes = mOccluderMeshResolution;
         const float radius = node->getBound().radius();
         if (radius > mOccluderMinRadius && mOccluderMinRadius > 0.f)
@@ -272,7 +405,59 @@ namespace MWRender
             const float scale = radius / mOccluderMinRadius;
             meshRes = std::max(mOccluderMeshResolution, std::min(mOccluderMaxMeshResolution, static_cast<int>(mOccluderMeshResolution * scale)));
         }
-        return mMeshCache.emplace(node, buildSimplifiedMesh(node, meshRes, mOccluderShrinkFactor)).first->second;
+
+        InstanceEntry entry;
+        entry.mNode = node;
+
+        bool fromTemplate = false;
+        if (mTemplateCache.valid())
+        {
+            const std::string key = templateKey(node, meshRes);
+            if (!key.empty())
+            {
+                OccluderMesh tmpl;
+                if (mTemplateCache->getOrCreate(key, node, meshRes, mOccluderShrinkFactor, tmpl))
+                {
+                    // Placing the shared hull is a plain affine transform of its
+                    // vertices. Shrinking about the centroid commutes with an affine
+                    // map, so this is identical to shrinking after placement; only
+                    // the clustering grid differs, and clustering can only pull
+                    // vertices inside the original hull, never outside it.
+                    osg::Matrix localToWorld;
+                    localToWorld.makeIdentity();
+                    if (osg::Transform* transform = node->asTransform())
+                        transform->computeLocalToWorldMatrix(localToWorld, nullptr);
+
+                    entry.mMesh.indices = std::move(tmpl.indices);
+                    entry.mMesh.vertices.reserve(tmpl.vertices.size());
+                    for (std::vector<osg::Vec3f>::const_iterator vit = tmpl.vertices.begin(); vit != tmpl.vertices.end(); ++vit)
+                        entry.mMesh.vertices.push_back((*vit) * localToWorld);
+
+                    // X029-safe: the old per-instance path tests the unsqueezed
+                    // geometry bounds, then uses the shrunken mesh only as an
+                    // occluder. Preserve that conservative rule here. Building the
+                    // AABB from the already-shrunken template could let the object
+                    // itself be rejected while visible geometry lies outside it.
+                    if (tmpl.aabb.valid())
+                    {
+                        for (unsigned int corner = 0; corner < 8; ++corner)
+                        {
+                            const osg::Vec3f local(
+                                (corner & 1u) ? tmpl.aabb.xMax() : tmpl.aabb.xMin(),
+                                (corner & 2u) ? tmpl.aabb.yMax() : tmpl.aabb.yMin(),
+                                (corner & 4u) ? tmpl.aabb.zMax() : tmpl.aabb.zMin());
+                            entry.mMesh.aabb.expandBy(local * localToWorld);
+                        }
+                    }
+                    fromTemplate = true;
+                }
+            }
+        }
+
+        if (!fromTemplate)
+            entry.mMesh = buildSimplifiedMesh(node, meshRes, mOccluderShrinkFactor);
+
+        return mMeshCache.emplace(node, std::move(entry)).first->second.mMesh;
     }
 
     void CellOcclusionCallback::operator()(osg::Node* node, osg::NodeVisitor* nv)
@@ -331,10 +516,19 @@ namespace MWRender
             { child->accept(*cv); continue; }
             if (bs.radius() >= mOccluderMinRadius)
                 continue;
+            // X031: most children are visible, so avoid the named user-data
+            // lookup on that hot path. Only a child that software occlusion would
+            // reject needs the skipOcclusion escape-hatch lookup (doors, etc.).
+            osg::BoundingBox bb; bb.expandBy(bs);
+            if (mCuller->testVisibleAABB(bb))
+            {
+                child->accept(*cv);
+                continue;
+            }
+
             bool skipOcclusion = false;
             child->getUserValue("skipOcclusion", skipOcclusion);
-            osg::BoundingBox bb; bb.expandBy(bs);
-            if (skipOcclusion || mCuller->testVisibleAABB(bb))
+            if (skipOcclusion)
                 child->accept(*cv);
         }
     }

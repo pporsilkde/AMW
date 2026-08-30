@@ -1,5 +1,6 @@
 #include "advancedpage.hpp"
 
+#include <algorithm>
 #include <array>
 
 #include <components/config/gamesettings.hpp>
@@ -19,6 +20,32 @@ Launcher::AdvancedPage::AdvancedPage(Config::GameSettings &gameSettings, QWidget
 {
     setObjectName ("AdvancedPage");
     setupUi(this);
+
+    // X030: launcher-native Arena XP profiles. Selecting a named profile
+    // updates the overall multiplier; entering another value marks it Custom.
+    connect(xpRatePresetComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+        this, [this](int index)
+        {
+            static const std::array<double, 5> rates = { 0.50, 0.75, 1.00, 1.50, 2.00 };
+            if (index >= 0 && index < static_cast<int>(rates.size()))
+                xpGainMultiplierSpinBox->setValue(rates[index]);
+        });
+    connect(xpGainMultiplierSpinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+        this, [this](double value)
+        {
+            static const std::array<double, 5> rates = { 0.50, 0.75, 1.00, 1.50, 2.00 };
+            int preset = static_cast<int>(rates.size()); // Custom
+            for (int i = 0; i < static_cast<int>(rates.size()); ++i)
+            {
+                if (std::abs(value - rates[i]) < 0.001)
+                {
+                    preset = i;
+                    break;
+                }
+            }
+            if (xpRatePresetComboBox->currentIndex() != preset)
+                xpRatePresetComboBox->setCurrentIndex(preset);
+        });
 
     // Keep the advanced tabs focused on the most useful launcher settings.
     if (animationsGroup)
@@ -263,6 +290,22 @@ bool Launcher::AdvancedPage::loadSettings()
         loadSettingBool(allowNPCToFollowOverWaterSurfaceCheckBox, "allow actors to follow over water surface", "Game");
     }
 
+    // X030: Arena progression controls. In ArenaMP these are local/default
+    // values; the connected server remains authoritative and may overwrite them.
+    {
+        loadSettingBool(xpLevelingEnabledCheckBox, "enabled", "XP Leveling");
+        xpGainMultiplierSpinBox->setValue(Settings::Manager::getFloat("xp gain multiplier", "XP Leveling"));
+        skillXpMultiplierSpinBox->setValue(Settings::Manager::getFloat("global XP gain multiplier", "Game"));
+        baseXpToLevelSpinBox->setValue(Settings::Manager::getInt("base xp to level", "XP Leveling"));
+        skillPointsPerLevelSpinBox->setValue(Settings::Manager::getInt("skill points per level", "XP Leveling"));
+        deathXpLossSpinBox->setValue(100.0 * Settings::Manager::getFloat("death xp loss fraction", "XP Leveling"));
+        loadSettingBool(difficultyXpScalingCheckBox, "difficulty xp scaling", "XP Leveling");
+        loadSettingBool(progressiveXpCurveCheckBox, "progressive xp curve", "XP Leveling");
+        loadSettingBool(showXpNotificationsCheckBox, "show xp notifications", "XP Leveling");
+        occlusionTerrainBudgetSpinBox->setValue(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
+        loadSettingBool(occlusionTerrainFrustumCullCheckBox, "occlusion terrain frustum cull", "Camera");
+    }
+
     // Visuals
     {
         loadSettingBool(autoUseObjectNormalMapsCheckBox, "auto use object normal maps", "Shaders");
@@ -452,6 +495,24 @@ void Launcher::AdvancedPage::saveSettings()
             Settings::Manager::setInt("async num threads", "Physics", numPhysicsThreads);
     }
 
+    // X030: Arena progression and Stage1 occlusion budget.
+    {
+        saveSettingBool(xpLevelingEnabledCheckBox, "enabled", "XP Leveling");
+        Settings::Manager::setFloat("xp gain multiplier", "XP Leveling",
+            static_cast<float>(xpGainMultiplierSpinBox->value()));
+        Settings::Manager::setFloat("global XP gain multiplier", "Game",
+            static_cast<float>(skillXpMultiplierSpinBox->value()));
+        Settings::Manager::setInt("base xp to level", "XP Leveling", baseXpToLevelSpinBox->value());
+        Settings::Manager::setInt("skill points per level", "XP Leveling", skillPointsPerLevelSpinBox->value());
+        Settings::Manager::setFloat("death xp loss fraction", "XP Leveling",
+            static_cast<float>(deathXpLossSpinBox->value() / 100.0));
+        saveSettingBool(difficultyXpScalingCheckBox, "difficulty xp scaling", "XP Leveling");
+        saveSettingBool(progressiveXpCurveCheckBox, "progressive xp curve", "XP Leveling");
+        saveSettingBool(showXpNotificationsCheckBox, "show xp notifications", "XP Leveling");
+        Settings::Manager::setInt("occlusion terrain cell budget", "Camera", occlusionTerrainBudgetSpinBox->value());
+        saveSettingBool(occlusionTerrainFrustumCullCheckBox, "occlusion terrain frustum cull", "Camera");
+    }
+
     // Visuals
     {
         saveSettingBool(autoUseObjectNormalMapsCheckBox, "auto use object normal maps", "Shaders");
@@ -476,10 +537,15 @@ void Launcher::AdvancedPage::saveSettings()
 
         saveSettingBool(activeGridObjectPagingCheckBox, "object paging active grid", "Terrain");
         double viewingDistance = viewingDistanceComboBox->value();
+        const int viewingDistanceUnits = static_cast<int>(convertToUnits(viewingDistance));
         if (viewingDistance != convertToCells(Settings::Manager::getInt("viewing distance", "Camera")))
-        {
-            Settings::Manager::setInt("viewing distance", "Camera", convertToUnits(viewingDistance));
-        }
+            Settings::Manager::setInt("viewing distance", "Camera", viewingDistanceUnits);
+
+        // X030: keep shadow reach synchronized with draw distance regardless of
+        // whether the distance was changed through a graphics preset or here.
+        if (Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows"))
+            Settings::Manager::setInt("maximum shadow map distance", "Shadows",
+                std::max(512, std::min(16384, viewingDistanceUnits)));
         double objectPagingMinSize = objectPagingMinSizeComboBox->value();
         if (objectPagingMinSize != Settings::Manager::getDouble("object paging min size", "Terrain"))
             Settings::Manager::setDouble("object paging min size", "Terrain", objectPagingMinSize);

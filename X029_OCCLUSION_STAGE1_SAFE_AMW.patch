@@ -1,0 +1,822 @@
+--- a/apps/openmw/mwrender/objects.cpp
++++ b/apps/openmw/mwrender/objects.cpp
+@@ -1,6 +1,7 @@
+ #include "objects.hpp"
+ 
+ #include <osg/Group>
++#include <osg/Stats>
+ #include <osg/UserDataContainer>
+ 
+ #include <components/sceneutil/positionattitudetransform.hpp>
+@@ -39,6 +40,41 @@
+     mCellSceneNodes.clear();
+ }
+ 
++osg::ref_ptr<osg::Group> Objects::createCellNode()
++{
++    osg::ref_ptr<osg::Group> cellnode = new osg::Group;
++    cellnode->setName("Cell Root");
++    if (mOcclusionCuller.valid())
++    {
++        if (!mOccluderTemplateCache.valid())
++            mOccluderTemplateCache = new OccluderTemplateCache;
++
++        cellnode->addCullCallback(new CellOcclusionCallback(
++            mOcclusionCuller.get(),
++            Settings::Manager::getFloat("occlusion occluder min radius", "Camera"),
++            Settings::Manager::getFloat("occlusion occluder max radius", "Camera"),
++            Settings::Manager::getFloat("occlusion occluder shrink factor", "Camera"),
++            Settings::Manager::getInt("occlusion occluder mesh resolution", "Camera"),
++            Settings::Manager::getInt("occlusion occluder max mesh resolution", "Camera"),
++            Settings::Manager::getFloat("occlusion occluder inside threshold", "Camera"),
++            Settings::Manager::getFloat("occlusion occluder max distance", "Camera"),
++            Settings::Manager::getBool("occlusion culling statics", "Camera"),
++            mOccluderTemplateCache.get()));
++    }
++    mRootNode->addChild(cellnode);
++    return cellnode;
++}
++
++void Objects::reportStats(unsigned int frameNumber, osg::Stats* stats) const
++{
++    if (!stats || !mOccluderTemplateCache.valid())
++        return;
++
++    stats->setAttribute(frameNumber, "Occl Templates", mOccluderTemplateCache->getSize());
++    stats->setAttribute(frameNumber, "Occl Tpl Hits", mOccluderTemplateCache->getHits());
++    stats->setAttribute(frameNumber, "Occl Tpl Misses", mOccluderTemplateCache->getMisses());
++}
++
+ void Objects::insertBegin(const MWWorld::Ptr& ptr)
+ {
+     assert(mObjects.find(ptr) == mObjects.end());
+@@ -48,22 +84,7 @@
+     CellMap::iterator found = mCellSceneNodes.find(ptr.getCell());
+     if (found == mCellSceneNodes.end())
+     {
+-        cellnode = new osg::Group;
+-        cellnode->setName("Cell Root");
+-        if (mOcclusionCuller.valid())
+-        {
+-            cellnode->addCullCallback(new CellOcclusionCallback(
+-                mOcclusionCuller.get(),
+-                Settings::Manager::getFloat("occlusion occluder min radius", "Camera"),
+-                Settings::Manager::getFloat("occlusion occluder max radius", "Camera"),
+-                Settings::Manager::getFloat("occlusion occluder shrink factor", "Camera"),
+-                Settings::Manager::getInt("occlusion occluder mesh resolution", "Camera"),
+-                Settings::Manager::getInt("occlusion occluder max mesh resolution", "Camera"),
+-                Settings::Manager::getFloat("occlusion occluder inside threshold", "Camera"),
+-                Settings::Manager::getFloat("occlusion occluder max distance", "Camera"),
+-                Settings::Manager::getBool("occlusion culling statics", "Camera")));
+-        }
+-        mRootNode->addChild(cellnode);
++        cellnode = createCellNode();
+         mCellSceneNodes[ptr.getCell()] = cellnode;
+     }
+     else
+@@ -215,9 +236,11 @@
+ 
+     osg::Group* cellnode;
+     if(mCellSceneNodes.find(newCell) == mCellSceneNodes.end()) {
+-        cellnode = new osg::Group;
+-        mRootNode->addChild(cellnode);
+-        mCellSceneNodes[newCell] = cellnode;
++        // X029: goes through the same factory as insertBegin, so a cell root
++        // created here also gets the occlusion cull callback.
++        osg::ref_ptr<osg::Group> created = createCellNode();
++        mCellSceneNodes[newCell] = created;
++        cellnode = created.get();
+     } else {
+         cellnode = mCellSceneNodes[newCell];
+     }
+--- a/apps/openmw/mwrender/objects.hpp
++++ b/apps/openmw/mwrender/objects.hpp
+@@ -30,9 +30,15 @@
+     class OcclusionCuller;
+ }
+ 
++namespace osg
++{
++    class Stats;
++}
++
+ namespace MWRender{
+ 
+ class Animation;
++class OccluderTemplateCache;
+ 
+ class PtrHolder : public osg::Object
+ {
+@@ -69,8 +75,16 @@
+ 
+     osg::ref_ptr<SceneUtil::UnrefQueue> mUnrefQueue;
+     osg::ref_ptr<SceneUtil::OcclusionCuller> mOcclusionCuller;
++    // X029: shared across every cell, so identical models build their occluder
++    // hull once instead of once per instance per cell load.
++    osg::ref_ptr<OccluderTemplateCache> mOccluderTemplateCache;
+ 
+     void insertBegin(const MWWorld::Ptr& ptr);
++
++    // X029: single place that builds a cell root. Previously updatePtr() created
++    // one without the occlusion cull callback, so objects that moved into a cell
++    // whose node did not exist yet were silently excluded from occlusion culling.
++    osg::ref_ptr<osg::Group> createCellNode();
+ 
+ public:
+     Objects(Resource::ResourceSystem* resourceSystem, osg::ref_ptr<osg::Group> rootNode, SceneUtil::UnrefQueue* unrefQueue, SceneUtil::OcclusionCuller* occlusionCuller = nullptr);
+@@ -97,6 +111,9 @@
+     /// Updates containing cell for object rendering data
+     void updatePtr(const MWWorld::Ptr &old, const MWWorld::Ptr &cur);
+ 
++    /// X029: occluder template cache counters for the resource stats page.
++    void reportStats(unsigned int frameNumber, osg::Stats* stats) const;
++
+ private:
+     void operator = (const Objects&);
+     Objects(const Objects&);
+--- a/apps/openmw/mwrender/occlusionculling.cpp
++++ b/apps/openmw/mwrender/occlusionculling.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <typeinfo>
+ 
+ #include <osg/BoundingSphere>
+ #include <osg/ComputeBoundsVisitor>
+@@ -11,10 +12,16 @@
+ #include <osg/Matrix>
+ #include <osg/NodeVisitor>
+ #include <osg/Transform>
++#include <osg/UserDataContainer>
+ #include <osgUtil/CullVisitor>
+ 
++#include <components/esm/loadstat.hpp>
+ #include <components/sceneutil/occlusionculling.hpp>
+ #include <components/terrain/terrainoccluder.hpp>
++
++#include "../mwworld/class.hpp"
++
++#include "objects.hpp"
+ 
+ namespace
+ {
+@@ -109,16 +116,22 @@
+ 
+ namespace MWRender
+ {
+-    OccluderMesh buildSimplifiedMesh(osg::Node* node, int gridRes, float shrinkFactor)
++    // X029: the simplification itself, split out so both the per-instance and the
++    // shared model-space builders can use it. boundsFallback may be null, which is
++    // what the model-space builder wants: a degenerate model must not report a
++    // bounding box measured in the wrong space.
++    static OccluderMesh simplifyCollected(const CollectMeshVisitor& v, osg::Node* boundsFallback,
++        int gridRes, float shrinkFactor)
+     {
+         OccluderMesh mesh;
+-        CollectMeshVisitor v;
+-        node->accept(v);
+         if (v.mIndices.empty() || v.mVertices.size() < 3)
+         {
+-            osg::ComputeBoundsVisitor cbv;
+-            node->accept(cbv);
+-            mesh.aabb = cbv.getBoundingBox();
++            if (boundsFallback)
++            {
++                osg::ComputeBoundsVisitor cbv;
++                boundsFallback->accept(cbv);
++                mesh.aabb = cbv.getBoundingBox();
++            }
+             return mesh;
+         }
+ 
+@@ -175,6 +188,72 @@
+                 *it = center + (*it - center) * shrinkFactor;
+         }
+         return mesh;
++    }
++
++    OccluderMesh buildSimplifiedMesh(osg::Node* node, int gridRes, float shrinkFactor)
++    {
++        CollectMeshVisitor v;
++        node->accept(v);
++        return simplifyCollected(v, node, gridRes, shrinkFactor);
++    }
++
++    OccluderMesh buildSimplifiedMeshLocal(osg::Node* node, int gridRes, float shrinkFactor)
++    {
++        CollectMeshVisitor v;
++        if (osg::Group* group = node->asGroup())
++        {
++            // Skip the node itself so its own placement transform stays out of the
++            // hull. Everything below it is the model.
++            const unsigned int count = group->getNumChildren();
++            for (unsigned int i = 0; i < count; ++i)
++                group->getChild(i)->accept(v);
++        }
++        else
++        {
++            node->accept(v);
++        }
++        return simplifyCollected(v, nullptr, gridRes, shrinkFactor);
++    }
++
++    bool OccluderTemplateCache::getOrCreate(const std::string& key, osg::Node* node,
++        int gridRes, float shrinkFactor, OccluderMesh& out)
++    {
++        {
++            const std::lock_guard<std::mutex> lock(mMutex);
++            const std::map<std::string, OccluderMesh>::const_iterator found = mTemplates.find(key);
++            if (found != mTemplates.end())
++            {
++                mHits.fetch_add(1, std::memory_order_relaxed);
++                if (found->second.indices.empty())
++                    return false;
++                out = found->second;
++                return true;
++            }
++        }
++
++        // Built outside the lock: this is the expensive subtree walk, and holding
++        // the mutex across it would serialise unrelated first-sightings.
++        OccluderMesh built = buildSimplifiedMeshLocal(node, gridRes, shrinkFactor);
++
++        const std::lock_guard<std::mutex> lock(mMutex);
++        if (mTemplates.size() >= sMaxEntries)
++            mTemplates.clear();
++
++        mMisses.fetch_add(1, std::memory_order_relaxed);
++        // A racing thread may have inserted the same key meanwhile; emplace keeps
++        // whichever landed first, and both are equivalent by construction.
++        const OccluderMesh& stored = mTemplates.emplace(key, std::move(built)).first->second;
++        if (stored.indices.empty())
++            return false;
++
++        out = stored;
++        return true;
++    }
++
++    unsigned int OccluderTemplateCache::getSize() const
++    {
++        const std::lock_guard<std::mutex> lock(mMutex);
++        return static_cast<unsigned int>(mTemplates.size());
+     }
+ 
+     SceneOcclusionCallback::SceneOcclusionCallback(SceneUtil::OcclusionCuller* culler, Terrain::TerrainOccluder* occluder,
+@@ -254,19 +333,63 @@
+     CellOcclusionCallback::CellOcclusionCallback(SceneUtil::OcclusionCuller* culler, float occluderMinRadius,
+         float occluderMaxRadius, float occluderShrinkFactor, int occluderMeshResolution,
+         int occluderMaxMeshResolution, float occluderInsideThreshold,
+-        float occluderMaxDistance, bool enableStaticOccluders)
++        float occluderMaxDistance, bool enableStaticOccluders, OccluderTemplateCache* templateCache)
+         : mCuller(culler), mOccluderMinRadius(occluderMinRadius), mOccluderMaxRadius(occluderMaxRadius),
+           mOccluderShrinkFactor(occluderShrinkFactor), mOccluderMeshResolution(occluderMeshResolution),
+           mOccluderMaxMeshResolution(occluderMaxMeshResolution), mOccluderInsideThreshold(occluderInsideThreshold),
+-          mOccluderMaxDistanceSq(occluderMaxDistance * occluderMaxDistance), mEnableStaticOccluders(enableStaticOccluders)
+-    {
++          mOccluderMaxDistanceSq(occluderMaxDistance * occluderMaxDistance), mEnableStaticOccluders(enableStaticOccluders),
++          mTemplateCache(templateCache)
++    {
++    }
++
++    std::string CellOcclusionCallback::templateKey(osg::Node* node, int gridRes) const
++    {
++        std::string key;
++        osg::UserDataContainer* udc = node->getUserDataContainer();
++        if (!udc)
++            return key;
++
++        for (unsigned int i = 0; i < udc->getNumUserObjects(); ++i)
++        {
++            PtrHolder* holder = dynamic_cast<PtrHolder*>(udc->getUserObject(i));
++            if (!holder || holder->mPtr.isEmpty())
++                continue;
++
++            // X029-safe: share templates only for true ESM::Static records. Doors,
++            // activators, containers and other non-actor objects may contain
++            // per-instance animated child transforms; sharing a hull captured from
++            // another animation state could become an oversized occluder.
++            if (holder->mPtr.getTypeName() != typeid(ESM::Static).name())
++                return key;
++
++            const std::string model = holder->mPtr.getClass().getModel(holder->mPtr);
++            if (model.empty())
++                return key;
++
++            key = model;
++            key += '|';
++            key += std::to_string(gridRes);
++            key += '|';
++            key += std::to_string(mOccluderShrinkFactor);
++            return key;
++        }
++
++        return key;
+     }
+ 
+     const OccluderMesh& CellOcclusionCallback::getOccluderMesh(osg::Node* node)
+     {
+-        std::unordered_map<osg::Node*, OccluderMesh>::iterator it = mMeshCache.find(node);
++        std::unordered_map<osg::Node*, InstanceEntry>::iterator it = mMeshCache.find(node);
+         if (it != mMeshCache.end())
+-            return it->second;
++        {
++            if (it->second.mNode.get() == node)
++                return it->second.mMesh;
++
++            // The node this entry was built for is gone and the address has been
++            // handed out again. Drop it rather than occlude with a stale hull.
++            mMeshCache.erase(it);
++        }
++
+         int meshRes = mOccluderMeshResolution;
+         const float radius = node->getBound().radius();
+         if (radius > mOccluderMinRadius && mOccluderMinRadius > 0.f)
+@@ -274,7 +397,59 @@
+             const float scale = radius / mOccluderMinRadius;
+             meshRes = std::max(mOccluderMeshResolution, std::min(mOccluderMaxMeshResolution, static_cast<int>(mOccluderMeshResolution * scale)));
+         }
+-        return mMeshCache.emplace(node, buildSimplifiedMesh(node, meshRes, mOccluderShrinkFactor)).first->second;
++
++        InstanceEntry entry;
++        entry.mNode = node;
++
++        bool fromTemplate = false;
++        if (mTemplateCache.valid())
++        {
++            const std::string key = templateKey(node, meshRes);
++            if (!key.empty())
++            {
++                OccluderMesh tmpl;
++                if (mTemplateCache->getOrCreate(key, node, meshRes, mOccluderShrinkFactor, tmpl))
++                {
++                    // Placing the shared hull is a plain affine transform of its
++                    // vertices. Shrinking about the centroid commutes with an affine
++                    // map, so this is identical to shrinking after placement; only
++                    // the clustering grid differs, and clustering can only pull
++                    // vertices inside the original hull, never outside it.
++                    osg::Matrix localToWorld;
++                    localToWorld.makeIdentity();
++                    if (osg::Transform* transform = node->asTransform())
++                        transform->computeLocalToWorldMatrix(localToWorld, nullptr);
++
++                    entry.mMesh.indices = std::move(tmpl.indices);
++                    entry.mMesh.vertices.reserve(tmpl.vertices.size());
++                    for (std::vector<osg::Vec3f>::const_iterator vit = tmpl.vertices.begin(); vit != tmpl.vertices.end(); ++vit)
++                        entry.mMesh.vertices.push_back((*vit) * localToWorld);
++
++                    // X029-safe: the old per-instance path tests the unsqueezed
++                    // geometry bounds, then uses the shrunken mesh only as an
++                    // occluder. Preserve that conservative rule here. Building the
++                    // AABB from the already-shrunken template could let the object
++                    // itself be rejected while visible geometry lies outside it.
++                    if (tmpl.aabb.valid())
++                    {
++                        for (unsigned int corner = 0; corner < 8; ++corner)
++                        {
++                            const osg::Vec3f local(
++                                (corner & 1u) ? tmpl.aabb.xMax() : tmpl.aabb.xMin(),
++                                (corner & 2u) ? tmpl.aabb.yMax() : tmpl.aabb.yMin(),
++                                (corner & 4u) ? tmpl.aabb.zMax() : tmpl.aabb.zMin());
++                            entry.mMesh.aabb.expandBy(local * localToWorld);
++                        }
++                    }
++                    fromTemplate = true;
++                }
++            }
++        }
++
++        if (!fromTemplate)
++            entry.mMesh = buildSimplifiedMesh(node, meshRes, mOccluderShrinkFactor);
++
++        return mMeshCache.emplace(node, std::move(entry)).first->second.mMesh;
+     }
+ 
+     void CellOcclusionCallback::operator()(osg::Node* node, osg::NodeVisitor* nv)
+--- a/apps/openmw/mwrender/occlusionculling.hpp
++++ b/apps/openmw/mwrender/occlusionculling.hpp
+@@ -4,9 +4,16 @@
+ #include <osg/BoundingBox>
+ #include <osg/Object>
+ #include <osg/NodeCallback>
++#include <osg/Referenced>
+ #include <osg/Vec3f>
++#include <osg/observer_ptr>
+ #include <osg/ref_ptr>
+ 
++#include <atomic>
++#include <cstddef>
++#include <map>
++#include <mutex>
++#include <string>
+ #include <unordered_map>
+ #include <vector>
+ 
+@@ -36,7 +43,54 @@
+         std::vector<unsigned int> indices;
+     };
+ 
++    /// Collapses a node's geometry into a coarse, shrunken occluder hull.
++    /// Vertices are produced in the node's own parent space, i.e. the node's own
++    /// transform IS applied.
+     OccluderMesh buildSimplifiedMesh(osg::Node* node, int gridRes, float shrinkFactor);
++
++    /// X029: same simplification, but the node's own transform is NOT applied, so
++    /// the result is a model-space hull that every instance of the same model can
++    /// share. Returns a mesh with no indices when the node has no usable geometry.
++    OccluderMesh buildSimplifiedMeshLocal(osg::Node* node, int gridRes, float shrinkFactor);
++
++    /// X029: shared model-space occluder hulls.
++    ///
++    /// Before this, every large static built its own hull from a full subtree walk
++    /// the first time it was culled, in a per-cell cache. Twenty houses of the same
++    /// model meant twenty walks, and all of them again on the next cell reload.
++    /// Here the expensive part happens once per (model, grid resolution) and each
++    /// instance only pays a vertex transform.
++    ///
++    /// Shared between cells, so it is accessed from the cull traversal; the mutex
++    /// guards the map and the counters are atomic for the stats reader.
++    class OccluderTemplateCache : public osg::Referenced
++    {
++    public:
++        /// Copies the shared model-space hull for \a key into \a out, building it
++        /// from \a node on a miss. Returns false when the model yields no usable
++        /// geometry, in which case the caller falls back to the per-instance path.
++        /// A copy rather than a pointer: nothing then depends on how long the entry
++        /// stays in the map.
++        bool getOrCreate(const std::string& key, osg::Node* node, int gridRes, float shrinkFactor,
++            OccluderMesh& out);
++
++        unsigned int getSize() const;
++        unsigned int getHits() const { return mHits.load(std::memory_order_relaxed); }
++        unsigned int getMisses() const { return mMisses.load(std::memory_order_relaxed); }
++
++    protected:
++        ~OccluderTemplateCache() override = default;
++
++    private:
++        // Bounded so a pathological load order cannot grow it without limit. The
++        // ceiling is far above any realistic number of distinct large statics.
++        static constexpr std::size_t sMaxEntries = 4096;
++
++        mutable std::mutex mMutex;
++        std::map<std::string, OccluderMesh> mTemplates;
++        std::atomic<unsigned int> mHits{0};
++        std::atomic<unsigned int> mMisses{0};
++    };
+ 
+     class PagedOccluderData : public osg::Object
+     {
+@@ -80,10 +134,22 @@
+         CellOcclusionCallback(SceneUtil::OcclusionCuller* culler, float occluderMinRadius,
+             float occluderMaxRadius, float occluderShrinkFactor, int occluderMeshResolution,
+             int occluderMaxMeshResolution, float occluderInsideThreshold,
+-            float occluderMaxDistance, bool enableStaticOccluders);
++            float occluderMaxDistance, bool enableStaticOccluders,
++            OccluderTemplateCache* templateCache = nullptr);
+         virtual void operator()(osg::Node* node, osg::NodeVisitor* nv);
+     private:
++        // X029: the per-instance entry keeps a weak reference to the node it was
++        // built for. The map is keyed by raw pointer, and a node removed from the
++        // cell can be replaced by a new one at the same address; without this check
++        // that new object would silently inherit the old world-space hull.
++        struct InstanceEntry
++        {
++            osg::observer_ptr<osg::Node> mNode;
++            OccluderMesh mMesh;
++        };
++
+         const OccluderMesh& getOccluderMesh(osg::Node* node);
++        std::string templateKey(osg::Node* node, int gridRes) const;
+         osg::ref_ptr<SceneUtil::OcclusionCuller> mCuller;
+         float mOccluderMinRadius;
+         float mOccluderMaxRadius;
+@@ -93,7 +159,8 @@
+         float mOccluderInsideThreshold;
+         float mOccluderMaxDistanceSq;
+         bool mEnableStaticOccluders;
+-        std::unordered_map<osg::Node*, OccluderMesh> mMeshCache;
++        osg::ref_ptr<OccluderTemplateCache> mTemplateCache;
++        std::unordered_map<osg::Node*, InstanceEntry> mMeshCache;
+     };
+ }
+ 
+--- a/apps/openmw/mwrender/renderingmanager.cpp
++++ b/apps/openmw/mwrender/renderingmanager.cpp
+@@ -856,6 +856,10 @@
+         {
+             mTerrainOccluder.reset(new Terrain::TerrainOccluder(mTerrainStorage.get(), ESM::Land::REAL_SIZE));
+             mTerrainOccluder->setLodLevel(std::max(0, Settings::Manager::getInt("occlusion terrain lod", "Camera")));
++            // X029: cap how many new terrain cells a single build may decode, so
++            // the first exterior assembly is spread over frames instead of
++            // decoding the whole 17x17 region in one cull.
++            mTerrainOccluder->setCellBuildBudget(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
+             sceneRoot->addCullCallback(new SceneOcclusionCallback(
+                 mOcclusionCuller.get(),
+                 mTerrainOccluder.get(),
+@@ -2000,6 +2004,26 @@
+             stats->setAttribute(frameNumber, "UnrefQueue", mUnrefQueue->getNumItems());
+ 
+             mTerrain->reportStats(frameNumber, stats);
++
++            // X029: the occlusion counters already existed and were read by nothing.
++            // Values are sampled from the last completed cull, so they can lag the
++            // displayed frame by one - fine for a profiler, not a correctness signal.
++            if (mOcclusionCuller.valid())
++            {
++                stats->setAttribute(frameNumber, "Occl Tested", mOcclusionCuller->getNumTested());
++                stats->setAttribute(frameNumber, "Occl Culled", mOcclusionCuller->getNumOccluded());
++                stats->setAttribute(frameNumber, "Occl Occluders", mOcclusionCuller->getNumBuildingOccluders());
++                stats->setAttribute(frameNumber, "Occl Tris", mOcclusionCuller->getNumBuildingTris());
++            }
++
++            if (mTerrainOccluder)
++            {
++                stats->setAttribute(frameNumber, "Occl Terrain Cells", mTerrainOccluder->getCachedCellCount());
++                stats->setAttribute(frameNumber, "Occl Terrain Built", mTerrainOccluder->getLastBuiltCellCount());
++            }
++
++            if (mObjects)
++                mObjects->reportStats(frameNumber, stats);
+         }
+     }
+ 
+--- a/components/resource/stats.cpp
++++ b/components/resource/stats.cpp
+@@ -390,6 +390,16 @@
+             "Land",
+             "Composite",
+             "",
++            "Occl Tested",
++            "Occl Culled",
++            "Occl Occluders",
++            "Occl Tris",
++            "Occl Terrain Cells",
++            "Occl Terrain Built",
++            "Occl Templates",
++            "Occl Tpl Hits",
++            "Occl Tpl Misses",
++            "",
+             "NavMesh UpdateJobs",
+             "NavMesh CacheSize",
+             "NavMesh UsedTiles",
+--- a/components/sceneutil/occlusionculling.cpp
++++ b/components/sceneutil/occlusionculling.cpp
+@@ -47,6 +47,15 @@
+         const double* vpDouble = mViewProjection.ptr();
+         for (int i = 0; i < 16; ++i)
+             mVPFloat[i] = static_cast<float>(vpDouble[i]);
++
++        // X029-safe: publish the counters from the completed cull before
++        // resetting the hot-path accumulators for this frame. Stats readers can
++        // safely sample these atomics from another OSG thread.
++        mPublishedNumOccluded.store(mNumOccluded, std::memory_order_relaxed);
++        mPublishedNumTested.store(mNumTested, std::memory_order_relaxed);
++        mPublishedNumBuildingOccluders.store(mNumBuildingOccluders, std::memory_order_relaxed);
++        mPublishedNumBuildingTris.store(mNumBuildingTris, std::memory_order_relaxed);
++        mPublishedNumBuildingVerts.store(mNumBuildingVerts, std::memory_order_relaxed);
+ 
+         mNumOccluded = 0;
+         mNumTested = 0;
+--- a/components/sceneutil/occlusionculling.hpp
++++ b/components/sceneutil/occlusionculling.hpp
+@@ -6,6 +6,7 @@
+ #include <osg/Referenced>
+ #include <osg/Vec3f>
+ 
++#include <atomic>
+ #include <vector>
+ 
+ class MaskedOcclusionCulling;
+@@ -41,11 +42,15 @@
+         const osg::Matrixd& getInverseViewMatrix() const { return mInverseView; }
+         const osg::Vec3f& getEyeWorld() const { return mEyeWorld; }
+ 
+-        unsigned int getNumOccluded() const { return mNumOccluded; }
+-        unsigned int getNumTested() const { return mNumTested; }
+-        unsigned int getNumBuildingOccluders() const { return mNumBuildingOccluders; }
+-        unsigned int getNumBuildingTris() const { return mNumBuildingTris; }
+-        unsigned int getNumBuildingVerts() const { return mNumBuildingVerts; }
++        // X029-safe: stats are published once per cull frame. This avoids data
++        // races with the update-thread stats reader without adding atomics to the
++        // per-AABB hot path. Values intentionally describe the previous completed
++        // cull frame.
++        unsigned int getNumOccluded() const { return mPublishedNumOccluded.load(std::memory_order_relaxed); }
++        unsigned int getNumTested() const { return mPublishedNumTested.load(std::memory_order_relaxed); }
++        unsigned int getNumBuildingOccluders() const { return mPublishedNumBuildingOccluders.load(std::memory_order_relaxed); }
++        unsigned int getNumBuildingTris() const { return mPublishedNumBuildingTris.load(std::memory_order_relaxed); }
++        unsigned int getNumBuildingVerts() const { return mPublishedNumBuildingVerts.load(std::memory_order_relaxed); }
+         void incrementBuildingOccluders(unsigned int tris, unsigned int verts)
+         {
+             ++mNumBuildingOccluders;
+@@ -71,6 +76,12 @@
+         unsigned int mNumBuildingOccluders = 0;
+         unsigned int mNumBuildingTris = 0;
+         unsigned int mNumBuildingVerts = 0;
++
++        std::atomic<unsigned int> mPublishedNumOccluded{0};
++        std::atomic<unsigned int> mPublishedNumTested{0};
++        std::atomic<unsigned int> mPublishedNumBuildingOccluders{0};
++        std::atomic<unsigned int> mPublishedNumBuildingTris{0};
++        std::atomic<unsigned int> mPublishedNumBuildingVerts{0};
+     };
+ }
+ 
+--- a/components/terrain/terrainoccluder.cpp
++++ b/components/terrain/terrainoccluder.cpp
+@@ -30,11 +30,18 @@
+         invalidateCache();
+     }
+ 
++    void TerrainOccluder::setCellBuildBudget(int cellsPerBuild)
++    {
++        mCellBuildBudget = cellsPerBuild;
++    }
++
+     void TerrainOccluder::invalidateCache()
+     {
+         mRegionCacheValid = false;
+         mCachedRadius = -1;
+         mCellCache.clear();
++        mPublishedCachedCellCount.store(0, std::memory_order_relaxed);
++        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
+     }
+ 
+     TerrainOccluder::CachedCellMesh TerrainOccluder::buildCell(int cellX, int cellY) const
+@@ -124,14 +131,22 @@
+         return result;
+     }
+ 
+-    const TerrainOccluder::CachedCellMesh& TerrainOccluder::getCell(int cellX, int cellY)
++    const TerrainOccluder::CachedCellMesh* TerrainOccluder::getCell(int cellX, int cellY, int& budget)
+     {
+         const CellKey key(cellX, cellY);
+         const std::map<CellKey, CachedCellMesh>::iterator found = mCellCache.find(key);
+         if (found != mCellCache.end())
+-            return found->second;
+-
+-        return mCellCache.emplace(key, buildCell(cellX, cellY)).first->second;
++            return &found->second;
++
++        // X029: cells with no LAND record are cached as empty meshes on purpose,
++        // so a missing cell costs its decode attempt exactly once. That attempt is
++        // still the expensive part, so it counts against the budget.
++        if (budget <= 0)
++            return nullptr;
++
++        --budget;
++        ++mLastBuiltCells;
++        return &mCellCache.emplace(key, buildCell(cellX, cellY)).first->second;
+     }
+ 
+     void TerrainOccluder::pruneCellCache(const osg::Vec2i& center, int radiusCells)
+@@ -154,11 +169,16 @@
+     bool TerrainOccluder::build(const osg::Vec3f& eyePoint, int radiusCells,
+         std::vector<osg::Vec3f>& outPositions, std::vector<unsigned int>& outIndices)
+     {
++        // Per-frame counter: zero unless this call actually decoded new cells.
++        mLastBuiltCells = 0;
++        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
++
+         if (!hasTerrainData())
+         {
+             outPositions.clear();
+             outIndices.clear();
+             mRegionCacheValid = false;
++            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+             return true;
+         }
+ 
+@@ -168,10 +188,20 @@
+         const osg::Vec2i cellPos(cellX, cellY);
+ 
+         if (mRegionCacheValid && cellPos == mCachedCellPos && radiusCells == mCachedRadius)
++        {
++            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+             return false;
++        }
+ 
+         outPositions.clear();
+         outIndices.clear();
++
++        // X029: budget the expensive part. Cells already in the cache are always
++        // assembled; only newly decoded ones are rationed. When the budget runs
++        // out the region is marked incomplete, so the next frame continues where
++        // this one stopped instead of declaring the region done.
++        int budget = mCellBuildBudget > 0 ? mCellBuildBudget : std::numeric_limits<int>::max();
++        bool complete = true;
+ 
+         // X028: region assembly still walks all cells, but expensive LAND decode +
+         // coarse-mesh construction happens only once per cached cell. At radius 8
+@@ -180,22 +210,37 @@
+         {
+             for (int cx = cellX - radiusCells; cx <= cellX + radiusCells; ++cx)
+             {
+-                const CachedCellMesh& cell = getCell(cx, cy);
+-                if (cell.mPositions.empty() || cell.mIndices.empty())
++                const CachedCellMesh* cell = getCell(cx, cy, budget);
++                if (!cell)
++                {
++                    // Not built yet and out of budget. Leaving it out only removes
++                    // an occluder, which can never hide something that is visible.
++                    complete = false;
+                     continue;
++                }
++
++                if (cell->mPositions.empty() || cell->mIndices.empty())
++                    continue;
+ 
+                 const unsigned int baseIndex = static_cast<unsigned int>(outPositions.size());
+-                outPositions.insert(outPositions.end(), cell.mPositions.begin(), cell.mPositions.end());
+-                outIndices.reserve(outIndices.size() + cell.mIndices.size());
+-                for (std::vector<unsigned int>::const_iterator it = cell.mIndices.begin(); it != cell.mIndices.end(); ++it)
++                outPositions.insert(outPositions.end(), cell->mPositions.begin(), cell->mPositions.end());
++                outIndices.reserve(outIndices.size() + cell->mIndices.size());
++                for (std::vector<unsigned int>::const_iterator it = cell->mIndices.begin(); it != cell->mIndices.end(); ++it)
+                     outIndices.push_back(baseIndex + *it);
+             }
+         }
+ 
+         mCachedCellPos = cellPos;
+         mCachedRadius = radiusCells;
+-        mRegionCacheValid = true;
++        mRegionCacheValid = complete;
++
++        // X029-safe: prune even while filling. pruneCellCache keeps radius+2,
++        // therefore it cannot evict any cell required by the current radius, and
++        // this prevents cache growth during rapid teleports where a region may not
++        // become complete before the next center is requested.
+         pruneCellCache(cellPos, radiusCells);
++        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
++        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
+         return true;
+     }
+ }
+--- a/components/terrain/terrainoccluder.hpp
++++ b/components/terrain/terrainoccluder.hpp
+@@ -1,6 +1,7 @@
+ #ifndef OPENMW_COMPONENTS_TERRAIN_TERRAINOCCLUDER_H
+ #define OPENMW_COMPONENTS_TERRAIN_TERRAINOCCLUDER_H
+ 
++#include <atomic>
+ #include <map>
+ #include <utility>
+ #include <vector>
+@@ -21,6 +22,19 @@
+         // region and the per-cell cache. This keeps runtime setting changes safe.
+         void setLodLevel(int lod);
+ 
++        // X029: upper bound on how many *new* cells a single build() may decode.
++        // The first entry into an exterior needs (2r+1)^2 cells - 289 at the
++        // default radius 8 - and decoding all of them in one cull frame is the
++        // largest remaining occlusion stutter. Spreading them over frames is
++        // fail-open: a partially assembled occluder hides less, never more.
++        void setCellBuildBudget(int cellsPerBuild);
++
++        // X029: profiler readout. The engine already collected occlusion counters
++        // that nothing ever read; these follow the same idea for the terrain side.
++        unsigned int getCachedCellCount() const { return mPublishedCachedCellCount.load(std::memory_order_relaxed); }
++        unsigned int getLastBuiltCellCount() const { return mPublishedLastBuiltCells.load(std::memory_order_relaxed); }
++        bool isRegionComplete() const { return mRegionCacheValid; }
++
+         // Rebuilds the output only when the eye crosses into a different terrain
+         // cell or the requested radius changes. Returns true when output changed.
+         bool build(const osg::Vec3f& eyePoint, int radiusCells, std::vector<osg::Vec3f>& outPositions,
+@@ -37,7 +51,9 @@
+         typedef std::pair<int, int> CellKey;
+ 
+         CachedCellMesh buildCell(int cellX, int cellY) const;
+-        const CachedCellMesh& getCell(int cellX, int cellY);
++        // Returns nullptr when the cell is not cached and the per-build budget is
++        // already spent. Callers must treat that as "skip this cell for now".
++        const CachedCellMesh* getCell(int cellX, int cellY, int& budget);
+         void pruneCellCache(const osg::Vec2i& center, int radiusCells);
+         void invalidateCache();
+ 
+@@ -49,6 +65,12 @@
+         osg::Vec2i mCachedCellPos;
+         int mCachedRadius = -1;
+ 
++        // X029: <= 0 means unlimited, which reproduces the X028 behaviour exactly.
++        int mCellBuildBudget = 24;
++        unsigned int mLastBuiltCells = 0;
++        std::atomic<unsigned int> mPublishedCachedCellCount{0};
++        std::atomic<unsigned int> mPublishedLastBuiltCells{0};
++
+         // X028/MGE-inspired incremental terrain occluder cache. MGE XE avoids
+         // regenerating unchanged distant-land units; here we apply the same idea
+         // to OpenMW's software occlusion mesh without importing renderer code.
+--- a/files/settings-default.cfg
++++ b/files/settings-default.cfg
+@@ -52,6 +52,11 @@
+ occlusion buffer height = 256
+ occlusion terrain lod = 3
+ occlusion terrain radius = 8
++# Maximum number of newly decoded terrain cells per occluder rebuild.
++# Lower values smooth out the first assembly after loading an exterior at the
++# cost of a briefly incomplete occluder (which only ever draws more, not less).
++# 0 or below restores the old behaviour of building the whole region at once.
++occlusion terrain cell budget = 24
+ occlusion occluder min radius = 500
+ occlusion occluder max radius = 4400
+ occlusion occluder shrink factor = 0.76

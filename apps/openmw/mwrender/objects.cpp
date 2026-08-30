@@ -1,6 +1,7 @@
 #include "objects.hpp"
 
 #include <osg/Group>
+#include <osg/Stats>
 #include <osg/UserDataContainer>
 
 #include <components/sceneutil/positionattitudetransform.hpp>
@@ -39,6 +40,41 @@ Objects::~Objects()
     mCellSceneNodes.clear();
 }
 
+osg::ref_ptr<osg::Group> Objects::createCellNode()
+{
+    osg::ref_ptr<osg::Group> cellnode = new osg::Group;
+    cellnode->setName("Cell Root");
+    if (mOcclusionCuller.valid())
+    {
+        if (!mOccluderTemplateCache.valid())
+            mOccluderTemplateCache = new OccluderTemplateCache;
+
+        cellnode->addCullCallback(new CellOcclusionCallback(
+            mOcclusionCuller.get(),
+            Settings::Manager::getFloat("occlusion occluder min radius", "Camera"),
+            Settings::Manager::getFloat("occlusion occluder max radius", "Camera"),
+            Settings::Manager::getFloat("occlusion occluder shrink factor", "Camera"),
+            Settings::Manager::getInt("occlusion occluder mesh resolution", "Camera"),
+            Settings::Manager::getInt("occlusion occluder max mesh resolution", "Camera"),
+            Settings::Manager::getFloat("occlusion occluder inside threshold", "Camera"),
+            Settings::Manager::getFloat("occlusion occluder max distance", "Camera"),
+            Settings::Manager::getBool("occlusion culling statics", "Camera"),
+            mOccluderTemplateCache.get()));
+    }
+    mRootNode->addChild(cellnode);
+    return cellnode;
+}
+
+void Objects::reportStats(unsigned int frameNumber, osg::Stats* stats) const
+{
+    if (!stats || !mOccluderTemplateCache.valid())
+        return;
+
+    stats->setAttribute(frameNumber, "Occl Templates", mOccluderTemplateCache->getSize());
+    stats->setAttribute(frameNumber, "Occl Tpl Hits", mOccluderTemplateCache->getHits());
+    stats->setAttribute(frameNumber, "Occl Tpl Misses", mOccluderTemplateCache->getMisses());
+}
+
 void Objects::insertBegin(const MWWorld::Ptr& ptr)
 {
     assert(mObjects.find(ptr) == mObjects.end());
@@ -48,22 +84,7 @@ void Objects::insertBegin(const MWWorld::Ptr& ptr)
     CellMap::iterator found = mCellSceneNodes.find(ptr.getCell());
     if (found == mCellSceneNodes.end())
     {
-        cellnode = new osg::Group;
-        cellnode->setName("Cell Root");
-        if (mOcclusionCuller.valid())
-        {
-            cellnode->addCullCallback(new CellOcclusionCallback(
-                mOcclusionCuller.get(),
-                Settings::Manager::getFloat("occlusion occluder min radius", "Camera"),
-                Settings::Manager::getFloat("occlusion occluder max radius", "Camera"),
-                Settings::Manager::getFloat("occlusion occluder shrink factor", "Camera"),
-                Settings::Manager::getInt("occlusion occluder mesh resolution", "Camera"),
-                Settings::Manager::getInt("occlusion occluder max mesh resolution", "Camera"),
-                Settings::Manager::getFloat("occlusion occluder inside threshold", "Camera"),
-                Settings::Manager::getFloat("occlusion occluder max distance", "Camera"),
-                Settings::Manager::getBool("occlusion culling statics", "Camera")));
-        }
-        mRootNode->addChild(cellnode);
+        cellnode = createCellNode();
         mCellSceneNodes[ptr.getCell()] = cellnode;
     }
     else
@@ -215,9 +236,11 @@ void Objects::updatePtr(const MWWorld::Ptr &old, const MWWorld::Ptr &cur)
 
     osg::Group* cellnode;
     if(mCellSceneNodes.find(newCell) == mCellSceneNodes.end()) {
-        cellnode = new osg::Group;
-        mRootNode->addChild(cellnode);
-        mCellSceneNodes[newCell] = cellnode;
+        // X029: goes through the same factory as insertBegin, so a cell root
+        // created here also gets the occlusion cull callback.
+        osg::ref_ptr<osg::Group> created = createCellNode();
+        mCellSceneNodes[newCell] = created;
+        cellnode = created.get();
     } else {
         cellnode = mCellSceneNodes[newCell];
     }

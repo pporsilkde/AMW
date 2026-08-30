@@ -1,0 +1,667 @@
+diff -ruN /mnt/data/x030_clean_mw/X031_OCCLUSION_STAGE2_RU.md /mnt/data/x031_mw/X031_OCCLUSION_STAGE2_RU.md
+--- /mnt/data/x030_clean_mw/X031_OCCLUSION_STAGE2_RU.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mw/X031_OCCLUSION_STAGE2_RU.md	2026-08-29 20:04:59.853917000 +0000
+@@ -0,0 +1,14 @@
++# ArenaMW X031 — Occlusion Stage2
++
++- Terrain occluder rasterizes cached LAND cells directly instead of assembling/copying one giant rebased region mesh.
++- Side-plane frustum culling skips terrain occluder cells behind/outside the camera before software rasterization.
++- New setting: `[Camera] occlusion terrain frustum cull = true`, exposed in Launcher Advanced/Arena settings.
++- Graphics presets enable the new frustum culling automatically.
++- Profiler adds `Occl Terrain Rast`.
++- X029 atomic profiler snapshots are preserved.
++- Reusable scratch LAND vertex storage reduces per-cell allocations.
++- `skipOcclusion` named user-data lookup is delayed until after a small-object AABB actually fails software occlusion.
++
++ArenaMP-only RAW config, questIndex, MMO multiplayer defaults and chat/protocol changes are intentionally not included in ArenaMW.
++
++Validation: X031 logic harness passes budget/frustum tests, Qt UI XML parses successfully. Full engine compilation was not run in this environment.
+diff -ruN /mnt/data/x030_clean_mw/X031_occlusion_logic_harness.cpp /mnt/data/x031_mw/X031_occlusion_logic_harness.cpp
+--- /mnt/data/x030_clean_mw/X031_occlusion_logic_harness.cpp	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mw/X031_occlusion_logic_harness.cpp	2026-08-29 20:04:59.857635966 +0000
+@@ -0,0 +1,109 @@
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <limits>
++#include <map>
++#include <vector>
++
++struct Vec4 { double v[4]; };
++struct Mat  { double m[4][4]; };
++
++static Mat mul(const Mat& a, const Mat& b)
++{
++    Mat r{};
++    for (int i = 0; i < 4; ++i)
++        for (int j = 0; j < 4; ++j)
++            for (int k = 0; k < 4; ++k)
++                r.m[i][j] += a.m[i][k] * b.m[k][j];
++    return r;
++}
++
++static Vec4 transformPlane(const Vec4& p, const Mat& M)
++{
++    Vec4 r{};
++    for (int i = 0; i < 4; ++i)
++        for (int j = 0; j < 4; ++j)
++            r.v[i] += p.v[j] * M.m[i][j];
++    return r;
++}
++
++static double distance(const Vec4& plane, double x, double y, double z)
++{
++    return plane.v[0]*x + plane.v[1]*y + plane.v[2]*z + plane.v[3];
++}
++
++struct OccluderSim
++{
++    std::map<std::pair<int,int>, bool> cache;
++    bool regionValid = false;
++    std::pair<int,int> cachedPos{0,0};
++    int cachedRadius = -1;
++    int budgetPerBuild = 24;
++    unsigned int lastBuilt = 0;
++
++    void prune(std::pair<int,int> c, int r)
++    {
++        const int keep = std::max(1, r) + 2;
++        for (auto it = cache.begin(); it != cache.end();)
++        {
++            if (std::abs(it->first.first-c.first)>keep || std::abs(it->first.second-c.second)>keep)
++                it=cache.erase(it); else ++it;
++        }
++    }
++    void collect(int cx0,int cy0,int radius)
++    {
++        lastBuilt=0;
++        int budget=budgetPerBuild>0?budgetPerBuild:std::numeric_limits<int>::max();
++        bool complete=true;
++        for(int cy=cy0-radius;cy<=cy0+radius;++cy)
++            for(int cx=cx0-radius;cx<=cx0+radius;++cx)
++            {
++                if(cache.count({cx,cy})) continue;
++                if(budget<=0){complete=false;continue;}
++                --budget; ++lastBuilt; cache[{cx,cy}]=true;
++            }
++        cachedPos={cx0,cy0}; cachedRadius=radius; regionValid=complete; prune(cachedPos,radius);
++    }
++};
++
++static bool testBudget()
++{
++    const int radius=8, region=(2*radius+1)*(2*radius+1);
++    OccluderSim sim; int frames=0;
++    while(!sim.regionValid && frames<1000){sim.collect(0,0,radius);++frames;}
++    const int expect=(region+sim.budgetPerBuild-1)/sim.budgetPerBuild;
++    bool ok=frames==expect;
++    std::printf("cold: %d frames expected %d => %s\n",frames,expect,ok?"ok":"FAIL");
++    sim.collect(1,0,radius); bool step=sim.lastBuilt==unsigned(2*radius+1);
++    std::printf("step: %u built expected %d => %s\n",sim.lastBuilt,2*radius+1,step?"ok":"FAIL");
++    OccluderSim off; off.budgetPerBuild=0; off.collect(0,0,radius); bool unlimited=off.lastBuilt==unsigned(region);
++    std::printf("unlimited: %u expected %d => %s\n",off.lastBuilt,region,unlimited?"ok":"FAIL");
++    return ok&&step&&unlimited;
++}
++
++static Mat perspective(double fovyDeg,double aspect,double zn,double zf)
++{
++    const double f=1.0/std::tan(fovyDeg*3.14159265358979/360.0);
++    Mat P{}; P.m[0][0]=f/aspect; P.m[1][1]=f; P.m[2][2]=(zf+zn)/(zn-zf); P.m[2][3]=-1.0; P.m[3][2]=2.0*zf*zn/(zn-zf); return P;
++}
++
++static bool testFrustum(const char* label,const Mat& proj)
++{
++    Mat view{}; for(int i=0;i<4;++i)view.m[i][i]=1.0;
++    Mat vp=mul(view,proj);
++    const Vec4 clip[4]={{{1,0,0,1}},{{-1,0,0,1}},{{0,1,0,1}},{{0,-1,0,1}}};
++    Vec4 planes[4]; for(int i=0;i<4;++i) planes[i]=transformPlane(clip[i],vp);
++    auto inside=[&](double x,double y,double z){for(auto &p:planes)if(distance(p,x,y,z)<0)return false;return true;};
++    bool ahead=true,behind=true,side=true;
++    for(double d=1;d<20000;d*=2){if(!inside(0,0,-d))ahead=false;if(inside(0,0,d))behind=false;if(inside(10*d,0,-d))side=false;}
++    std::printf("%s ahead=%s behind-reject=%s side-reject=%s\n",label,ahead?"ok":"FAIL",behind?"ok":"FAIL",side?"ok":"FAIL");
++    return ahead&&behind&&side;
++}
++
++int main()
++{
++    bool ok=testBudget();
++    ok &= testFrustum("standard", perspective(75.0,16.0/9.0,1.0,100000.0));
++    ok &= testFrustum("reversed", perspective(75.0,16.0/9.0,100000.0,1.0));
++    return ok?0:1;
++}
+diff -ruN /mnt/data/x030_clean_mw/apps/launcher/advancedpage.cpp /mnt/data/x031_mw/apps/launcher/advancedpage.cpp
+--- /mnt/data/x030_clean_mw/apps/launcher/advancedpage.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/apps/launcher/advancedpage.cpp	2026-08-29 19:52:45.945037942 +0000
+@@ -303,6 +303,7 @@
+         loadSettingBool(progressiveXpCurveCheckBox, "progressive xp curve", "XP Leveling");
+         loadSettingBool(showXpNotificationsCheckBox, "show xp notifications", "XP Leveling");
+         occlusionTerrainBudgetSpinBox->setValue(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
++        loadSettingBool(occlusionTerrainFrustumCullCheckBox, "occlusion terrain frustum cull", "Camera");
+     }
+ 
+     // Visuals
+@@ -509,6 +510,7 @@
+         saveSettingBool(progressiveXpCurveCheckBox, "progressive xp curve", "XP Leveling");
+         saveSettingBool(showXpNotificationsCheckBox, "show xp notifications", "XP Leveling");
+         Settings::Manager::setInt("occlusion terrain cell budget", "Camera", occlusionTerrainBudgetSpinBox->value());
++        saveSettingBool(occlusionTerrainFrustumCullCheckBox, "occlusion terrain frustum cull", "Camera");
+     }
+ 
+     // Visuals
+diff -ruN /mnt/data/x030_clean_mw/apps/launcher/graphicspage.cpp /mnt/data/x031_mw/apps/launcher/graphicspage.cpp
+--- /mnt/data/x030_clean_mw/apps/launcher/graphicspage.cpp	2026-08-29 19:37:27.000000000 +0000
++++ /mnt/data/x031_mw/apps/launcher/graphicspage.cpp	2026-08-29 19:52:45.945597695 +0000
+@@ -977,6 +977,7 @@
+     Settings::Manager::setInt("occlusion buffer height", "Camera", occlusionHeight[level]);
+     Settings::Manager::setInt("occlusion terrain radius", "Camera", occlusionTerrainRadius[level]);
+     Settings::Manager::setInt("occlusion terrain cell budget", "Camera", occlusionTerrainCellBudget[level]);
++    Settings::Manager::setBool("occlusion terrain frustum cull", "Camera", true);
+     Settings::Manager::setFloat("occlusion occluder min radius", "Camera", occlusionMinRadius[level]);
+     Settings::Manager::setFloat("occlusion occluder max radius", "Camera", occlusionMaxRadius[level]);
+     Settings::Manager::setFloat("occlusion occluder shrink factor", "Camera", occlusionShrinkFactor[level]);
+diff -ruN /mnt/data/x030_clean_mw/apps/openmw/mwrender/occlusionculling.cpp /mnt/data/x031_mw/apps/openmw/mwrender/occlusionculling.cpp
+--- /mnt/data/x030_clean_mw/apps/openmw/mwrender/occlusionculling.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/apps/openmw/mwrender/occlusionculling.cpp	2026-08-29 19:52:45.944498259 +0000
+@@ -279,12 +279,20 @@
+         mCuller->beginFrame(cam->getViewMatrix(), cam->getProjectionMatrix());
+         if (mEnableTerrainOccluder && mTerrainOccluder->hasTerrainData())
+         {
+-            // X028: TerrainOccluder keeps the assembled region stable while the
+-            // eye remains in the same terrain cell. Do not clear/copy these large
+-            // arrays every frame; only update them when the region actually changes.
+-            mTerrainOccluder->build(cv->getEyePoint(), mRadiusCells, mPositions, mIndices);
+-            if (!mPositions.empty() && !mIndices.empty())
+-                mCuller->rasterizeOccluder(mPositions, mIndices);
++            // X031: side planes only. The desired transform is inverse(view*proj),
++            // so transformProvidingInverse receives view*proj directly. Near/far
++            // are intentionally omitted: this rejects cells behind/off-axis while
++            // remaining independent of normal/reversed depth conventions.
++            mFrustum.setToUnitFrustum(false, false);
++            mFrustum.transformProvidingInverse(cam->getViewMatrix() * cam->getProjectionMatrix());
++
++            mTerrainOccluder->collectVisibleCells(cv->getEyePoint(), mRadiusCells, mFrustum, mVisibleCells);
++            for (std::vector<Terrain::OccluderCellMesh>::const_iterator it = mVisibleCells.begin();
++                 it != mVisibleCells.end(); ++it)
++            {
++                if (it->mPositions && it->mIndices && !it->mPositions->empty() && !it->mIndices->empty())
++                    mCuller->rasterizeOccluder(*it->mPositions, *it->mIndices);
++            }
+         }
+         traverse(node, nv);
+     }
+@@ -508,10 +516,19 @@
+             { child->accept(*cv); continue; }
+             if (bs.radius() >= mOccluderMinRadius)
+                 continue;
++            // X031: most children are visible, so avoid the named user-data
++            // lookup on that hot path. Only a child that software occlusion would
++            // reject needs the skipOcclusion escape-hatch lookup (doors, etc.).
++            osg::BoundingBox bb; bb.expandBy(bs);
++            if (mCuller->testVisibleAABB(bb))
++            {
++                child->accept(*cv);
++                continue;
++            }
++
+             bool skipOcclusion = false;
+             child->getUserValue("skipOcclusion", skipOcclusion);
+-            osg::BoundingBox bb; bb.expandBy(bs);
+-            if (skipOcclusion || mCuller->testVisibleAABB(bb))
++            if (skipOcclusion)
+                 child->accept(*cv);
+         }
+     }
+diff -ruN /mnt/data/x030_clean_mw/apps/openmw/mwrender/occlusionculling.hpp /mnt/data/x031_mw/apps/openmw/mwrender/occlusionculling.hpp
+--- /mnt/data/x030_clean_mw/apps/openmw/mwrender/occlusionculling.hpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/apps/openmw/mwrender/occlusionculling.hpp	2026-08-29 19:52:45.944342204 +0000
+@@ -4,6 +4,7 @@
+ #include <osg/BoundingBox>
+ #include <osg/Object>
+ #include <osg/NodeCallback>
++#include <osg/Polytope>
+ #include <osg/Referenced>
+ #include <osg/Vec3f>
+ #include <osg/observer_ptr>
+@@ -17,6 +18,8 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++#include <components/terrain/terrainoccluder.hpp>
++
+ namespace osg
+ {
+     class Group;
+@@ -29,10 +32,6 @@
+     class OcclusionCuller;
+ }
+ 
+-namespace Terrain
+-{
+-    class TerrainOccluder;
+-}
+ 
+ namespace MWRender
+ {
+@@ -114,8 +113,10 @@
+         int mRadiusCells;
+         bool mEnableTerrainOccluder;
+         unsigned int mLastFrameNumber;
+-        std::vector<osg::Vec3f> mPositions;
+-        std::vector<unsigned int> mIndices;
++        // X031: rasterize cached cells directly. The frustum and the tiny list of
++        // cell references are reused every cull frame.
++        osg::Polytope mFrustum;
++        std::vector<Terrain::OccluderCellMesh> mVisibleCells;
+     };
+ 
+     class PagedOccluderCallback : public osg::NodeCallback
+diff -ruN /mnt/data/x030_clean_mw/apps/openmw/mwrender/renderingmanager.cpp /mnt/data/x031_mw/apps/openmw/mwrender/renderingmanager.cpp
+--- /mnt/data/x030_clean_mw/apps/openmw/mwrender/renderingmanager.cpp	2026-08-29 19:37:27.000000000 +0000
++++ /mnt/data/x031_mw/apps/openmw/mwrender/renderingmanager.cpp	2026-08-29 19:52:45.944752432 +0000
+@@ -860,6 +860,7 @@
+             // the first exterior assembly is spread over frames instead of
+             // decoding the whole 17x17 region in one cull.
+             mTerrainOccluder->setCellBuildBudget(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
++            mTerrainOccluder->setFrustumCulling(Settings::Manager::getBool("occlusion terrain frustum cull", "Camera"));
+             sceneRoot->addCullCallback(new SceneOcclusionCallback(
+                 mOcclusionCuller.get(),
+                 mTerrainOccluder.get(),
+@@ -2028,6 +2029,7 @@
+             {
+                 stats->setAttribute(frameNumber, "Occl Terrain Cells", mTerrainOccluder->getCachedCellCount());
+                 stats->setAttribute(frameNumber, "Occl Terrain Built", mTerrainOccluder->getLastBuiltCellCount());
++                stats->setAttribute(frameNumber, "Occl Terrain Rast", mTerrainOccluder->getLastVisibleCellCount());
+             }
+ 
+             if (mObjects)
+diff -ruN /mnt/data/x030_clean_mw/components/resource/stats.cpp /mnt/data/x031_mw/components/resource/stats.cpp
+--- /mnt/data/x030_clean_mw/components/resource/stats.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/components/resource/stats.cpp	2026-08-29 19:52:45.944876970 +0000
+@@ -396,6 +396,7 @@
+             "Occl Tris",
+             "Occl Terrain Cells",
+             "Occl Terrain Built",
++            "Occl Terrain Rast",
+             "Occl Templates",
+             "Occl Tpl Hits",
+             "Occl Tpl Misses",
+diff -ruN /mnt/data/x030_clean_mw/components/terrain/terrainoccluder.cpp /mnt/data/x031_mw/components/terrain/terrainoccluder.cpp
+--- /mnt/data/x030_clean_mw/components/terrain/terrainoccluder.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/components/terrain/terrainoccluder.cpp	2026-08-29 19:54:52.810015936 +0000
+@@ -12,6 +12,7 @@
+     TerrainOccluder::TerrainOccluder(Storage* storage, float cellWorldSize)
+         : mStorage(storage)
+         , mCellWorldSize(cellWorldSize)
++        , mScratchPositions(new osg::Vec3Array)
+     {
+     }
+ 
+@@ -35,13 +36,24 @@
+         mCellBuildBudget = cellsPerBuild;
+     }
+ 
++    void TerrainOccluder::publishStats()
++    {
++        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
++        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
++        mPublishedLastVisibleCells.store(mLastVisibleCells, std::memory_order_relaxed);
++        mPublishedRegionComplete.store(mRegionCacheValid, std::memory_order_relaxed);
++    }
++
+     void TerrainOccluder::invalidateCache()
+     {
+         mRegionCacheValid = false;
+         mCachedRadius = -1;
+         mCellCache.clear();
+-        mPublishedCachedCellCount.store(0, std::memory_order_relaxed);
+-        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
++        mLastBuiltCells = 0;
++        mLastVisibleCells = 0;
++        if (mScratchPositions.valid())
++            mScratchPositions->clear();
++        publishStats();
+     }
+ 
+     TerrainOccluder::CachedCellMesh TerrainOccluder::buildCell(int cellX, int cellY) const
+@@ -49,20 +61,20 @@
+         CachedCellMesh result;
+ 
+         const osg::Vec2f center(cellX + 0.5f, cellY + 0.5f);
+-        osg::ref_ptr<osg::Vec3Array> fullRes(new osg::Vec3Array);
++        if (!mScratchPositions.valid())
++            mScratchPositions = new osg::Vec3Array;
++        mScratchPositions->clear();
+         osg::ref_ptr<osg::Vec3Array> normals(new osg::Vec3Array);
+         osg::ref_ptr<osg::Vec4ubArray> colors(new osg::Vec4ubArray);
+         colors->setNormalize(true);
+-        mStorage->fillVertexBuffers(0, 1.0f, center, fullRes, normals, colors);
+-        if (fullRes->empty())
++        mStorage->fillVertexBuffers(0, 1.0f, center, mScratchPositions, normals, colors);
++        if (mScratchPositions->empty())
+             return result;
+ 
+-        const int fullPerSide = static_cast<int>(std::sqrt(static_cast<float>(fullRes->size())));
++        const int fullPerSide = static_cast<int>(std::sqrt(static_cast<float>(mScratchPositions->size())));
+         if (fullPerSide < 2)
+             return result;
+ 
+-        // Avoid undefined behaviour on a corrupt/external setting while preserving
+-        // the old semantics for all practical LOD values.
+         const int safeLod = std::min(mLodLevel, 15);
+         const int step = std::max(1, 1 << safeLod);
+         const int coarsePerSide = (fullPerSide - 1) / step + 1;
+@@ -81,7 +93,7 @@
+                 float minH = std::numeric_limits<float>::max();
+                 for (int fj = startJ; fj <= endJ; ++fj)
+                     for (int fi = startI; fi <= endI; ++fi)
+-                        minH = std::min(minH, (*fullRes)[fj * fullPerSide + fi].z());
++                        minH = std::min(minH, (*mScratchPositions)[fj * fullPerSide + fi].z());
+                 quadMins[qj * (coarsePerSide - 1) + qi] = minH;
+             }
+         }
+@@ -104,9 +116,11 @@
+ 
+                 const int srcI = std::min(ci * step, fullPerSide - 1);
+                 const int srcJ = std::min(cj * step, fullPerSide - 1);
+-                osg::Vec3f pos = (*fullRes)[srcJ * fullPerSide + srcI];
++                osg::Vec3f pos = (*mScratchPositions)[srcJ * fullPerSide + srcI];
+                 pos.z() = minH;
+-                result.mPositions.push_back(pos + worldOffset);
++                pos += worldOffset;
++                result.mPositions.push_back(pos);
++                result.mBounds.expandBy(pos);
+             }
+         }
+ 
+@@ -138,9 +152,6 @@
+         if (found != mCellCache.end())
+             return &found->second;
+ 
+-        // X029: cells with no LAND record are cached as empty meshes on purpose,
+-        // so a missing cell costs its decode attempt exactly once. That attempt is
+-        // still the expensive part, so it counts against the budget.
+         if (budget <= 0)
+             return nullptr;
+ 
+@@ -151,9 +162,6 @@
+ 
+     void TerrainOccluder::pruneCellCache(const osg::Vec2i& center, int radiusCells)
+     {
+-        // Keep two extra rings so a normal one-cell movement can reuse the full
+-        // overlap and only generate the newly exposed edge. This bounds memory
+-        // while avoiding the old all-or-nothing rebuild.
+         const int keepRadius = std::max(1, radiusCells) + 2;
+         for (std::map<CellKey, CachedCellMesh>::iterator it = mCellCache.begin(); it != mCellCache.end();)
+         {
+@@ -166,20 +174,18 @@
+         }
+     }
+ 
+-    bool TerrainOccluder::build(const osg::Vec3f& eyePoint, int radiusCells,
+-        std::vector<osg::Vec3f>& outPositions, std::vector<unsigned int>& outIndices)
++    void TerrainOccluder::collectVisibleCells(const osg::Vec3f& eyePoint, int radiusCells,
++        const osg::Polytope& frustum, std::vector<OccluderCellMesh>& out)
+     {
+-        // Per-frame counter: zero unless this call actually decoded new cells.
+         mLastBuiltCells = 0;
+-        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
++        mLastVisibleCells = 0;
++        out.clear();
+ 
+         if (!hasTerrainData())
+         {
+-            outPositions.clear();
+-            outIndices.clear();
+             mRegionCacheValid = false;
+-            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+-            return true;
++            publishStats();
++            return;
+         }
+ 
+         radiusCells = std::max(1, radiusCells);
+@@ -187,25 +193,17 @@
+         const int cellY = static_cast<int>(std::floor(eyePoint.y() / mCellWorldSize));
+         const osg::Vec2i cellPos(cellX, cellY);
+ 
+-        if (mRegionCacheValid && cellPos == mCachedCellPos && radiusCells == mCachedRadius)
+-        {
+-            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+-            return false;
+-        }
+-
+-        outPositions.clear();
+-        outIndices.clear();
+-
+-        // X029: budget the expensive part. Cells already in the cache are always
+-        // assembled; only newly decoded ones are rationed. When the budget runs
+-        // out the region is marked incomplete, so the next frame continues where
+-        // this one stopped instead of declaring the region done.
++        // Keep the old X029 budget semantics: cached cells are free, newly decoded
++        // cells consume the budget, and an incomplete region simply contributes
++        // fewer occluders until later frames finish it.
+         int budget = mCellBuildBudget > 0 ? mCellBuildBudget : std::numeric_limits<int>::max();
+         bool complete = true;
+ 
+-        // X028: region assembly still walks all cells, but expensive LAND decode +
+-        // coarse-mesh construction happens only once per cached cell. At radius 8
+-        // a one-cell move reuses 272/289 cells and builds only the new 17-cell edge.
++        // Reuse enough storage for the full square while keeping each entry tiny
++        // (two pointers). No vertex/index copying or index rebasing happens here.
++        const int side = radiusCells * 2 + 1;
++        out.reserve(static_cast<std::size_t>(side * side));
++
+         for (int cy = cellY - radiusCells; cy <= cellY + radiusCells; ++cy)
+         {
+             for (int cx = cellX - radiusCells; cx <= cellX + radiusCells; ++cx)
+@@ -213,8 +211,6 @@
+                 const CachedCellMesh* cell = getCell(cx, cy, budget);
+                 if (!cell)
+                 {
+-                    // Not built yet and out of budget. Leaving it out only removes
+-                    // an occluder, which can never hide something that is visible.
+                     complete = false;
+                     continue;
+                 }
+@@ -222,11 +218,27 @@
+                 if (cell->mPositions.empty() || cell->mIndices.empty())
+                     continue;
+ 
+-                const unsigned int baseIndex = static_cast<unsigned int>(outPositions.size());
+-                outPositions.insert(outPositions.end(), cell->mPositions.begin(), cell->mPositions.end());
+-                outIndices.reserve(outIndices.size() + cell->mIndices.size());
+-                for (std::vector<unsigned int>::const_iterator it = cell->mIndices.begin(); it != cell->mIndices.end(); ++it)
+-                    outIndices.push_back(baseIndex + *it);
++                if (mFrustumCulling && cell->mBounds.valid())
++                {
++                    bool outside = false;
++                    const osg::Polytope::PlaneList& planes = frustum.getPlaneList();
++                    for (osg::Polytope::PlaneList::const_iterator plane = planes.begin(); plane != planes.end(); ++plane)
++                    {
++                        if (plane->intersect(cell->mBounds) < 0)
++                        {
++                            outside = true;
++                            break;
++                        }
++                    }
++                    if (outside)
++                        continue;
++                }
++
++                OccluderCellMesh mesh;
++                mesh.mPositions = &cell->mPositions;
++                mesh.mIndices = &cell->mIndices;
++                out.push_back(mesh);
++                ++mLastVisibleCells;
+             }
+         }
+ 
+@@ -234,13 +246,9 @@
+         mCachedRadius = radiusCells;
+         mRegionCacheValid = complete;
+ 
+-        // X029-safe: prune even while filling. pruneCellCache keeps radius+2,
+-        // therefore it cannot evict any cell required by the current radius, and
+-        // this prevents cache growth during rapid teleports where a region may not
+-        // become complete before the next center is requested.
++        // Safe even while the region is incomplete: current cells lie within
++        // radius, while prune keeps radius+2 rings.
+         pruneCellCache(cellPos, radiusCells);
+-        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+-        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
+-        return true;
++        publishStats();
+     }
+ }
+diff -ruN /mnt/data/x030_clean_mw/components/terrain/terrainoccluder.hpp /mnt/data/x031_mw/components/terrain/terrainoccluder.hpp
+--- /mnt/data/x030_clean_mw/components/terrain/terrainoccluder.hpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/components/terrain/terrainoccluder.hpp	2026-08-29 19:52:45.944108252 +0000
+@@ -6,55 +6,71 @@
+ #include <utility>
+ #include <vector>
+ 
++#include <osg/Array>
++#include <osg/BoundingBox>
++#include <osg/Polytope>
+ #include <osg/Vec2i>
+ #include <osg/Vec3f>
++#include <osg/ref_ptr>
+ 
+ namespace Terrain
+ {
+     class Storage;
+ 
++    /// X031: one cached LAND cell's coarse occluder mesh, handed out by reference.
++    /// References stay valid until the next collectVisibleCells() on the same
++    /// occluder; the caller consumes them immediately in the cull traversal.
++    struct OccluderCellMesh
++    {
++        const std::vector<osg::Vec3f>* mPositions = nullptr;
++        const std::vector<unsigned int>* mIndices = nullptr;
++    };
++
+     class TerrainOccluder
+     {
+     public:
+         TerrainOccluder(Storage* storage, float cellWorldSize);
+ 
+-        // X028: changing the terrain occlusion LOD invalidates both the assembled
+-        // region and the per-cell cache. This keeps runtime setting changes safe.
+         void setLodLevel(int lod);
+-
+-        // X029: upper bound on how many *new* cells a single build() may decode.
+-        // The first entry into an exterior needs (2r+1)^2 cells - 289 at the
+-        // default radius 8 - and decoding all of them in one cull frame is the
+-        // largest remaining occlusion stutter. Spreading them over frames is
+-        // fail-open: a partially assembled occluder hides less, never more.
+         void setCellBuildBudget(int cellsPerBuild);
+ 
+-        // X029: profiler readout. The engine already collected occlusion counters
+-        // that nothing ever read; these follow the same idea for the terrain side.
+-        unsigned int getCachedCellCount() const { return mPublishedCachedCellCount.load(std::memory_order_relaxed); }
+-        unsigned int getLastBuiltCellCount() const { return mPublishedLastBuiltCells.load(std::memory_order_relaxed); }
+-        bool isRegionComplete() const { return mRegionCacheValid; }
++        // X031: reject cached terrain occluder cells outside the camera side
++        // planes before they reach the software rasterizer.
++        void setFrustumCulling(bool enabled) { mFrustumCulling = enabled; }
++
++        /// X031: return cached cells to rasterize this frame without assembling
++        /// one giant rebased mesh. Missing cells are decoded within the X029
++        /// budget. Skipped/missing cells only remove occluders, so the path is
++        /// fail-open: the worst case is drawing more geometry.
++        void collectVisibleCells(const osg::Vec3f& eyePoint, int radiusCells,
++            const osg::Polytope& frustum, std::vector<OccluderCellMesh>& out);
+ 
+-        // Rebuilds the output only when the eye crosses into a different terrain
+-        // cell or the requested radius changes. Returns true when output changed.
+-        bool build(const osg::Vec3f& eyePoint, int radiusCells, std::vector<osg::Vec3f>& outPositions,
+-            std::vector<unsigned int>& outIndices);
+         bool hasTerrainData() const;
+ 
++        // Published snapshots are safe to read from the update/stats thread while
++        // the cull traversal owns the mutable cache.
++        unsigned int getCachedCellCount() const { return mPublishedCachedCellCount.load(std::memory_order_relaxed); }
++        unsigned int getLastBuiltCellCount() const { return mPublishedLastBuiltCells.load(std::memory_order_relaxed); }
++        unsigned int getLastVisibleCellCount() const { return mPublishedLastVisibleCells.load(std::memory_order_relaxed); }
++        bool isRegionComplete() const { return mPublishedRegionComplete.load(std::memory_order_relaxed); }
++
+     private:
+         struct CachedCellMesh
+         {
+             std::vector<osg::Vec3f> mPositions;
+             std::vector<unsigned int> mIndices;
++            // Bounds of the actual coarse occluder mesh. Frustum rejection never
++            // hides scene geometry; it only decides whether this occluder is worth
++            // rasterizing for the current camera.
++            osg::BoundingBox mBounds;
+         };
+ 
+         typedef std::pair<int, int> CellKey;
+ 
+         CachedCellMesh buildCell(int cellX, int cellY) const;
+-        // Returns nullptr when the cell is not cached and the per-build budget is
+-        // already spent. Callers must treat that as "skip this cell for now".
+         const CachedCellMesh* getCell(int cellX, int cellY, int& budget);
+         void pruneCellCache(const osg::Vec2i& center, int radiusCells);
++        void publishStats();
+         void invalidateCache();
+ 
+         Storage* mStorage;
+@@ -65,15 +81,20 @@
+         osg::Vec2i mCachedCellPos;
+         int mCachedRadius = -1;
+ 
+-        // X029: <= 0 means unlimited, which reproduces the X028 behaviour exactly.
+         int mCellBuildBudget = 24;
++        bool mFrustumCulling = true;
+         unsigned int mLastBuiltCells = 0;
++        unsigned int mLastVisibleCells = 0;
++
+         std::atomic<unsigned int> mPublishedCachedCellCount{0};
+         std::atomic<unsigned int> mPublishedLastBuiltCells{0};
++        std::atomic<unsigned int> mPublishedLastVisibleCells{0};
++        std::atomic<bool> mPublishedRegionComplete{false};
++
++        // X031: reuse the largest temporary LAND position array instead of
++        // allocating/freeing it once for every decoded cell.
++        mutable osg::ref_ptr<osg::Vec3Array> mScratchPositions;
+ 
+-        // X028/MGE-inspired incremental terrain occluder cache. MGE XE avoids
+-        // regenerating unchanged distant-land units; here we apply the same idea
+-        // to OpenMW's software occlusion mesh without importing renderer code.
+         std::map<CellKey, CachedCellMesh> mCellCache;
+     };
+ }
+diff -ruN /mnt/data/x030_clean_mw/files/settings-default.cfg /mnt/data/x031_mw/files/settings-default.cfg
+--- /mnt/data/x030_clean_mw/files/settings-default.cfg	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/files/settings-default.cfg	2026-08-29 19:52:45.944950060 +0000
+@@ -57,6 +57,9 @@
+ # cost of a briefly incomplete occluder (which only ever draws more, not less).
+ # 0 or below restores the old behaviour of building the whole region at once.
+ occlusion terrain cell budget = 24
++# X031: skip terrain occluder cells outside the camera side planes before software rasterization.
++# Fail-open: disabling/removing an occluder can only draw more scene geometry, never hide it.
++occlusion terrain frustum cull = true
+ occlusion occluder min radius = 500
+ occlusion occluder max radius = 4400
+ occlusion occluder shrink factor = 0.76
+diff -ruN /mnt/data/x030_clean_mw/files/ui/advancedpage.ui /mnt/data/x031_mw/files/ui/advancedpage.ui
+--- /mnt/data/x030_clean_mw/files/ui/advancedpage.ui	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mw/files/ui/advancedpage.ui	2026-08-29 19:52:45.945379206 +0000
+@@ -1925,6 +1925,16 @@
+            </widget>
+           </item>
+           <item row="1" column="0" colspan="2">
++           <widget class="QCheckBox" name="occlusionTerrainFrustumCullCheckBox">
++            <property name="text">
++             <string>Frustum-cull terrain occluder cells</string>
++            </property>
++            <property name="toolTip">
++             <string>Skip cached terrain occluder cells outside the camera side planes before software rasterization. Recommended on all presets.</string>
++            </property>
++           </widget>
++          </item>
++          <item row="2" column="0" colspan="2">
+            <widget class="QLabel" name="occlusionTerrainBudgetHintLabel">
+             <property name="text">
+              <string>Recommended: 12–16 on weak CPUs, 24 balanced, 32–40 on fast desktop CPUs.</string>
