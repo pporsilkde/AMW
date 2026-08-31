@@ -11,7 +11,7 @@
             <Property key="TextAlign" value="Left VCenter"/>
             <Property key="TextShadow" value="true"/>
             <Property key="TextShadowColour" value="0 0 0"/>
-            <Property key="FontHeight" value="12"/>
+            <Property key="FontHeight" value="13"/>
             <Property key="Caption" value="FPS: --"/>
         </Widget>
 

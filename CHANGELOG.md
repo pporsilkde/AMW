@@ -2,6 +2,12 @@
 
 This file consolidates ArenaMW development notes that previously existed as separate root-level patch, review, checksum and harness files. Original OpenMW 0.47 history is preserved in `docs/upstream/OPENMW_CHANGELOG.md`.
 
+## Y002s — CharGen crosshair continuity
+
+### Changed
+- The HUD crosshair is forced visible for the complete single-player character-creation/registration flow while `chargenstate != -1`, including modal CharGen GUI stages that normally suppress the camera reticle.
+- As soon as character creation finishes (`chargenstate == -1`), crosshair visibility returns to the normal camera, GUI-mode and `[HUD] crosshair` preference rules.
+
 ## Y001s — clean standalone source + launcher/FPS/preview safety
 
 ### Added

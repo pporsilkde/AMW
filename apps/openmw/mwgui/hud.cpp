@@ -800,7 +800,17 @@ namespace MWGui
         if (mFpsBox)
             mFpsBox->setVisible(Settings::Manager::getBool("show fps", "HUD"));
         if (mCrosshair)
-            mCrosshair->setVisible(mCrosshairBaseVisible && Settings::Manager::getBool("crosshair", "HUD"));
+        {
+            // ArenaMW Y002s: CharGen is a modal GUI flow, and both InputManager
+            // and Camera normally hide the crosshair while GUI mode is active.
+            // Keep the reticle forced on until registration is fully complete;
+            // once chargenstate reaches -1, immediately return to the normal
+            // camera/base-visibility and user HUD preference rules.
+            const bool characterCreationInProgress = !characterRegistrationFinished;
+            const bool userCrosshairEnabled = Settings::Manager::getBool("crosshair", "HUD");
+            mCrosshair->setVisible(characterCreationInProgress
+                || (mCrosshairBaseVisible && userCrosshairEnabled));
+        }
 
         updateHorizontalCompass();
         updateHorizontalCompassMarkers(dt);
@@ -1577,8 +1587,14 @@ namespace MWGui
 
     void HUD::setCrosshairVisible(bool visible)
     {
+        // Preserve the camera/GUI request so normal visibility resumes cleanly
+        // after CharGen. During character creation itself, however, modal GUI
+        // mode must not suppress the centre reticle.
         mCrosshairBaseVisible = visible;
-        mCrosshair->setVisible(visible && Settings::Manager::getBool("crosshair", "HUD"));
+        const bool characterCreationInProgress
+            = MWBase::Environment::get().getWorld()->getGlobalInt("chargenstate") != -1;
+        mCrosshair->setVisible(characterCreationInProgress
+            || (visible && Settings::Manager::getBool("crosshair", "HUD")));
     }
 
     void HUD::setCrosshairOwned(bool owned)

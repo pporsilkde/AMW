@@ -1,4 +1,4 @@
-# ArenaMW Y001s
+# ArenaMW Y002s
 
 [Русский](README_RU.md) · **English**
 
@@ -10,12 +10,16 @@ ArenaMW is the standalone/single-player branch of the Arena engine work. It is b
 
 | Component | Value |
 | --- | --- |
-| ArenaMW source | **Y001s** |
+| ArenaMW source | **Y002s** |
 | Engine base | OpenMW 0.47.0 |
 | Runtime | Single-player `openmw` |
 | Launcher | `openmw-launcher` |
 | Network/server layer | Not included |
 | Primary release build | Windows x64 |
+
+## Y002s highlights
+
+- Crosshair remains visible throughout CharGen/character registration and returns to normal HUD/camera preference handling immediately after creation is complete.
 
 ## Y001s highlights
 
