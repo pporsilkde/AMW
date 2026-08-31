@@ -61,6 +61,7 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
     , mLauncherSettings(launcherSettings)
     , mRecommendedQuality(2)
     , mInitializingQuality(false)
+    , mGraphicsBaselineValid(false)
 {
     setObjectName ("GraphicsPage");
     setupUi(this);
@@ -237,6 +238,8 @@ void Launcher::GraphicsPage::syncGraphicsControls()
         lightingMethod = 0;
     else if (Settings::Manager::getString("lighting method", "Shaders") == "shaders")
         lightingMethod = 2;
+    else if (Settings::Manager::getString("lighting method", "Shaders") == "clustered")
+        lightingMethod = 3;
     if (pbrIndex > 0 && lightingMethod == 0)
         lightingMethod = 1;
     lightingMethodComboBox->setCurrentIndex(lightingMethod);
@@ -284,10 +287,23 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     slotStandardToggled(standardRadioButton->isChecked());
     slotFramerateLimitToggled(framerateLimitCheckBox->isChecked());
     updateShadowControls();
+
+    // Y001s: remember the exact settings snapshot that populated the Graphics
+    // controls. Other launcher pages and the game may rewrite settings.cfg while
+    // the launcher is open; this snapshot lets us distinguish real user edits
+    // from stale UI state.
+    mGraphicsBaselineSettings = Settings::Manager::mUserSettings;
+    mGraphicsBaselineValid = true;
 }
 
-void Launcher::GraphicsPage::saveSettings()
+bool Launcher::GraphicsPage::saveSettings()
 {
+    // Detect edits against the snapshot used to populate this page, not against
+    // whatever Settings::Manager happens to contain now.
+    const Settings::CategorySettingValueMap currentManagerSettings = Settings::Manager::mUserSettings;
+    if (mGraphicsBaselineValid)
+        Settings::Manager::mUserSettings = mGraphicsBaselineSettings;
+    Settings::Manager::resetPendingChanges();
     // Visuals
 
     // Ensure we only set the new settings if they changed. This is to avoid cluttering the
@@ -377,7 +393,7 @@ void Launcher::GraphicsPage::saveSettings()
     Settings::Manager::setInt("max shader ripples", "Water", waterMaxRipplesSpinBox->value());
 
     // Lighting. PBR material maps require the shader-compatible backend.
-    static std::array<std::string, 3> lightingMethodMap = {"legacy", "shaders compatibility", "shaders"};
+    static std::array<std::string, 4> lightingMethodMap = {"legacy", "shaders compatibility", "shaders", "clustered"};
     int lightingMethodIndex = lightingMethodComboBox->currentIndex();
     if (pbrIndex > 0 && lightingMethodIndex == 0)
     {
@@ -452,6 +468,55 @@ void Launcher::GraphicsPage::saveSettings()
         autoSelectQualityCheckBox->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     storeLauncherValue(QStringLiteral("General/Graphics/vendorOptimizations"),
         vendorOptimizationsCheckBox->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+
+    const Settings::CategorySettingVector changedKeys = Settings::Manager::getPendingChanges();
+    Settings::CategorySettingValueMap desiredValues;
+    for (const Settings::CategorySetting& key : changedKeys)
+    {
+        const auto value = Settings::Manager::mUserSettings.find(key);
+        if (value != Settings::Manager::mUserSettings.end())
+            desiredValues.emplace(key, value->second);
+    }
+    const Settings::CategorySettingValueMap nextGraphicsBaseline = Settings::Manager::mUserSettings;
+
+    if (desiredValues.empty())
+    {
+        // Even with no Graphics edits, refresh the shared manager from disk so
+        // MainDialog's later AdvancedPage/final save starts from the newest
+        // profile instead of an old launcher snapshot.
+        if (!reloadUserSettingsFromDisk())
+        {
+            Settings::Manager::mUserSettings = currentManagerSettings;
+            Settings::Manager::resetPendingChanges();
+            return false;
+        }
+        Settings::Manager::resetPendingChanges();
+        return true;
+    }
+
+    // Merge with the newest settings.cfg instead of writing the launcher's stale
+    // full copy. Only settings actually changed on Graphics are replayed.
+    if (!reloadUserSettingsFromDisk())
+    {
+        Settings::Manager::mUserSettings = currentManagerSettings;
+        Settings::Manager::resetPendingChanges();
+        return false;
+    }
+
+    for (const auto& entry : desiredValues)
+        Settings::Manager::setString(entry.first.second, entry.first.first, entry.second);
+
+    if (!saveUserSettingsToDisk())
+    {
+        Settings::Manager::mUserSettings = currentManagerSettings;
+        Settings::Manager::resetPendingChanges();
+        return false;
+    }
+
+    mGraphicsBaselineSettings = nextGraphicsBaseline;
+    mGraphicsBaselineValid = true;
+    Settings::Manager::resetPendingChanges();
+    return true;
 }
 
 int Launcher::GraphicsPage::terrainDetailIndexFromSettings() const
@@ -557,7 +622,7 @@ bool Launcher::GraphicsPage::reloadUserSettingsFromDisk()
     catch (const std::exception& e)
     {
         QMessageBox::critical(this, tr("Error reading settings.cfg"),
-            tr("Could not reload the current game settings before applying the preset:\n\n%1")
+            tr("Could not reload the current game settings before applying graphics changes:\n\n%1")
                 .arg(QString::fromUtf8(e.what())));
         return false;
     }
@@ -577,7 +642,7 @@ bool Launcher::GraphicsPage::saveUserSettingsToDisk()
     catch (const std::exception& e)
     {
         QMessageBox::critical(this, tr("Error writing settings.cfg"),
-            tr("Could not save the selected graphics preset:\n\n%1")
+            tr("Could not save the selected graphics settings:\n\n%1")
                 .arg(QString::fromUtf8(e.what())));
         return false;
     }
@@ -969,6 +1034,7 @@ void Launcher::GraphicsPage::slotApplyQualityPreset()
 
     if (!saveUserSettingsToDisk())
         return;
+    Settings::Manager::resetPendingChanges();
 
     storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"),
         index == 0 ? QStringLiteral("auto") : QString::number(level));
@@ -1130,7 +1196,7 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     Settings::Manager::setBool("idle actor ripples", "Water", level >= 2);
     Settings::Manager::setInt("max shader ripples", "Water", level == 0 ? 1 : (level == 1 ? 2 : (level <= 3 ? 4 : (level == 4 ? 6 : 8))));
     Settings::Manager::setFloat("small feature culling pixel size", "Water",
-        level == 0 ? 32.f : (level == 1 ? 28.f : (level == 2 ? 20.f : (level == 3 ? 18.f : (level == 4 ? 14.f : 10.f))));
+        level == 0 ? 32.f : (level == 1 ? 28.f : (level == 2 ? 20.f : (level == 3 ? 18.f : (level == 4 ? 14.f : 10.f)))));
     Settings::Manager::setFloat("refraction scale", "Water",
         level <= 1 ? 4.f : (level <= 3 ? 3.f : (level == 4 ? 2.f : 1.f)));
 

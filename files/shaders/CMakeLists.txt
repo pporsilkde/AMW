@@ -41,6 +41,9 @@ set(SHADER_FILES
     lighting_pbr_compat.glsl
     lighting_enhanced_pbr.glsl
     lighting_util.glsl
+    magnus_cluster.comp
+    magnus_cull.comp
+    magnus_water.glsl
     parallax.glsl
     s360_fragment.glsl
     s360_vertex.glsl

@@ -1,5 +1,13 @@
 #version 120
 
+#if @lightingMethodClustered
+#extension GL_EXT_gpu_shader4 : require
+#extension GL_ARB_shader_storage_buffer_object : require
+#extension GL_ARB_shading_language_420pack : require
+#endif
+
+#include "magnus_water.glsl"
+
 // Set to 0 to disable FBM raymarched waves (requires Enhanced PBR Lighting to function)
 #define RAYMARCH_WAVES 1
 
@@ -95,7 +103,7 @@ uniform bool enableRainRipples;
 uniform bool isInteriorWater;
 uniform float useRefraction;
 uniform float useActorRipples;
-// ArenaMW runtime water controls. Defaults preserve the upstream PBR look.
+// ArenaMP runtime water controls. Defaults preserve the upstream PBR look.
 uniform float waterWaveStrength;
 uniform float waterSurfaceRoughness;
 uniform float waterTransparency;
@@ -407,7 +415,7 @@ void main(void)
     }
 #endif // MULTIPLE_WATER_TYPES
 
-    // Apply ArenaMW's global controls on top of the per-region water profile.
+    // Apply ArenaMP's global controls on top of the per-region water profile.
     // 1.0 keeps the Complete Water Shaders PBR author's original values.
     waveStrength = clamp(waveStrength * waterWaveStrength, 0.0, 2.5);
     foamIntensity = clamp(foamIntensity * waterFoamIntensity, 0.0, 2.0);
@@ -832,7 +840,7 @@ void main(void)
         }
 
         float alphaBase = isInterior ? 0.25f : mix(isDay ? 0.17f : 0.10f, 0.85f, foamMask);
-        // Existing ArenaMW Water Roughness now controls the PBR BRDF lobe.
+        // Existing ArenaMP Water Roughness now controls the PBR BRDF lobe.
         // 0.22 is the compatibility/default value and leaves the port unchanged.
         float roughnessScale = clamp(waterSurfaceRoughness / 0.22f, 0.09f, 4.55f);
         float alpha = clamp(alphaBase * roughnessScale, 0.02f, 1.0f);
@@ -1080,7 +1088,7 @@ void main(void)
     }
 #endif // @waterRefraction
 
-    // ArenaMW keeps the refraction RTT alive even when the user disables the
+    // ArenaMP keeps the refraction RTT alive even when the user disables the
     // visual refraction option.  Reuse the 0.51 no-refraction look dynamically
     // instead of rebuilding/switching the water pipeline at runtime.
     if (useRefraction < 0.5)
@@ -1097,10 +1105,15 @@ void main(void)
         }
     }
 
+    vec3 magnusPointSpecular = vec3(0.0);
+    if (!isUnderwater)
+        magnusPointSpecular = magnusWaterPointSpecular(position.xyz, normal, 72.0,
+            0.85 * clamp(waterHighlightIntensity, 0.0, 2.0));
+
 #if @sunlightScattering
-    gl_FragData[0].rgb += (specular * sunSpec.rgb + rainSpecular) * (1.0 - foamMask);
+    gl_FragData[0].rgb += (specular * sunSpec.rgb + rainSpecular + magnusPointSpecular) * (1.0 - foamMask);
 #else
-    gl_FragData[0].rgb += rainSpecular * (1.0 - foamMask);
+    gl_FragData[0].rgb += (rainSpecular + magnusPointSpecular) * (1.0 - foamMask);
 #endif // @sunlightScattering
 
 #if @waterRefraction

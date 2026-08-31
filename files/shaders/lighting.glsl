@@ -121,6 +121,40 @@ void perLightPoint(out vec3 ambientOut, out vec3 diffuseOut, int lightIndex, vec
 #endif
 }
 
+#if @lightingMethodClustered && defined(MAGNUS_FRAGMENT_SHADER)
+void perMagnusPoint(out vec3 ambientOut, out vec3 diffuseOut, MagnusPointLight light, vec3 viewPos, vec3 viewNormal)
+{
+    vec3 lightVec = light.position.xyz - viewPos;
+    float lightDistance = length(lightVec);
+    float radius = light.radius;
+    if (lightDistance > radius * GLOW_RADIUS * 2.0)
+    {
+        ambientOut = vec3(0.0);
+        diffuseOut = vec3(0.0);
+        return;
+    }
+
+    vec3 lightDir = lightVec / max(lightDistance, 0.0001);
+    float illumination = magnusIllumination(light, lightDistance);
+    ambientOut = light.ambient.xyz * illumination;
+    float lambert = dot(viewNormal.xyz, lightDir) * illumination;
+#ifndef GROUNDCOVER
+    lambert = max(lambert, 0.0);
+#else
+    float eyeCosine = dot(normalize(viewPos), viewNormal.xyz);
+    if (lambert < 0.0)
+    {
+        lambert = -lambert;
+        eyeCosine = -eyeCosine;
+    }
+    lambert *= clamp(-8.0 * (1.0 - 0.3) * eyeCosine + 1.0, 0.3, 1.0);
+#endif
+    diffuseOut = light.diffuse.xyz * lambert * 0.78;
+    diffuseOut += calculateGlow(light.diffuse.xyz, lightDistance, radius, POINT_GLOW_MULTIPLIER);
+    bloomAccumulator += calculateBloom(light.diffuse.xyz, illumination * lambert, lightDistance, radius, POINT_BLOOM_MULTIPLIER);
+}
+#endif
+
 #if PER_PIXEL_LIGHTING
 void doLighting(vec3 viewPos, vec3 viewNormal, float shadowing, out vec3 diffuseLight, out vec3 ambientLight)
 #else
@@ -128,14 +162,12 @@ void doLighting(vec3 viewPos, vec3 viewNormal, out vec3 diffuseLight, out vec3 a
 #endif
 {
     vec3 ambientOut, diffuseOut;
-    
-    // Сброс аккумулятора bloom
+
     bloomAccumulator = vec3(0.0);
 
     perLightSun(diffuseOut, viewPos, viewNormal);
     ambientLight = gl_LightModel.ambient.xyz;
 #if PER_PIXEL_LIGHTING
-    // Ambient lift для осветления теней - делаем тени менее глубокими
     float ambientLift = 0.15;
     diffuseLight = diffuseOut * max(shadowing, ambientLift);
 #else
@@ -143,6 +175,19 @@ void doLighting(vec3 viewPos, vec3 viewNormal, out vec3 diffuseLight, out vec3 a
     diffuseLight = vec3(0.0);
 #endif
 
+#if @lightingMethodClustered
+#ifdef MAGNUS_FRAGMENT_SHADER
+    int magnusClusterIndex = magnusGetClusterIndex(gl_FragCoord.xy, viewPos);
+    MagnusLightGrid magnusGrid = magnusLightGridBuffer[magnusClusterIndex];
+    for (uint i = 0u; i < magnusGrid.count; ++i)
+    {
+        MagnusPointLight light = magnusPointLights[magnusLightIndexList[magnusGrid.offset + i]];
+        perMagnusPoint(ambientOut, diffuseOut, light, viewPos, viewNormal);
+        ambientLight += ambientOut;
+        diffuseLight += diffuseOut;
+    }
+#endif
+#else
     for (int i = @startLight; i < @endLight; ++i)
     {
 #if @lightingMethodUBO
@@ -153,27 +198,58 @@ void doLighting(vec3 viewPos, vec3 viewNormal, out vec3 diffuseLight, out vec3 a
         ambientLight += ambientOut;
         diffuseLight += diffuseOut;
     }
-    
-    // Добавляем накопленный bloom к финальному освещению
+#endif
+
     diffuseLight += bloomAccumulator;
 }
 
-vec3 getSpecular(vec3 viewNormal, vec3 viewDirection, float shininess, vec3 matSpec)
+vec3 getSpecular(vec3 viewPos, vec3 viewNormal, vec3 viewDirection, float shininess, vec3 matSpec)
 {
     vec3 lightDir = normalize(lcalcPosition(0));
+    vec3 result;
 #if @materialQuality >= 4
     vec3 viewDir = normalize(-viewDirection);
-    return pbrSunSpecular(normalize(viewNormal), viewDir, lightDir, shininess,
+    result = pbrSunSpecular(normalize(viewNormal), viewDir, lightDir, shininess,
         lcalcSpecular(0).xyz * matSpec);
 #else
     float NdotL = dot(viewNormal, lightDir);
     if (NdotL <= 0.0)
-        return vec3(0.0);
-    vec3 halfVec = normalize(lightDir - viewDirection);
-    float NdotH = dot(viewNormal, halfVec);
-    return pow(max(NdotH, 0.0), max(1e-4, shininess))
-        * lcalcSpecular(0).xyz * matSpec * 0.35;
+        result = vec3(0.0);
+    else
+    {
+        vec3 halfVec = normalize(lightDir - viewDirection);
+        float NdotH = dot(viewNormal, halfVec);
+        result = pow(max(NdotH, 0.0), max(1e-4, shininess))
+            * lcalcSpecular(0).xyz * matSpec * 0.35;
+    }
 #endif
+#if @lightingMethodClustered && defined(MAGNUS_FRAGMENT_SHADER)
+    int magnusSpecCluster = magnusGetClusterIndex(gl_FragCoord.xy, viewPos);
+    MagnusLightGrid magnusSpecGrid = magnusLightGridBuffer[magnusSpecCluster];
+    for (uint i = 0u; i < magnusSpecGrid.count; ++i)
+    {
+        MagnusPointLight light = magnusPointLights[magnusLightIndexList[magnusSpecGrid.offset + i]];
+        vec3 lightVec = light.position.xyz - viewPos;
+        float lightDistance = length(lightVec);
+        if (lightDistance > light.radius * POINT_LIGHT_COVERAGE_MULTIPLIER * 2.0)
+            continue;
+        vec3 pointDir = lightVec / max(lightDistance, 0.0001);
+        float attenuation = magnusIllumination(light, lightDistance);
+#if @materialQuality >= 4
+        result += pbrSunSpecular(normalize(viewNormal), normalize(-viewDirection), pointDir, shininess,
+            light.specular.xyz * matSpec) * attenuation;
+#else
+        float pointNdotL = dot(viewNormal, pointDir);
+        if (pointNdotL > 0.0)
+        {
+            vec3 pointHalf = normalize(pointDir - viewDirection);
+            result += pow(max(dot(viewNormal, pointHalf), 0.0), max(1e-4, shininess))
+                * light.specular.xyz * matSpec * attenuation * 0.35;
+        }
+#endif
+    }
+#endif
+    return result;
 }
 
 #else
@@ -237,6 +313,36 @@ void perLightPoint(out vec3 ambientOut, out vec3 diffuseOut, int lightIndex, vec
     diffuseOut = lcalcDiffuse(lightIndex) * lambert;
 }
 
+#if @lightingMethodClustered && defined(MAGNUS_FRAGMENT_SHADER)
+void perMagnusPoint(out vec3 ambientOut, out vec3 diffuseOut, MagnusPointLight light, vec3 viewPos, vec3 viewNormal)
+{
+    vec3 lightVec = light.position.xyz - viewPos;
+    float lightDistance = length(lightVec);
+    if (lightDistance > light.radius * POINT_LIGHT_COVERAGE_MULTIPLIER * 2.0)
+    {
+        ambientOut = vec3(0.0);
+        diffuseOut = vec3(0.0);
+        return;
+    }
+    vec3 lightDir = lightVec / max(lightDistance, 0.0001);
+    float illumination = magnusIllumination(light, lightDistance);
+    ambientOut = light.ambient.xyz * illumination;
+    float lambert = dot(viewNormal.xyz, lightDir) * illumination;
+#ifndef GROUNDCOVER
+    lambert = max(lambert, 0.0);
+#else
+    float eyeCosine = dot(normalize(viewPos), viewNormal.xyz);
+    if (lambert < 0.0)
+    {
+        lambert = -lambert;
+        eyeCosine = -eyeCosine;
+    }
+    lambert *= clamp(-8.0 * (1.0 - 0.3) * eyeCosine + 1.0, 0.3, 1.0);
+#endif
+    diffuseOut = light.diffuse.xyz * lambert;
+}
+#endif
+
 #if PER_PIXEL_LIGHTING
 void doLighting(vec3 viewPos, vec3 viewNormal, float shadowing, out vec3 diffuseLight, out vec3 ambientLight)
 #else
@@ -254,6 +360,19 @@ void doLighting(vec3 viewPos, vec3 viewNormal, out vec3 diffuseLight, out vec3 a
     diffuseLight = vec3(0.0);
 #endif
 
+#if @lightingMethodClustered
+#ifdef MAGNUS_FRAGMENT_SHADER
+    int magnusClusterIndex = magnusGetClusterIndex(gl_FragCoord.xy, viewPos);
+    MagnusLightGrid magnusGrid = magnusLightGridBuffer[magnusClusterIndex];
+    for (uint i = 0u; i < magnusGrid.count; ++i)
+    {
+        MagnusPointLight light = magnusPointLights[magnusLightIndexList[magnusGrid.offset + i]];
+        perMagnusPoint(ambientOut, diffuseOut, light, viewPos, viewNormal);
+        ambientLight += ambientOut;
+        diffuseLight += diffuseOut;
+    }
+#endif
+#else
     for (int i = @startLight; i < @endLight; ++i)
     {
 #if @lightingMethodUBO
@@ -264,24 +383,57 @@ void doLighting(vec3 viewPos, vec3 viewNormal, out vec3 diffuseLight, out vec3 a
         ambientLight += ambientOut;
         diffuseLight += diffuseOut;
     }
+#endif
+
 }
 
-vec3 getSpecular(vec3 viewNormal, vec3 viewDirection, float shininess, vec3 matSpec)
+vec3 getSpecular(vec3 viewPos, vec3 viewNormal, vec3 viewDirection, float shininess, vec3 matSpec)
 {
     vec3 lightDir = normalize(lcalcPosition(0));
+    vec3 result;
 #if @materialQuality >= 4
     vec3 viewDir = normalize(-viewDirection);
-    return pbrSunSpecular(normalize(viewNormal), viewDir, lightDir, shininess,
+    result = pbrSunSpecular(normalize(viewNormal), viewDir, lightDir, shininess,
         lcalcSpecular(0).xyz * matSpec);
 #else
     float NdotL = dot(viewNormal, lightDir);
     if (NdotL <= 0.0)
-        return vec3(0.0);
-    vec3 halfVec = normalize(lightDir - viewDirection);
-    float NdotH = dot(viewNormal, halfVec);
-    return pow(max(NdotH, 0.0), max(1e-4, shininess))
-        * lcalcSpecular(0).xyz * matSpec * 0.35;
+        result = vec3(0.0);
+    else
+    {
+        vec3 halfVec = normalize(lightDir - viewDirection);
+        float NdotH = dot(viewNormal, halfVec);
+        result = pow(max(NdotH, 0.0), max(1e-4, shininess))
+            * lcalcSpecular(0).xyz * matSpec * 0.35;
+    }
 #endif
+#if @lightingMethodClustered && defined(MAGNUS_FRAGMENT_SHADER)
+    int magnusSpecCluster = magnusGetClusterIndex(gl_FragCoord.xy, viewPos);
+    MagnusLightGrid magnusSpecGrid = magnusLightGridBuffer[magnusSpecCluster];
+    for (uint i = 0u; i < magnusSpecGrid.count; ++i)
+    {
+        MagnusPointLight light = magnusPointLights[magnusLightIndexList[magnusSpecGrid.offset + i]];
+        vec3 lightVec = light.position.xyz - viewPos;
+        float lightDistance = length(lightVec);
+        if (lightDistance > light.radius * POINT_LIGHT_COVERAGE_MULTIPLIER * 2.0)
+            continue;
+        vec3 pointDir = lightVec / max(lightDistance, 0.0001);
+        float attenuation = magnusIllumination(light, lightDistance);
+#if @materialQuality >= 4
+        result += pbrSunSpecular(normalize(viewNormal), normalize(-viewDirection), pointDir, shininess,
+            light.specular.xyz * matSpec) * attenuation;
+#else
+        float pointNdotL = dot(viewNormal, pointDir);
+        if (pointNdotL > 0.0)
+        {
+            vec3 pointHalf = normalize(pointDir - viewDirection);
+            result += pow(max(dot(viewNormal, pointHalf), 0.0), max(1e-4, shininess))
+                * light.specular.xyz * matSpec * attenuation * 0.35;
+        }
+#endif
+    }
+#endif
+    return result;
 }
 
 #endif

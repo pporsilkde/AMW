@@ -445,11 +445,22 @@ bool Launcher::AdvancedPage::loadSettings()
         mUpdatingOsgPresetUi = false;
         slotOsgPatchControlChanged();
     }
+
+    // Y001s: snapshot the settings that actually populated Advanced. This page
+    // has several controls that overlap graphics presets; without a baseline,
+    // pressing Play could write stale Advanced values over a freshly applied
+    // Graphics preset even when the user never touched Advanced.
+    mSettingsBaseline = Settings::Manager::mUserSettings;
+    mSettingsBaselineValid = true;
     return true;
 }
 
 void Launcher::AdvancedPage::saveSettings()
 {
+    const Settings::CategorySettingValueMap currentManagerSettings = Settings::Manager::mUserSettings;
+    if (mSettingsBaselineValid)
+        Settings::Manager::mUserSettings = mSettingsBaseline;
+    Settings::Manager::resetPendingChanges();
     // Game mechanics
     {
         saveSettingBool(toggleSneakCheckBox, "toggle sneak", "Input");
@@ -676,6 +687,28 @@ void Launcher::AdvancedPage::saveSettings()
         if (scriptRun != mGameSettings.value("script-run"))
             mGameSettings.setValue("script-run", scriptRun);
     }
+
+    const Settings::CategorySettingVector changedKeys = Settings::Manager::getPendingChanges();
+    Settings::CategorySettingValueMap desiredValues;
+    for (const Settings::CategorySetting& key : changedKeys)
+    {
+        const auto value = Settings::Manager::mUserSettings.find(key);
+        if (value != Settings::Manager::mUserSettings.end())
+            desiredValues.emplace(key, value->second);
+    }
+    const Settings::CategorySettingValueMap nextBaseline = Settings::Manager::mUserSettings;
+
+    // Restore the fresh manager state prepared by GraphicsPage, then apply only
+    // controls that truly changed on Advanced. This prevents stale overlap
+    // (view distance, force shaders, physics/occlusion controls) from undoing a
+    // Graphics quality preset on Play.
+    Settings::Manager::mUserSettings = currentManagerSettings;
+    Settings::Manager::resetPendingChanges();
+    for (const auto& entry : desiredValues)
+        Settings::Manager::setString(entry.first.second, entry.first.first, entry.second);
+
+    mSettingsBaseline = nextBaseline;
+    mSettingsBaselineValid = true;
 }
 
 void Launcher::AdvancedPage::applyOsgPreset(const QString& presetName)

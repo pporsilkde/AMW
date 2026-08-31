@@ -1440,10 +1440,11 @@ namespace MWGui
             SceneUtil::LightingMethod mMethod;
             const char* mLabelKey;
         };
-        const std::array<LightingChoice, 3> methods = {{
+        const std::array<LightingChoice, 4> methods = {{
             { SceneUtil::LightingMethod::FFP, "value.lighting_legacy" },
             { SceneUtil::LightingMethod::PerObjectUniform, "value.lighting_compatibility" },
             { SceneUtil::LightingMethod::SingleUBO, "value.lighting_shaders" },
+            { SceneUtil::LightingMethod::Clustered, "value.lighting_clustered" },
         }};
 
         for (const LightingChoice& choice : methods)

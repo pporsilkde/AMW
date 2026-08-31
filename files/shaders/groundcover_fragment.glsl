@@ -1,5 +1,10 @@
 #version 120
 
+#if @lightingMethodClustered
+    #extension GL_ARB_shader_storage_buffer_object : require
+    #extension GL_ARB_shading_language_420pack : require
+#endif
+
 #if @useUBO
     #extension GL_ARB_uniform_buffer_object : require
 #endif
@@ -25,7 +30,7 @@ varying vec4 passTangent;
 
 // Other shaders respect forcePPL, but legacy groundcover mods were designed to work with vertex lighting.
 // They may do not look as intended with per-pixel lighting, so ignore this setting for now.
-#define PER_PIXEL_LIGHTING @normalMap
+#define PER_PIXEL_LIGHTING (@normalMap || @lightingMethodClustered)
 
 varying float euclideanDepth;
 varying float linearDepth;
@@ -47,6 +52,7 @@ centroid varying vec3 shadowDiffuseLighting;
 
 #include "helpsettings.glsl"
 #include "shadows_fragment.glsl"
+#define MAGNUS_FRAGMENT_SHADER 1
 #include "lighting.glsl"
 #include "lighting_enhanced_pbr.glsl"
 #include "alpha.glsl"

@@ -1,7 +1,0 @@
-X029 cleanup note
-
-Если до этого X028 уже был распакован поверх исходников, удалите старую папку:
-
-docs/porting/MGE-XE_REFERENCE_GPLv2/
-
-Она не компилируется и не влияет на runtime. В X029 cumulative она намеренно больше не поставляется из-за несовместимости GPL-2.0-only reference source с GPLv3 деревом Arena/OpenMW.

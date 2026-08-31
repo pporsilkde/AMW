@@ -803,7 +803,11 @@ bool Launcher::MainDialog::writeSettings()
     // Now write all config files
     saveSettings();
     mDataFilesPage->saveSettings();
-    mGraphicsPage->saveSettings();
+    // Y001s: GraphicsPage performs a merge-safe save against the newest
+    // settings.cfg, so Water/Terrain/PBR/shadow edits are applied without
+    // overwriting unrelated settings changed by the running game.
+    if (!mGraphicsPage->saveSettings())
+        return false;
     mSettingsPage->saveSettings();
     mAdvancedPage->saveSettings();
 

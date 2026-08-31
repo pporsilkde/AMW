@@ -1,6 +1,14 @@
 
 #version 120
 
+#if @lightingMethodClustered
+#extension GL_EXT_gpu_shader4 : require
+#extension GL_ARB_shader_storage_buffer_object : require
+#extension GL_ARB_shading_language_420pack : require
+#endif
+
+#include "magnus_water.glsl"
+
 #include "water_waves.glsl"
 
 // runtime refraction toggle via uniform useRefraction
@@ -660,9 +668,11 @@ void main(void) {
 
         float rippleHighlight = clamp(rippleEnergy * (0.08 + 0.10 * fresnel), 0.0, 0.22);
 
+        vec3 magnusPointSpecular = magnusWaterPointSpecular(position.xyz, normal, 96.0, 0.85);
         vec3 finalCol = mix(a, b, fFinal) +
                        clamp(spec * gl_LightSource[0].diffuse.xyz *
                              gl_LightSource[0].diffuse.xyz, 0.0, 1.0) +
+                       magnusPointSpecular +
                        clamp(vec3(rain.w) * 0.1, 0.0, 0.1) +
                        vec3(rippleHighlight);
 
@@ -723,6 +733,7 @@ void main(void) {
         float rippleHighlight = clamp(rippleEnergy * (0.08 + 0.10 * fresnel), 0.0, 0.24);
 
         finalCol += clamp(spec * gl_LightSource[0].specular.xyz, 0.0, 0.9);
+        finalCol += magnusWaterPointSpecular(position.xyz, normal, 96.0, 0.85);
         finalCol += clamp(vec3(rain.w) * 0.1, 0.0, 0.12);
         finalCol += vec3(rippleHighlight);
         finalCol += vec3(isNight * 0.15 * max(dot(normal, L), 0.0));

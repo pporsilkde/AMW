@@ -1,3 +1,0 @@
-ArenaMW X019 sync marker.
-Функционально ArenaMW равен X017_NO_HEALTH_BARS; QuestIndex autogeneration относится только к ArenaMP server.
-Health-bars X014 не включены.

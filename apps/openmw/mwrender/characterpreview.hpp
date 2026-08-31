@@ -26,6 +26,20 @@ namespace MWRender
     class NpcAnimation;
     class DrawOnceCallback;
 
+    /// ArenaMW Y001s (ported from ArenaMP X040): release RTT preview graphs that were retired at least a few
+    /// frames ago.
+    ///
+    /// A CharacterPreview owns an osg::Camera plus a complete NpcAnimation
+    /// subtree. Under DrawThreadPerContext the draw thread is still dispatching
+    /// the previous frame's render graph while the main thread runs update, and
+    /// that render graph holds bare StateSet/Drawable pointers into the subtree.
+    /// Destroying it inline (as CharGen does when it replaces Race/Class/Birth/
+    /// Review modals) frees objects the renderer is about to call virtuals on.
+    ///
+    /// Must be called from the main loop only, outside of any traversal.
+    /// Pass force = true during shutdown, after the viewer has stopped threading.
+    void collectRetiredCharacterPreviews(unsigned int currentFrame, bool force = false);
+
     class CharacterPreview
     {
     public:

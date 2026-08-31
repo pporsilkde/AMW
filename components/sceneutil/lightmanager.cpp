@@ -1,9 +1,14 @@
 #include "lightmanager.hpp"
 
 #include <array>
+#include <cstdio>
+#include <unordered_map>
 
 #include <osg/BufferObject>
 #include <osg/BufferIndexBinding>
+#include <osg/BufferTemplate>
+#include <osg/DispatchCompute>
+#include <osg/GL>
 #include <osg/Endian>
 #include <osg/Version>
 #include <osg/ValueObject>
@@ -11,6 +16,8 @@
 #include <osgUtil/CullVisitor>
 
 #include <components/sceneutil/util.hpp>
+
+#include <components/shader/shadermanager.hpp>
 
 #include <components/misc/hash.hpp>
 #include <components/misc/stringops.hpp>
@@ -78,6 +85,55 @@ namespace
     {
         return (camera->getName() == "ReflectionCamera");
     }
+
+    bool supportsOpenGL43()
+    {
+        const GLubyte* version = glGetString(GL_VERSION);
+        if (!version)
+            return false;
+
+        int major = 0;
+        int minor = 0;
+        if (std::sscanf(reinterpret_cast<const char*>(version), "%d.%d", &major, &minor) != 2)
+            return false;
+        return major > 4 || (major == 4 && minor >= 3);
+    }
+
+    struct MagnusPointLight
+    {
+        osg::Vec4f position;
+        osg::Vec4f diffuse;
+        osg::Vec4f ambient;
+        osg::Vec4f specular;
+        float constant = 1.f;
+        float linear = 0.f;
+        float quadratic = 0.f;
+        float radius = 0.f;
+    };
+
+    struct MagnusCluster
+    {
+        osg::Vec4f minPoint;
+        osg::Vec4f maxPoint;
+    };
+
+    class MagnusMemoryBarrier : public osg::Drawable::DrawCallback
+    {
+    public:
+        explicit MagnusMemoryBarrier(GLbitfield barriers)
+            : mBarriers(barriers)
+        {
+        }
+
+        void drawImplementation(osg::RenderInfo& renderInfo, const osg::Drawable* drawable) const override
+        {
+            drawable->drawImplementation(renderInfo);
+            renderInfo.getState()->get<osg::GLExtensions>()->glMemoryBarrier(mBarriers);
+        }
+
+    private:
+        GLbitfield mBarriers;
+    };
 }
 
 namespace SceneUtil
@@ -270,6 +326,7 @@ namespace SceneUtil
                 break;
             }
         case LightingMethod::PerObjectUniform:
+        case LightingMethod::Clustered:
             {
                 osg::Matrixf lightMat;
                 configurePosition(lightMat, light->getPosition());
@@ -277,7 +334,8 @@ namespace SceneUtil
                 configureDiffuse(lightMat, light->getDiffuse());
                 configureSpecular(lightMat, light->getSpecular());
 
-                osg::ref_ptr<osg::Uniform> uni = new osg::Uniform(osg::Uniform::FLOAT_MAT4, "LightBuffer", lightManager->getMaxLights());
+                const int lightBufferSize = method == LightingMethod::Clustered ? 1 : lightManager->getMaxLights();
+                osg::ref_ptr<osg::Uniform> uni = new osg::Uniform(osg::Uniform::FLOAT_MAT4, "LightBuffer", lightBufferSize);
                 uni->setElement(0, lightMat);
                 stateset->addUniform(uni, mode);
                 break;
@@ -660,11 +718,21 @@ namespace SceneUtil
     class LightManagerCullCallback : public osg::NodeCallback
     {
     public:
-        LightManagerCullCallback(LightManager* lightManager) : mLightManager(lightManager), mLastFrameNumber(0) {}
+        LightManagerCullCallback(LightManager* lightManager)
+            : mLightManager(lightManager)
+            , mLastFrameNumber(0)
+        {
+        }
 
         void operator()(osg::Node* node, osg::NodeVisitor* nv) override
         {
             osgUtil::CullVisitor* cv = static_cast<osgUtil::CullVisitor*>(nv);
+
+            if (mLightManager->usingClustered())
+            {
+                applyClustered(node, cv);
+                return;
+            }
 
             if (mLastFrameNumber != cv->getTraversalNumber())
             {
@@ -687,7 +755,7 @@ namespace SceneUtil
 
                 if (sun)
                 {
-                    // we must defer uploading the transformation to view-space position to deal with different cameras (e.g. reflection RTT).
+                    // We must defer uploading the transformation to view-space position to deal with different cameras.
                     if (mLightManager->getLightingMethod() == LightingMethod::PerObjectUniform)
                     {
                         osg::Matrixf lightMat;
@@ -713,8 +781,182 @@ namespace SceneUtil
         }
 
     private:
+        static constexpr int sGridSizeX = 16;
+        static constexpr int sGridSizeY = 8;
+        static constexpr int sGridSizeZ = 24;
+        static constexpr int sNumClusters = sGridSizeX * sGridSizeY * sGridSizeZ;
+        static constexpr int sWorkGroupSize = 512;
+        static constexpr int sMaxLightsPerCluster = 512;
+
+        struct ViewData
+        {
+            osg::ref_ptr<osg::ShaderStorageBufferBinding> mClusterSSBB;
+            osg::ref_ptr<osg::BufferTemplate<std::vector<MagnusPointLight>>> mGPULights[2];
+            osg::ref_ptr<osg::ShaderStorageBufferBinding> mPointLightSSBB[2];
+            osg::ref_ptr<osg::ShaderStorageBufferBinding> mLightGridSSBB[2];
+            osg::ref_ptr<osg::ShaderStorageBufferBinding> mLightIndexListSSBB[2];
+            osg::ref_ptr<osg::ShaderStorageBufferBinding> mLightIndexCounterSSBB[2];
+            osg::ref_ptr<osg::StateSet> mStateSet[2];
+            osg::ref_ptr<osg::DispatchCompute> mClusterComputeNode[2];
+            osg::ref_ptr<osg::DispatchCompute> mCullComputeNode[2];
+        };
+
+        void initClusteredView(ViewData& cache)
+        {
+            Shader::ShaderManager* shaderManager = mLightManager->getShaderManager();
+            if (!shaderManager)
+                throw std::runtime_error("Project Magnus clustered lighting requires ShaderManager");
+
+            osg::ref_ptr<osg::UByteArray> clusterData = new osg::UByteArray(sizeof(MagnusCluster) * sNumClusters);
+            clusterData->setBufferObject(new osg::ShaderStorageBufferObject);
+            cache.mClusterSSBB = new osg::ShaderStorageBufferBinding(1, clusterData, 0, clusterData->getTotalDataSize());
+
+            const int maxLightIndices = sMaxLightsPerCluster * sNumClusters;
+            for (int i = 0; i < 2; ++i)
+            {
+                cache.mGPULights[i] = new osg::BufferTemplate<std::vector<MagnusPointLight>>();
+                cache.mGPULights[i]->getData().emplace_back();
+                cache.mGPULights[i]->setBufferObject(new osg::ShaderStorageBufferObject);
+                cache.mPointLightSSBB[i] = new osg::ShaderStorageBufferBinding(
+                    2, cache.mGPULights[i], 0, cache.mGPULights[i]->getTotalDataSize());
+
+                osg::ref_ptr<osg::UIntArray> gridData = new osg::UIntArray(sNumClusters * 2);
+                gridData->setBufferObject(new osg::ShaderStorageBufferObject);
+                cache.mLightGridSSBB[i] = new osg::ShaderStorageBufferBinding(3, gridData, 0, gridData->getTotalDataSize());
+
+                osg::ref_ptr<osg::UIntArray> indexData = new osg::UIntArray(maxLightIndices);
+                indexData->setBufferObject(new osg::ShaderStorageBufferObject);
+                cache.mLightIndexListSSBB[i] = new osg::ShaderStorageBufferBinding(4, indexData, 0, indexData->getTotalDataSize());
+
+                osg::ref_ptr<osg::UIntArray> counterData = new osg::UIntArray(1);
+                counterData->setBufferObject(new osg::ShaderStorageBufferObject);
+                cache.mLightIndexCounterSSBB[i] = new osg::ShaderStorageBufferBinding(5, counterData, 0, counterData->getTotalDataSize());
+
+                cache.mStateSet[i] = new osg::StateSet;
+                cache.mStateSet[i]->addUniform(new osg::Uniform("magnusNear", 1.f));
+                cache.mStateSet[i]->addUniform(new osg::Uniform("magnusClusterFar", 8192.f));
+                cache.mStateSet[i]->addUniform(new osg::Uniform("magnusGridSize",
+                    osg::Vec3f(static_cast<float>(sGridSizeX), static_cast<float>(sGridSizeY), static_cast<float>(sGridSizeZ))));
+                cache.mStateSet[i]->addUniform(new osg::Uniform("magnusScreenRes", osg::Vec2f(1.f, 1.f)));
+                cache.mStateSet[i]->setAttributeAndModes(cache.mClusterSSBB, osg::StateAttribute::ON);
+                cache.mStateSet[i]->setAttributeAndModes(cache.mPointLightSSBB[i], osg::StateAttribute::ON);
+                cache.mStateSet[i]->setAttributeAndModes(cache.mLightGridSSBB[i], osg::StateAttribute::ON);
+                cache.mStateSet[i]->setAttributeAndModes(cache.mLightIndexListSSBB[i], osg::StateAttribute::ON);
+                cache.mStateSet[i]->setAttributeAndModes(cache.mLightIndexCounterSSBB[i], osg::StateAttribute::ON);
+
+                cache.mClusterComputeNode[i] = new osg::DispatchCompute;
+                cache.mClusterComputeNode[i]->setCullingActive(false);
+                cache.mClusterComputeNode[i]->setComputeGroups(sGridSizeX, sGridSizeY, sGridSizeZ);
+                cache.mClusterComputeNode[i]->getOrCreateStateSet()->addUniform(
+                    new osg::Uniform("magnusInverseProjectionMatrix", osg::Matrixf{}));
+                cache.mClusterComputeNode[i]->getOrCreateStateSet()->setAttributeAndModes(
+                    shaderManager->getProgram(nullptr,
+                        shaderManager->getShader("magnus_cluster.comp", {}, osg::Shader::COMPUTE)),
+                    osg::StateAttribute::ON);
+                cache.mClusterComputeNode[i]->setDrawCallback(new MagnusMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT));
+
+                Shader::ShaderManager::DefineMap cullDefines;
+                cullDefines["workGroupSize"] = std::to_string(sWorkGroupSize);
+                cullDefines["maxLightsPerCluster"] = std::to_string(sMaxLightsPerCluster);
+                cache.mCullComputeNode[i] = new osg::DispatchCompute;
+                cache.mCullComputeNode[i]->setCullingActive(false);
+                cache.mCullComputeNode[i]->setComputeGroups(sNumClusters, 1, 1);
+                cache.mCullComputeNode[i]->getOrCreateStateSet()->setAttributeAndModes(
+                    shaderManager->getProgram(nullptr,
+                        shaderManager->getShader("magnus_cull.comp", cullDefines, osg::Shader::COMPUTE)),
+                    osg::StateAttribute::ON);
+                cache.mCullComputeNode[i]->setDrawCallback(new MagnusMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT));
+            }
+        }
+
+        void applyClustered(osg::Node* node, osgUtil::CullVisitor* cv)
+        {
+            if (!(cv->getTraversalMask() & mLightManager->getLightingMask()))
+            {
+                traverse(node, cv);
+                return;
+            }
+
+            const size_t frame = cv->getTraversalNumber();
+            const size_t frameId = frame % 2;
+            ViewData& cache = mClusteredViews[cv->getCurrentCamera()];
+            if (!cache.mStateSet[0])
+                initClusteredView(cache);
+
+            auto sun = mLightManager->getSunlight();
+            if (sun)
+            {
+                osg::Matrixf lightMat;
+                configurePosition(lightMat, sun->getPosition());
+                configureAmbient(lightMat, sun->getAmbient());
+                configureDiffuse(lightMat, sun->getDiffuse());
+                configureSpecular(lightMat, sun->getSpecular());
+                mLightManager->setSunlightBuffer(lightMat, frame);
+            }
+
+            float clusterFar = mLightManager->getPointLightFadeEnd();
+            if (clusterFar <= 0.f)
+                clusterFar = 8192.f;
+
+            double fovy = 60.0;
+            double aspectRatio = 1.0;
+            double nearPlane = 1.0;
+            double ignoredFar = clusterFar;
+            osg::Matrixd projection = *cv->getProjectionMatrix();
+            if (projection.getPerspective(fovy, aspectRatio, nearPlane, ignoredFar))
+                projection = osg::Matrixd::perspective(fovy, aspectRatio, nearPlane, clusterFar);
+            else
+                nearPlane = 1.0;
+
+            osg::Viewport* viewport = cv->getCurrentCamera()->getViewport();
+            const float width = viewport ? std::max(1.f, static_cast<float>(viewport->width())) : 1.f;
+            const float height = viewport ? std::max(1.f, static_cast<float>(viewport->height())) : 1.f;
+
+            osg::StateSet* stateset = cache.mStateSet[frameId];
+            stateset->getUniform("magnusNear")->set(static_cast<float>(nearPlane));
+            stateset->getUniform("magnusClusterFar")->set(clusterFar);
+            stateset->getUniform("magnusScreenRes")->set(osg::Vec2f(width, height));
+            cache.mClusterComputeNode[frameId]->getStateSet()->getUniform("magnusInverseProjectionMatrix")
+                ->set(osg::Matrixf::inverse(projection));
+
+            auto& gpuLights = cache.mGPULights[frameId]->getData();
+            gpuLights.clear();
+            const osg::RefMatrix* viewMatrix = cv->getCurrentRenderStage()->getInitialViewMatrix();
+            const auto& lights = mLightManager->getLightsInViewSpace(cv->getCurrentCamera(), viewMatrix, frame);
+            gpuLights.reserve(lights.size());
+            for (const auto& bound : lights)
+            {
+                osg::Light* light = bound.mLightSource->getLight(frame);
+                MagnusPointLight gpuLight;
+                gpuLight.position = light->getPosition() * (*viewMatrix);
+                gpuLight.diffuse = light->getDiffuse();
+                gpuLight.ambient = light->getAmbient();
+                gpuLight.specular = light->getSpecular();
+                gpuLight.constant = light->getConstantAttenuation();
+                gpuLight.linear = light->getLinearAttenuation();
+                gpuLight.quadratic = light->getQuadraticAttenuation();
+                gpuLight.radius = bound.mLightSource->getRadius() * mLightManager->getPointLightRadiusMultiplier();
+                gpuLights.push_back(gpuLight);
+            }
+            if (gpuLights.empty())
+                gpuLights.emplace_back();
+
+            cache.mPointLightSSBB[frameId]->setSize(cache.mGPULights[frameId]->getTotalDataSize());
+            cache.mGPULights[frameId]->dirty();
+            auto* counter = static_cast<osg::UIntArray*>(cache.mLightIndexCounterSSBB[frameId]->getBufferData());
+            (*counter)[0] = 0;
+            counter->dirty();
+
+            cv->pushStateSet(stateset);
+            cache.mClusterComputeNode[frameId]->accept(*cv);
+            cache.mCullComputeNode[frameId]->accept(*cv);
+            traverse(node, cv);
+            cv->popStateSet();
+        }
+
         LightManager* mLightManager;
         size_t mLastFrameNumber;
+        std::unordered_map<osg::Camera*, ViewData> mClusteredViews;
     };
 
     class LightManagerStateAttribute : public osg::StateAttribute
@@ -831,6 +1073,7 @@ namespace SceneUtil
          {"legacy", LightingMethod::FFP}
         ,{"shaders compatibility", LightingMethod::PerObjectUniform}
         ,{"shaders", LightingMethod::SingleUBO}
+        ,{"clustered", LightingMethod::Clustered}
     };
 
     LightingMethod LightManager::getLightingMethodFromString(const std::string& value)
@@ -846,9 +1089,13 @@ namespace SceneUtil
 
     std::string LightManager::getLightingMethodString(LightingMethod method)
     {
-        for (const auto& p : LightManager::mLightingMethodSettingMap)
-            if (p.second == method)
-                return p.first;
+        switch (method)
+        {
+        case LightingMethod::FFP: return "legacy";
+        case LightingMethod::PerObjectUniform: return "shaders compatibility";
+        case LightingMethod::SingleUBO: return "shaders";
+        case LightingMethod::Clustered: return "clustered";
+        }
         return "";
     }
 
@@ -857,10 +1104,11 @@ namespace SceneUtil
         getOrCreateStateSet()->removeAttribute(osg::StateAttribute::LIGHT);
     }
 
-    LightManager::LightManager(bool ffp)
+    LightManager::LightManager(bool ffp, Shader::ShaderManager* shaderManager)
         : mStartLight(0)
         , mLightingMask(~0u)
         , mSun(nullptr)
+        , mShaderManager(shaderManager)
         , mPointLightRadiusMultiplier(1.f)
         , mPointLightFadeEnd(0.f)
         , mPointLightFadeStart(0.f)
@@ -868,10 +1116,12 @@ namespace SceneUtil
         osg::GLExtensions* exts = osg::GLExtensions::Get(0, false);
         bool supportsUBO = exts && exts->isUniformBufferObjectSupported;
         bool supportsGPU4 = exts && exts->isGpuShader4Supported;
+        bool supportsClustered = shaderManager && supportsOpenGL43();
 
         mSupported[static_cast<int>(LightingMethod::FFP)] = true;
         mSupported[static_cast<int>(LightingMethod::PerObjectUniform)] = true;
         mSupported[static_cast<int>(LightingMethod::SingleUBO)] = supportsUBO && supportsGPU4;
+        mSupported[static_cast<int>(LightingMethod::Clustered)] = supportsClustered;
 
         setUpdateCallback(new LightManagerUpdateCallback);
 
@@ -886,18 +1136,25 @@ namespace SceneUtil
 
         static bool hasLoggedWarnings = false;
 
-        if (lightingMethod == LightingMethod::SingleUBO && !hasLoggedWarnings)
+        if (!hasLoggedWarnings)
         {
-            if (!supportsUBO)
-                Log(Debug::Warning) << "GL_ARB_uniform_buffer_object not supported: switching to shader compatibility lighting mode";
-            if (!supportsGPU4)
-                Log(Debug::Warning) << "GL_EXT_gpu_shader4 not supported: switching to shader compatibility lighting mode";
+            if (lightingMethod == LightingMethod::SingleUBO)
+            {
+                if (!supportsUBO)
+                    Log(Debug::Warning) << "GL_ARB_uniform_buffer_object not supported: switching to shader compatibility lighting mode";
+                if (!supportsGPU4)
+                    Log(Debug::Warning) << "GL_EXT_gpu_shader4 not supported: switching to shader compatibility lighting mode";
+            }
+            else if (lightingMethod == LightingMethod::Clustered && !supportsClustered)
+                Log(Debug::Warning) << "Project Magnus requires desktop OpenGL 4.3 and a main-scene ShaderManager: falling back to existing shader lighting";
             hasLoggedWarnings = true;
         }
 
         int targetLights = std::clamp(Settings::Manager::getInt("max lights", "Shaders"), mMaxLightsLowerLimit, mMaxLightsUpperLimit);
 
-        if (!supportsUBO || !supportsGPU4 || lightingMethod == LightingMethod::PerObjectUniform)
+        if (lightingMethod == LightingMethod::Clustered && supportsClustered)
+            initClustered();
+        else if (!supportsUBO || !supportsGPU4 || lightingMethod == LightingMethod::PerObjectUniform)
             initPerObjectUniform(targetLights);
         else
             initSingleUBO(targetLights);
@@ -914,11 +1171,13 @@ namespace SceneUtil
         , mStartLight(copy.mStartLight)
         , mLightingMask(copy.mLightingMask)
         , mSun(copy.mSun)
+        , mShaderManager(copy.mShaderManager)
         , mLightingMethod(copy.mLightingMethod)
         , mPointLightRadiusMultiplier(copy.mPointLightRadiusMultiplier)
         , mPointLightFadeEnd(copy.mPointLightFadeEnd)
         , mPointLightFadeStart(copy.mPointLightFadeStart)
         , mMaxLights(copy.mMaxLights)
+        , mSupported(copy.mSupported)
     {
     }
 
@@ -957,9 +1216,10 @@ namespace SceneUtil
         defines["lightingMethodFFP"] = getLightingMethod() == LightingMethod::FFP ? "1" : "0";
         defines["lightingMethodPerObjectUniform"] = getLightingMethod() == LightingMethod::PerObjectUniform ? "1" : "0";
         defines["lightingMethodUBO"] = getLightingMethod() == LightingMethod::SingleUBO ? "1" : "0";
+        defines["lightingMethodClustered"] = getLightingMethod() == LightingMethod::Clustered ? "1" : "0";
         defines["useUBO"] = std::to_string(getLightingMethod() == LightingMethod::SingleUBO);
-        // exposes bitwise operators
-        defines["useGPUShader4"] = std::to_string(getLightingMethod() == LightingMethod::SingleUBO);
+        // exposes integer/bitwise operators used by UBO and Magnus SSBO shaders
+        defines["useGPUShader4"] = std::to_string(getLightingMethod() == LightingMethod::SingleUBO || getLightingMethod() == LightingMethod::Clustered);
         defines["getLight"] = getLightingMethod() == LightingMethod::FFP ? "gl_LightSource" : "LightBuffer";
         defines["startLight"] =  getLightingMethod() == LightingMethod::SingleUBO ? "0" : "1";
         defines["endLight"] = getLightingMethod() == LightingMethod::FFP ? defines["maxLights"] : "PointLightCount";
@@ -974,7 +1234,7 @@ namespace SceneUtil
 
     void LightManager::updateMaxLights()
     {
-        if (usingFFP())
+        if (usingFFP() || usingClustered())
             return;
 
         int targetLights = std::clamp(Settings::Manager::getInt("max lights", "Shaders"), mMaxLightsLowerLimit, mMaxLightsUpperLimit);
@@ -1082,6 +1342,20 @@ namespace SceneUtil
         getOrCreateStateSet()->setAttribute(new LightManagerStateAttribute(this), osg::StateAttribute::ON);
     }
 
+    void LightManager::initClustered()
+    {
+        setLightingMethod(LightingMethod::Clustered);
+        Log(Debug::Info) << "Project Magnus clustered lighting enabled: 16x8x24 clusters, 512 light indices per cluster";
+        // Per-object limits are not used by clustered lighting. Keep the value high only
+        // for code paths that query it; the actual per-cluster cap is 512 in the cull pass.
+        setMaxLights(512);
+
+        auto* stateset = getOrCreateStateSet();
+        // Reuse the old matrix representation for the directional sun. Point lights live in SSBOs.
+        stateset->setAttributeAndModes(new LightStateAttributePerObjectUniform({}, this), osg::StateAttribute::ON);
+        stateset->addUniform(new osg::Uniform(osg::Uniform::FLOAT_MAT4, "LightBuffer", 1));
+    }
+
     void LightManager::setLightingMethod(LightingMethod method)
     {
         mLightingMethod = method;
@@ -1094,6 +1368,10 @@ namespace SceneUtil
             mStateSetGenerator = std::make_unique<StateSetGeneratorSingleUBO>();
             break;
         case LightingMethod::PerObjectUniform:
+            mStateSetGenerator = std::make_unique<StateSetGeneratorPerObjectUniform>();
+            break;
+        case LightingMethod::Clustered:
+            // LightListCallback is bypassed in this mode; keep a valid generator for shared code paths.
             mStateSetGenerator = std::make_unique<StateSetGeneratorPerObjectUniform>();
             break;
         }
@@ -1170,6 +1448,9 @@ namespace SceneUtil
 
     osg::ref_ptr<osg::StateSet> LightManager::getLightListStateSet(const LightList& lightList, size_t frameNum, const osg::RefMatrix* viewMatrix)
     {
+        if (usingClustered())
+            return nullptr;
+
         // possible optimization: return a StateSet containing all requested lights plus some extra lights (if a suitable one exists)
         size_t hash = 0;
         for (size_t i = 0; i < lightList.size(); ++i)
@@ -1303,6 +1584,10 @@ namespace SceneUtil
         }
 
         if (!(cv->getTraversalMask() & mLightManager->getLightingMask()))
+            return false;
+
+        // Magnus assigns point lights per screen/depth cluster. Per-object StateSets are unnecessary.
+        if (mLightManager->usingClustered())
             return false;
 
         // Possible optimizations:

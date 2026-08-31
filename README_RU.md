@@ -1,0 +1,42 @@
+# ArenaMW Y001s
+
+**Русский** · [English](README.md)
+
+ArenaMW — standalone/single-player ветка Arena на базе OpenMW 0.47.0. В неё входят совместимые геймплейные, интерфейсные, анимационные, AI и графические изменения ArenaMP/EncoreMP, но **без** TES3MP-сети, сервера, authority, групп игроков и серверных Lua-механик.
+
+> Нужна легальная копия *The Elder Scrolls III: Morrowind*. Ресурсы Bethesda в архив не входят.
+
+## Версия
+
+| Компонент | Значение |
+| --- | --- |
+| Снимок ArenaMW | **Y001s** |
+| Основа | OpenMW 0.47.0 |
+| Игра | single-player `openmw` |
+| Лаунчер | `openmw-launcher` |
+| Сеть/сервер | отсутствуют |
+| Основная релизная цель | Windows x64 |
+
+## Что изменено в Y001s
+
+- Репозиторий очищен по принципу X057 ArenaMP: удалены вложенная история `.git`, старые cumulative/revert patch-файлы, одноразовые harness'ы, старые SHA/changed-file манифесты и неиспользуемые Travis/GitLab/AppVeyor конфиги.
+- Исправлено применение Graphics/Quality: Water, Terrain, PBR, lighting, shadows, video и FPS limit сохраняются при Play/закрытии через merge с актуальным `settings.cfg`, а не через слепую запись старого состояния лаунчера.
+- Страница Advanced также сохраняет только реально изменённые параметры: её старое состояние больше не может откатить пересекающиеся настройки Graphics/Quality при нажатии Play.
+- Новый HUD FPS показывает `FPS: N`. Для старого профиля счётчик один раз включается миграцией, после чего обычный параметр HUD снова полностью контролируется пользователем. **F3 не менялся и остаётся HDR.**
+- Перенесено совместимое исправление ArenaMP X040: выбранный `[OSG] threading model` теперь реально передаётся `osgViewer`, а CharGen/Inventory CharacterPreview больше не освобождает RTT/OSG-граф, пока render thread ещё может держать на него ссылки.
+- Перенесён renderer-only Project Magnus Clustered Lighting как дополнительный режим для desktop OpenGL 4.3; на неподдерживаемом GPU/драйвере движок автоматически откатывается на существующий shader-compatible lighting.
+- Перенесено исправление X042a для MSVC: в ArenaMW X033 оставалось некорректно закрытое выражение Water quality.
+- Сохранены standalone-системы ArenaMW до поколения X033: XP-прокачка, Refined Alchemy и яды, требования экипировки, тактический AI, анимации, Arena Dialogue/HUD, QuickLoot, HDR/Bloom/PBR, новая вода, тени и CPU occlusion culling.
+
+## Сборка
+
+Эталонный Windows workflow: `.github/workflows/windows.yml`.
+
+```bash
+bash CI/before_script.msvc.sh -c Release -p x64 -v 2022 -N -V -i "$PWD/install"
+source MSVC2022_64_Ninja/activate_msvc.sh
+cmake --build MSVC2022_64_Ninja --config Release --parallel 2
+cmake --install MSVC2022_64_Ninja --config Release
+```
+
+Подробности: [сборка](docs/BUILDING_RU.md), [возможности](docs/FEATURES_RU.md), [граница порта ArenaMP → ArenaMW](docs/ARENAMP_PORTING.md), [история изменений](CHANGELOG.md).

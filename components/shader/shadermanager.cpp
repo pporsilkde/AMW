@@ -351,8 +351,10 @@ namespace Shader
         if (found == mPrograms.end())
         {
             osg::ref_ptr<osg::Program> program (new osg::Program);
-            program->addShader(vertexShader);
-            program->addShader(fragmentShader);
+            if (vertexShader)
+                program->addShader(vertexShader);
+            if (fragmentShader)
+                program->addShader(fragmentShader);
             program->addBindAttribLocation("aOffset", 6);
             program->addBindAttribLocation("aRotation", 7);
             if (mLightingMethod == SceneUtil::LightingMethod::SingleUBO)

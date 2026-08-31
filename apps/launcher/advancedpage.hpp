@@ -52,6 +52,8 @@ namespace Launcher
         void updateOsgPresetDescription(const QString& presetName);
 
         bool mUpdatingOsgPresetUi = false;
+        Settings::CategorySettingValueMap mSettingsBaseline;
+        bool mSettingsBaselineValid = false;
     };
 }
 #endif

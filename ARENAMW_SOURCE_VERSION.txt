@@ -1,0 +1,4 @@
+ArenaMW Y001s
+Base engine: OpenMW 0.47.0
+Profile: standalone / single-player
+Source cleanup generation: Y001s

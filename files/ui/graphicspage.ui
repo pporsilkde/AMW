@@ -578,6 +578,11 @@
              <string>shaders</string>
             </property>
            </item>
+           <item>
+            <property name="text">
+             <string>clustered (Project Magnus)</string>
+            </property>
+           </item>
           </widget>
          </item>
         </layout>

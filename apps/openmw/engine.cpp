@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <sstream>
 #include <vector>
+#include <utility>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -63,6 +64,7 @@
 #include "mwworld/player.hpp"
 #include "mwworld/worldimp.hpp"
 
+#include "mwrender/characterpreview.hpp"
 #include "mwrender/vismask.hpp"
 
 #include "mwclass/classes.hpp"
@@ -81,6 +83,33 @@
 
 namespace
 {
+    osgViewer::ViewerBase::ThreadingModel getViewerThreadingModelSetting()
+    {
+        const std::string value = Settings::Manager::getString("threading model", "OSG");
+
+        if (value == "SingleThreaded")
+            return osgViewer::ViewerBase::SingleThreaded;
+        if (value == "CullDrawThreadPerContext")
+            return osgViewer::ViewerBase::CullDrawThreadPerContext;
+
+        return osgViewer::ViewerBase::DrawThreadPerContext;
+    }
+
+    const char* getViewerThreadingModelName(osgViewer::ViewerBase::ThreadingModel model)
+    {
+        switch (model)
+        {
+            case osgViewer::ViewerBase::SingleThreaded:
+                return "SingleThreaded";
+            case osgViewer::ViewerBase::CullDrawThreadPerContext:
+                return "CullDrawThreadPerContext";
+            case osgViewer::ViewerBase::DrawThreadPerContext:
+                return "DrawThreadPerContext";
+            default:
+                return "DrawThreadPerContext";
+        }
+    }
+
     void unequipRespawnDamageItems(const MWWorld::Ptr& player)
     {
         static const std::array<int, 5> damageEffects = {
@@ -777,6 +806,19 @@ std::string OMW::Engine::loadSettings (Settings::Manager & settings)
     if (boost::filesystem::exists(settingspath))
         settings.loadUser(settingspath);
 
+    // Y001s: the FPS display is a dedicated HUD widget. F3 remains the HDR
+    // hotkey. Upgrade old profiles once so a historical explicit show fps=false
+    // does not make the new counter appear broken; later user choices are kept.
+    const Settings::CategorySettingValueMap::key_type fpsMigrationKey
+        = std::make_pair(std::string("HUD"), std::string("fps counter default y001s"));
+    if (Settings::Manager::mUserSettings.find(fpsMigrationKey) == Settings::Manager::mUserSettings.end())
+    {
+        Settings::Manager::setBool("show fps", "HUD", true);
+        Settings::Manager::setBool("fps counter default y001s", "HUD", true);
+        settings.saveUser(settingspath);
+        Settings::Manager::resetPendingChanges();
+    }
+
     return settingspath;
 }
 
@@ -1138,6 +1180,15 @@ void OMW::Engine::go()
     mViewer->setUseConfigureAffinity(false);
 #endif
 
+    // Y001s / ArenaMP X040: honor the [OSG] threading model selected in
+    // the launcher. Previously the setting could be written correctly while
+    // osgViewer silently stayed on AutomaticSelection.
+    {
+        const osgViewer::ViewerBase::ThreadingModel threadingModel = getViewerThreadingModelSetting();
+        mViewer->setThreadingModel(threadingModel);
+        Log(Debug::Info) << "OSG viewer threading model: " << getViewerThreadingModelName(threadingModel);
+    }
+
     mScreenCaptureOperation = new WriteScreenshotToFileOperation(
         mCfgMgr.getScreenshotPath().string(),
         Settings::Manager::getString("screenshot format", "General"));
@@ -1210,6 +1261,10 @@ void OMW::Engine::go()
 
         mViewer->advance(simulationTime);
 
+        // Y001s / ArenaMP X040 port: retire CharacterPreview RTT graphs only
+        // between frames, after the draw thread has had a safety margin.
+        MWRender::collectRetiredCharacterPreviews(mViewer->getFrameStamp()->getFrameNumber());
+
         if (!frame(dt))
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -1253,6 +1308,9 @@ void OMW::Engine::go()
     settings.saveUser(settingspath);
 
     mViewer->stopThreading();
+
+    // Rendering threads are stopped; remaining preview graphs can be released.
+    MWRender::collectRetiredCharacterPreviews(0, true);
 
     Log(Debug::Info) << "Quitting peacefully.";
 }

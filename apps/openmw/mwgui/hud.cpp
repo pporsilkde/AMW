@@ -819,7 +819,7 @@ namespace MWGui
             const float safeTime = std::max(0.0001f, mFpsAccumulatedTime);
             const int fps = static_cast<int>(std::lround(
                 static_cast<double>(mFpsFrameCount) / safeTime));
-            mFpsBox->setCaption(MyGUI::utility::toString(fps));
+            mFpsBox->setCaption("FPS: " + MyGUI::utility::toString(fps));
             mFpsUpdateTimer = 0.25f;
             mFpsAccumulatedTime = 0.f;
             mFpsFrameCount = 0;

@@ -1,75 +1,56 @@
-# ArenaMW 0.47 Standalone
+# ArenaMW Y001s
 
-ArenaMW is a single-player OpenMW 0.47.0 source tree carrying the gameplay,
-animation, interface and rendering work from ArenaMP/EncoreMP, without the
-TES3MP networking layer. It builds `openmw`, `openmw-launcher`, the installation
-wizard and the INI importer; no client/server browser, master server or RakNet
-target is part of the project.
+[Русский](README_RU.md) · **English**
 
-## Included
+ArenaMW is the standalone/single-player branch of the Arena engine work. It is based on OpenMW 0.47.0 and carries the compatible gameplay, UI, animation, AI and rendering systems developed for ArenaMP/EncoreMP without TES3MP networking, server authority, player groups or server scripts.
 
-- EncoreMP gameplay rebalance: combat accuracy and damage, ranged projectile
-  recovery, hand-to-hand, armour/unarmoured/creature armour, armorer, magic
-  resistance and Willpower, enchanting, alchemy, training, mercantile,
-  pickpocketing, stealth cache and ally scaling.
-- Tactical AI, collision avoidance, cross-door hostile pursuit and improved
-  dialogue/head-tracking rules.
-- Dynamic NPC idles, selectable player poses that yield to movement/combat and
-  resume when idle, walking styles, animated item, door, container, book and
-  scroll interactions, and the bundled animation VFS.
-- Arena cinematic dialogue with integrated persuasion and keyboard navigation,
-  redesigned HUD, target panel, resource-bar fading, game time, QuickLoot,
-  container filtering/capacity, spell trader improvements, interface scaling
-  and Russian/English Arena localisation. Embedded persuasion always reopens
-  in the centred Arena layout, without a Responses caption covering disposition.
-  The HUD FPS counter remains visible;
-  the OSG diagnostic overlay is unbound, while F3 and F4 remain the HDR and
-  bloom toggles.
-- Arena's expanded race/appearance creation layout with standalone Back/Next
-  flow, plus TES3MP-style automatic resurrection at the nearest temple or
-  divine shrine without opening a death menu.
-- HDR, bloom, PBR-compatible lighting, water shaders, ripples, occlusion culling
-  and the MaskedOcclusionCulling dependency.
-- Escape/main-menu-only pause semantics. Inventory, dialogue, barter,
-  containers, books/scrolls, crafting, console and modal message boxes keep the
-  simulation running, as do the QuickLoot and HUD overlays.
-- Arena launcher hardware detection and quality presets without a server page,
-  server browser, multiplayer process or QtNetwork runtime dependency. Portable
-  `build.ini` manifests retain build name, data path, language, ordered content,
-  groundcover and BSA archives while ignoring all IP/address/port fields.
-  The Wizard accepts either the Morrowind root or its `Data Files` directory,
-  marks setup complete after a successful run and automatically separates
-  grass/groundcover plugins while registering base and additional BSA archives.
-  The plugin manager automatically selects `Morrowind.esm` and the matching
-  content profile when it opens after setup.
-  The Launcher uses ArenaMP's fixed 1024x720 window geometry.
-  A standalone template is included as `docs/build.ini.example`.
-- EncoreMP 0.93 companion ESP files under `extras/EncoreMP`.
+> A legal copy of *The Elder Scrolls III: Morrowind* is required. Bethesda game data is not included.
 
-## Build on Windows
+## Source snapshot
 
-The ArenaMP dependency/bootstrap script is retained and adjusted for the
-standalone target. It builds the game, launcher, installation wizard and INI
-importer; editor, conversion and test targets are disabled in this player
-package:
+| Component | Value |
+| --- | --- |
+| ArenaMW source | **Y001s** |
+| Engine base | OpenMW 0.47.0 |
+| Runtime | Single-player `openmw` |
+| Launcher | `openmw-launcher` |
+| Network/server layer | Not included |
+| Primary release build | Windows x64 |
+
+## Y001s highlights
+
+- Clean source distribution: embedded `.git`, historical cumulative patches, one-off harnesses, old checksum manifests and obsolete Travis/GitLab/AppVeyor files are removed.
+- Y001 graphics persistence: manual Water, Terrain, PBR, lighting, shadow, video and FPS-limit changes are merge-saved to the newest `settings.cfg` when Play/close is used.
+- Advanced settings are change-tracked too, so untouched overlapping controls cannot overwrite a Graphics quality preset when Play is pressed.
+- New HUD FPS presentation: `FPS: N`, enabled once for upgraded profiles; its normal HUD setting remains user-controlled afterwards. F3 is unchanged and remains the HDR hotkey.
+- ArenaMP X040 single-player port: the selected `[OSG] threading model` now reaches `osgViewer`, and Character/Inventory/CharGen RTT preview resources are retired after a render-thread safety margin instead of being destroyed while OSG may still reference them.
+- Project Magnus clustered lighting is available as an optional desktop OpenGL 4.3 mode; unsupported systems fall back to the existing shader-compatible lighting path.
+- Ported the X042a MSVC fix for the Water quality expression that was still malformed in the ArenaMW X033 source.
+- Existing ArenaMW standalone systems through the X033 generation are preserved: XP leveling, Refined Alchemy/poisons, equipment requirements, tactical AI, animation systems, Arena dialogue/HUD, QuickLoot, PBR/water/HDR/bloom, shadows and CPU occlusion culling.
+
+## Build
+
+The retained Windows workflow is `.github/workflows/windows.yml`. For a local MSVC/Ninja build:
 
 ```bash
-bash CI/before_script.msvc.sh -c Release -p x64 -v 2022 -N -C -V -i "$PWD/install"
+bash CI/before_script.msvc.sh -c Release -p x64 -v 2022 -N -V -i "$PWD/install"
 source MSVC2022_64_Ninja/activate_msvc.sh
 cmake --build MSVC2022_64_Ninja --config Release --parallel 2
 cmake --install MSVC2022_64_Ninja --config Release
 ```
 
-The workflow `.github/workflows/windows.yml` performs the same build and emits
-a Windows x64 ZIP. It also checks that HDR/Bloom/QuickLoot resources are present
-and that no TES3MP executable was produced.
+See [Building ArenaMW](docs/BUILDING.md), [feature overview](docs/FEATURES.md), [ArenaMP-to-ArenaMW port boundary](docs/ARENAMP_PORTING.md), and [changelog](CHANGELOG.md).
 
-## Content setup
+## Repository layout
 
-Use a legal Morrowind installation as with normal OpenMW. The engine-side
-gameplay changes work without an ESP. The files in `extras/EncoreMP` add the
-optional Encore content and spell changes; read their companion notes before
-enabling them and keep the listed load order.
+| Path | Purpose |
+| --- | --- |
+| `apps/` | Game, launcher, wizard and OpenMW utilities/source |
+| `components/` | Shared engine libraries |
+| `files/` | Defaults, shaders, MyGUI layouts, localisation and VFS resources |
+| `extern/` | Bundled third-party source dependencies, including masked occlusion code |
+| `extras/` | Optional EncoreMP content |
+| `CI/` | Build/bootstrap scripts |
+| `docs/` | ArenaMW documentation plus retained upstream OpenMW history |
 
-See `PORTING_NOTES.md` for the separation boundary and validation performed.
-The original OpenMW 0.47 README is retained as `README-OPENMW.md`.
+ArenaMW is an independent fork. OpenMW, TES3MP, EncoreMP contributors and Bethesda Softworks do not endorse this project.

@@ -6,13 +6,13 @@
         <Widget type="Widget" position="0 0 300 200" name="GameplayHud" align="Stretch">
             <Property key="NeedMouse" value="false"/>
 	
-        <Widget type="TextBox" skin="SandBrightText" position="8 6 72 22" name="FpsText" align="Left Top">
+        <Widget type="TextBox" skin="SandBrightText" position="12 8 120 24" name="FpsText" align="Left Top">
             <Property key="NeedMouse" value="false"/>
-            <Property key="TextAlign" value="Left"/>
+            <Property key="TextAlign" value="Left VCenter"/>
             <Property key="TextShadow" value="true"/>
             <Property key="TextShadowColour" value="0 0 0"/>
-            <Property key="FontName" value="Russo"/>
-            <Property key="Caption" value="0"/>
+            <Property key="FontHeight" value="12"/>
+            <Property key="Caption" value="FPS: --"/>
         </Widget>
 
         <!-- Engine-native horizontal compass; tick labels are populated by HUD.cpp. -->

@@ -1,7 +1,10 @@
 #include "characterpreview.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <mutex>
+#include <vector>
 
 #include <osg/Material>
 #include <osg/Fog>
@@ -34,8 +37,69 @@
 #include "npcanimation.hpp"
 #include "vismask.hpp"
 
+namespace
+{
+    /// One retired CharacterPreview graph, kept alive until the renderer is
+    /// provably done with it. Ownership is deliberately held by ref_ptr so the
+    /// whole subtree survives even if OSG dropped its own references first.
+    struct RetiredPreview
+    {
+        osg::ref_ptr<osg::Group> mParent;
+        osg::ref_ptr<osg::Camera> mCamera;
+        osg::ref_ptr<osg::Node> mNode;
+        osg::ref_ptr<osg::Referenced> mAnimation;
+        unsigned int mRetiredFrame = 0;
+    };
+
+    std::mutex sRetiredPreviewMutex;
+    std::vector<RetiredPreview> sRetiredPreviews;
+
+    /// Frame number of the last main-loop drain, so destructors running mid-frame
+    /// can stamp their entry without reaching for the viewer.
+    std::atomic<unsigned int> sCurrentPreviewFrame{0};
+
+    /// Cull for frame N runs while draw for frame N-1 is still in flight, and the
+    /// GL object cache is released one frame later again. Three frames is the
+    /// smallest margin that covers both DrawThreadPerContext and
+    /// CullDrawThreadPerContext.
+    const unsigned int sRetireFrameMargin = 3;
+}
+
 namespace MWRender
 {
+
+    void collectRetiredCharacterPreviews(unsigned int currentFrame, bool force)
+    {
+        sCurrentPreviewFrame.store(currentFrame, std::memory_order_relaxed);
+
+        std::vector<RetiredPreview> ready;
+        {
+            std::lock_guard<std::mutex> lock(sRetiredPreviewMutex);
+            if (sRetiredPreviews.empty())
+                return;
+
+            for (std::size_t i = sRetiredPreviews.size(); i > 0; --i)
+            {
+                RetiredPreview& candidate = sRetiredPreviews[i - 1];
+                const bool expired = currentFrame >= candidate.mRetiredFrame + sRetireFrameMargin;
+                if (!force && !expired)
+                    continue;
+
+                ready.push_back(std::move(candidate));
+                sRetiredPreviews.erase(sRetiredPreviews.begin() + (i - 1));
+            }
+        }
+
+        // Detach and destroy outside the lock, on the main thread, between
+        // traversals. This is the only point where preview GL resources may go.
+        for (RetiredPreview& retired : ready)
+        {
+            if (retired.mParent.valid() && retired.mCamera.valid())
+                retired.mParent->removeChild(retired.mCamera);
+            if (retired.mCamera.valid())
+                retired.mCamera->removeChildren(0, retired.mCamera->getNumChildren());
+        }
+    }
 
     class DrawOnceCallback : public osg::NodeCallback
     {
@@ -279,14 +343,34 @@ namespace MWRender
 
     CharacterPreview::~CharacterPreview ()
     {
-        // Hide and detach the RTT camera before tearing down its animation graph.
-        // OSG may be running cull/draw threads while CharGen replaces modal
-        // windows, so never leave a still-visible camera pointing at resources
-        // that are being released.
+        // Hiding the camera is safe to do inline: the node mask is only read by
+        // the cull traversal, which has not run yet for this frame.
         mCamera->setNodeMask(0);
-        mParent->removeChild(mCamera);
         mCamera->removeUpdateCallback(mDrawOnceCallback);
-        mCamera->removeChildren(0, mCamera->getNumChildren());
+
+        // Everything else is deferred. Detaching the camera and releasing the
+        // NpcAnimation subtree here would free StateSets and Drawables that the
+        // draw thread still holds bare pointers to, which is how CharGen crashed
+        // with an execute-access violation inside the GL driver: three
+        // RaceSelectionPreviews and one Review preview are built and destroyed
+        // within a few seconds of each other.
+        RetiredPreview retired;
+        retired.mParent = mParent;
+        retired.mCamera = mCamera;
+        retired.mNode = mNode;
+        retired.mAnimation = mAnimation;
+        retired.mRetiredFrame = sCurrentPreviewFrame.load(std::memory_order_relaxed);
+
+        {
+            std::lock_guard<std::mutex> lock(sRetiredPreviewMutex);
+            sRetiredPreviews.push_back(std::move(retired));
+        }
+
+        // Drop our own handles now; the queue holds the graph alive from here.
+        mAnimation = nullptr;
+        mNode = nullptr;
+        mCamera = nullptr;
+        mDrawOnceCallback = nullptr;
     }
 
     int CharacterPreview::getTextureWidth() const
