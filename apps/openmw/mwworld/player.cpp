@@ -44,8 +44,11 @@ namespace MWWorld
         mAttackingOrSpell(false),
         mJumping(false),
         mMount(),
+        mPendingMount(),
+        mMountingTimer(0.f),
         mMountLeftRight(0.f),
         mMountForwardBackward(0.f),
+        mMountSpeedRatio(0.f),
         mMountYawDelta(0.f),
         mMountRun(false),
         mDismountSneakLatch(false)
@@ -174,6 +177,8 @@ namespace MWWorld
             mMountForwardBackward = value;
             ptr.getClass().getMovementSettings(ptr).mPosition[1] = 0.f;
         }
+        else if (isMounting())
+            ptr.getClass().getMovementSettings(ptr).mPosition[1] = 0.f;
         else
             ptr.getClass().getMovementSettings(ptr).mPosition[1] = value;
     }
@@ -186,6 +191,8 @@ namespace MWWorld
             mMountLeftRight = value;
             ptr.getClass().getMovementSettings(ptr).mPosition[0] = 0.f;
         }
+        else if (isMounting())
+            ptr.getClass().getMovementSettings(ptr).mPosition[0] = 0.f;
         else
             ptr.getClass().getMovementSettings(ptr).mPosition[0] = value;
     }
@@ -203,6 +210,8 @@ namespace MWWorld
             mMountForwardBackward = value;
             ptr.getClass().getMovementSettings(ptr).mPosition[1] = 0.f;
         }
+        else if (isMounting())
+            ptr.getClass().getMovementSettings(ptr).mPosition[1] = 0.f;
         else
             ptr.getClass().getMovementSettings(ptr).mPosition[1] = value;
     }
@@ -210,8 +219,8 @@ namespace MWWorld
     void Player::setUpDown(int value)
     {
         MWWorld::Ptr ptr = getPlayer();
-        // Jump/vertical movement is intentionally suppressed while mounted.
-        ptr.getClass().getMovementSettings(ptr).mPosition[2] = isMounted() ? 0.f : static_cast<float>(value);
+        // Jump/vertical movement is intentionally suppressed while mounting or mounted.
+        ptr.getClass().getMovementSettings(ptr).mPosition[2] = (isMounted() || isMounting()) ? 0.f : static_cast<float>(value);
     }
 
     void Player::setRunState(bool run)
@@ -222,6 +231,8 @@ namespace MWWorld
             mMountRun = run;
             ptr.getClass().getCreatureStats(ptr).setMovementFlag(MWMechanics::CreatureStats::Flag_Run, false);
         }
+        else if (isMounting())
+            ptr.getClass().getCreatureStats(ptr).setMovementFlag(MWMechanics::CreatureStats::Flag_Run, false);
         else
             ptr.getClass().getCreatureStats(ptr).setMovementFlag(MWMechanics::CreatureStats::Flag_Run, run);
     }
@@ -229,7 +240,7 @@ namespace MWWorld
     void Player::setSneak(bool sneak)
     {
         MWWorld::Ptr ptr = getPlayer();
-        if (isMounted())
+        if (isMounted() || isMounting())
         {
             ptr.getClass().getCreatureStats(ptr).setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, false);
             return;
@@ -255,6 +266,8 @@ namespace MWWorld
             mMountYawDelta += yaw;
             ptr.getClass().getMovementSettings(ptr).mRotation[2] = 0.f;
         }
+        else if (isMounting())
+            ptr.getClass().getMovementSettings(ptr).mRotation[2] = 0.f;
         else
             ptr.getClass().getMovementSettings(ptr).mRotation[2] += yaw;
     }
@@ -311,9 +324,33 @@ namespace MWWorld
         return !mMount.isEmpty();
     }
 
+    bool Player::isMounting() const
+    {
+        return !mPendingMount.isEmpty();
+    }
+
     MWWorld::Ptr Player::getMount() const
     {
         return mMount;
+    }
+
+    float Player::getMountForwardBackward() const
+    {
+        // Return the actual smoothed mount speed rather than the raw W/S input.
+        // Rider animation therefore follows acceleration, braking and reverse naturally.
+        return mMountSpeedRatio;
+    }
+
+    float Player::getMountLeftRight() const
+    {
+        return mMountLeftRight;
+    }
+
+    bool Player::isMountRunning() const
+    {
+        // Do not switch to the gallop animation until the guar has actually
+        // accelerated beyond walking speed.
+        return mMountRun && mMountSpeedRatio > 0.68f;
     }
 
     bool Player::tryMount(const MWWorld::Ptr& mount)
@@ -321,6 +358,9 @@ namespace MWWorld
         if (mount.isEmpty() || !mount.isInCell() || !mount.getClass().isActor()
             || !Misc::StringUtils::ciEqual(mount.getCellRef().getRefId(), "guar_pack"))
             return false;
+
+        if (isMounting())
+            return mPendingMount == mount;
 
         if (isMounted())
         {
@@ -337,30 +377,28 @@ namespace MWWorld
             return false;
 
         MWWorld::Ptr player = getPlayer();
-        mMount = mount;
-        mMountLeftRight = 0.f;
-        mMountForwardBackward = mAutoMove ? 1.f : mForwardBackward;
-        mMountYawDelta = 0.f;
-        mMountRun = player.getClass().getCreatureStats(player)
-            .getMovementFlag(MWMechanics::CreatureStats::Flag_Run);
-        mDismountSneakLatch = false;
 
-        // Keep the authored AI sequence intact. Riding overrides locomotion and
-        // steering after AI has updated, so Wander/Combat resumes naturally on
-        // dismount instead of being permanently erased from the creature.
-        mountStats.setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, false);
-        MWMechanics::Movement& mountMovement = mount.getClass().getMovementSettings(mount);
-        mountMovement.mPosition[0] = 0.f;
-        mountMovement.mPosition[1] = 0.f;
-        mountMovement.mPosition[2] = 0.f;
+        // A mount always starts under direct control. Do not inherit a player
+        // autorun/Q state that was active before mounting; Q can be toggled again
+        // deliberately once seated. This prevents the guar from taking off by itself.
+        mAutoMove = false;
+        mPendingMount = mount;
+        mMountingTimer = MWBase::Environment::get().getMechanicsManager()->playAnimationGroup(
+            player, "IRSaddling", 0, 1, false) ? 1.5f : 0.f;
 
         MWMechanics::Movement& playerMovement = player.getClass().getMovementSettings(player);
         playerMovement.mPosition[0] = 0.f;
         playerMovement.mPosition[1] = 0.f;
         playerMovement.mPosition[2] = 0.f;
         player.getClass().getCreatureStats(player).setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, false);
-        MWBase::Environment::get().getWorld()->setActorCollisionMode(player, false, true);
-        updateRiding();
+
+        // The original Immersive Riding animation is authored as a short
+        // pre-mount sequence. Keep the player beside the guar until it finishes.
+        if (mMountingTimer > 0.f)
+            return true;
+
+        // No authored saddling animation was available: complete the mount immediately.
+        updateRiding(0.f);
         return true;
     }
 
@@ -379,8 +417,11 @@ namespace MWWorld
 
         MWWorld::Ptr mount = mMount;
         mMount = MWWorld::Ptr();
+        mPendingMount = MWWorld::Ptr();
+        mMountingTimer = 0.f;
         mMountLeftRight = 0.f;
         mMountForwardBackward = 0.f;
+        mMountSpeedRatio = 0.f;
         mMountYawDelta = 0.f;
         mMountRun = false;
 
@@ -421,23 +462,57 @@ namespace MWWorld
 
         MWMechanics::CreatureStats& stats = mMount.getClass().getCreatureStats(mMount);
         if (stats.isDead() || stats.getHealth().getCurrent() <= 0.f)
-        {
-            dismount();
             return;
+
+        // Raw throttle comes only from W/S (or Q after the player explicitly
+        // enables autorun while already mounted). AI is allowed to keep its
+        // packages, but its movement is overwritten here immediately before the
+        // CharacterController/physics update.
+        const float throttle = mAutoMove ? 1.f : std::max(-1.f, std::min(1.f, mMountForwardBackward));
+        float targetSpeed = 0.f;
+        if (throttle > 0.05f)
+            targetSpeed = mMountRun ? 1.f : 0.62f;
+        else if (throttle < -0.05f)
+            targetSpeed = -0.42f;
+
+        // Natural acceleration/braking. Walking responds quickly, gallop takes
+        // longer to build, releasing W/S brakes decisively instead of coasting
+        // under the creature's AI movement.
+        const float dt = std::max(0.f, duration);
+        if (targetSpeed == 0.f)
+        {
+            const float brake = 2.8f * dt;
+            if (mMountSpeedRatio > 0.f)
+                mMountSpeedRatio = std::max(0.f, mMountSpeedRatio - brake);
+            else if (mMountSpeedRatio < 0.f)
+                mMountSpeedRatio = std::min(0.f, mMountSpeedRatio + brake);
+        }
+        else if (targetSpeed > mMountSpeedRatio)
+        {
+            const float accel = (targetSpeed > 0.7f ? 0.75f : 1.8f) * dt;
+            mMountSpeedRatio = std::min(targetSpeed, mMountSpeedRatio + accel);
+        }
+        else if (targetSpeed < mMountSpeedRatio)
+        {
+            const float decel = (targetSpeed < 0.f ? 2.0f : 1.6f) * dt;
+            mMountSpeedRatio = std::max(targetSpeed, mMountSpeedRatio - decel);
         }
 
         MWMechanics::Movement& movement = mMount.getClass().getMovementSettings(mMount);
-        // Riding uses A/D as steering rather than creature strafing. Mouse/stick
-        // yaw is accumulated separately, so both control styles can be mixed.
         movement.mPosition[0] = 0.f;
-        movement.mPosition[1] = mAutoMove ? 1.f : mMountForwardBackward;
+        movement.mPosition[1] = mMountSpeedRatio;
         movement.mPosition[2] = 0.f;
-        const float turnRate = mMountRun ? 1.35f : 1.75f;
+
+        // A/D is steering, not strafing. Idle turns are intentionally quicker;
+        // galloping turns are wider and calmer. Mouse/stick yaw remains additive.
+        const float speedAbs = std::abs(mMountSpeedRatio);
+        const float turnRate = speedAbs < 0.08f ? 2.15f : (isMountRunning() ? 1.15f : 1.65f);
         movement.mRotation[0] = 0.f;
         movement.mRotation[1] = 0.f;
-        movement.mRotation[2] = mMountYawDelta + mMountLeftRight * turnRate * std::max(0.f, duration);
+        movement.mRotation[2] = mMountYawDelta + mMountLeftRight * turnRate * dt;
         mMountYawDelta = 0.f;
-        stats.setMovementFlag(MWMechanics::CreatureStats::Flag_Run, mMountRun);
+
+        stats.setMovementFlag(MWMechanics::CreatureStats::Flag_Run, isMountRunning());
         stats.setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, false);
 
         MWWorld::Ptr player = getPlayer();
@@ -447,12 +522,55 @@ namespace MWWorld
         playerMovement.mPosition[2] = 0.f;
     }
 
-    void Player::updateRiding()
+    void Player::updateRiding(float duration)
     {
+        MWWorld::Ptr player = getPlayer();
+
+        if (isMounting())
+        {
+            if (!mPendingMount.isInCell() || mPendingMount.getRefData().getCount() <= 0
+                || !mPendingMount.getRefData().isEnabled() || mPendingMount.getRefData().isDeleted()
+                || mPendingMount.getClass().getCreatureStats(mPendingMount).isDead()
+                || mPendingMount.getClass().getCreatureStats(mPendingMount).getHealth().getCurrent() <= 0.f
+                || player.getClass().getCreatureStats(player).isDead())
+            {
+                mPendingMount = MWWorld::Ptr();
+                mMountingTimer = 0.f;
+                return;
+            }
+
+            mMountingTimer -= std::max(0.f, duration);
+            if (mMountingTimer > 0.f)
+                return;
+
+            mMount = mPendingMount;
+            mPendingMount = MWWorld::Ptr();
+            mMountingTimer = 0.f;
+            mMountLeftRight = 0.f;
+            mMountForwardBackward = mForwardBackward;
+            mMountSpeedRatio = 0.f;
+            mMountYawDelta = 0.f;
+            mMountRun = player.getClass().getCreatureStats(player)
+                .getMovementFlag(MWMechanics::CreatureStats::Flag_Run);
+            mDismountSneakLatch = false;
+
+            MWMechanics::CreatureStats& mountStats = mMount.getClass().getCreatureStats(mMount);
+            mountStats.setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, false);
+            MWMechanics::Movement& mountMovement = mMount.getClass().getMovementSettings(mMount);
+            mountMovement.mPosition[0] = 0.f;
+            mountMovement.mPosition[1] = 0.f;
+            mountMovement.mPosition[2] = 0.f;
+
+            MWMechanics::Movement& playerMovement = player.getClass().getMovementSettings(player);
+            playerMovement.mPosition[0] = 0.f;
+            playerMovement.mPosition[1] = 0.f;
+            playerMovement.mPosition[2] = 0.f;
+            player.getClass().getCreatureStats(player).setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, false);
+            MWBase::Environment::get().getWorld()->setActorCollisionMode(player, false, true);
+        }
+
         if (!isMounted())
             return;
-
-        MWWorld::Ptr player = getPlayer();
         if (!mMount.isInCell() || mMount.getRefData().getCount() <= 0
             || !mMount.getRefData().isEnabled() || mMount.getRefData().isDeleted()
             || mMount.getClass().getCreatureStats(mMount).isDead()
@@ -467,10 +585,9 @@ namespace MWWorld
         const ESM::Position& mountPosition = mMount.getRefData().getPosition();
         const osg::Vec3f mountHalf = world->getHalfExtents(mMount);
 
-        // Keep the player origin on the guar's back. This first engine-only
-        // implementation deliberately reuses the ordinary player model/animation;
-        // a dedicated seated skeleton can be layered on later without changing the
-        // movement/network model.
+        // Keep the player origin on the authored saddle. The seated rider pose is
+        // animation-driven; the root remains attached to the mount for stable physics
+        // and multiplayer replication.
         const float seatZ = mountPosition.pos[2] + std::max(36.f, mountHalf.z() * 1.35f);
         player = world->moveObject(player, mMount.getCell(),
             mountPosition.pos[0], mountPosition.pos[1], seatZ, false);
@@ -540,8 +657,11 @@ namespace MWWorld
         mAttackingOrSpell = false;
         mJumping = false;
         mMount = MWWorld::Ptr();
+        mPendingMount = MWWorld::Ptr();
+        mMountingTimer = 0.f;
         mMountLeftRight = 0.f;
         mMountForwardBackward = 0.f;
+        mMountSpeedRatio = 0.f;
         mMountYawDelta = 0.f;
         mMountRun = false;
         mDismountSneakLatch = false;

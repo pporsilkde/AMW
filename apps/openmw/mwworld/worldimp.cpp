@@ -3253,7 +3253,7 @@ namespace MWWorld
         }
 
         if (!paused)
-            mPlayer->updateRiding();
+            mPlayer->updateRiding(duration);
 
         updatePlayer();
 

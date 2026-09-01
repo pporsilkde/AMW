@@ -1,3 +1,22 @@
+# Y005s — Riding control and gait correction
+
+- Fixed the core control-order bug that allowed `guar_pack` AI movement to reach CharacterController/physics before rider input; riding control is now applied after AI/collision steering but before movement is queued.
+- A mounted guar is stationary with no W/S input. Existing Wander/Combat packages are preserved and resume after dismount, but cannot move the mount while occupied.
+- Mounting clears any pre-existing player autorun/Q state so the guar never launches forward just because autorun was enabled before activation; Q can still be enabled intentionally after mounting.
+- Added smoothed mount throttle with quick walk acceleration, slower gallop build-up, decisive braking, and reduced reverse speed.
+- Added a real gallop speed tier. OpenMW 0.47 creatures normally return identical walk/run speed, so the active ridden guar gets a local 1.45x run multiplier without altering other creatures.
+- Rider walk/gallop animation now follows actual smoothed mount speed instead of raw input, preventing idle animation while braking/coasting.
+- Steering is faster at rest/walk and wider at gallop.
+
+# Y004s — Native riding animations
+
+- Added built-in animation/model assets derived from the user-supplied Immersive Riding 1.4 package; no ESP/OMWAddon or OpenMW Lua runtime is required.
+- `guar_pack` now renders with the saddled guar model and its authored Idle/Walk/Run/Turn/Attack cycles while retaining the original creature record, stats, collision and AI.
+- Activation starts `IRSaddling`; the player mounts after the 1.5-second authored transition instead of snapping instantly onto the guar.
+- Third-person mounted locomotion now uses `RIdle`, `RSlowWalkForward`, `RWalkForward` and `IRTurn`.
+- Mounted combat remains enabled: riding locomotion yields the upper body to weapon/casting animation when necessary.
+- First-person keeps the safe normal combat/arms path and receives the authored saddling animation source.
+
 # ArenaMW changelog
 
 This file consolidates ArenaMW development notes that previously existed as separate root-level patch, review, checksum and harness files. Original OpenMW 0.47 history is preserved in `docs/upstream/OPENMW_CHANGELOG.md`.

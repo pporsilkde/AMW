@@ -63,8 +63,11 @@ namespace MWWorld
         // Y003s: native riding state. The mount remains an ordinary creature;
         // only its movement authority is temporarily driven by player input.
         MWWorld::Ptr mMount;
+        MWWorld::Ptr mPendingMount;
+        float mMountingTimer;
         float mMountLeftRight;
         float mMountForwardBackward;
+        float mMountSpeedRatio;
         float mMountYawDelta;
         bool mMountRun;
         bool mDismountSneakLatch;
@@ -105,12 +108,16 @@ namespace MWWorld
 
         /// Y003s native riding. `guar_pack` is the engine-level rideable mount.
         bool isMounted() const;
+        bool isMounting() const;
         MWWorld::Ptr getMount() const;
+        float getMountForwardBackward() const;
+        float getMountLeftRight() const;
+        bool isMountRunning() const;
         bool tryMount(const MWWorld::Ptr& mount);
         void requestDismount();
         void dismount();
         void applyMountControls(float duration);
-        void updateRiding();
+        void updateRiding(float duration);
 
         bool getAutoMove() const;
         void setAutoMove (bool enable);

@@ -51,3 +51,7 @@ cmake --install MSVC2022_64_Ninja --config Release
 ```
 
 Подробности: [сборка](docs/BUILDING_RU.md), [возможности](docs/FEATURES_RU.md), [граница порта ArenaMP → ArenaMW](docs/ARENAMP_PORTING.md), [история изменений](CHANGELOG.md).
+
+## Анимации верховой езды
+
+Y004s встраивает необходимые модели и анимации Immersive Riding прямо в ресурсы движка. `guar_pack` отображается с седлом и использует авторские Idle/Walk/Run/Turn/Attack циклы; игрок получает анимацию посадки и сидячие Idle/Walk/Gallop/Turn позы. ESP, OMWAddon и современный OpenMW Lua не требуются.

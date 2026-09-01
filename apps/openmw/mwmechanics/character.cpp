@@ -57,6 +57,28 @@ namespace
 
 constexpr float sDynamicMovementTransitionSeconds = 0.12f;
 
+bool isMountedLocalPlayer(const MWWorld::Ptr& ptr)
+{
+    MWBase::World* world = MWBase::Environment::get().getWorld();
+    return !ptr.isEmpty() && ptr == world->getPlayerPtr()
+        && world->getPlayer().isMounted();
+}
+
+std::string getRidingMovementAnimation(const MWWorld::Ptr& ptr, const std::string& baseGroup)
+{
+    MWBase::World* world = MWBase::Environment::get().getWorld();
+    if (!isMountedLocalPlayer(ptr) || world->isFirstPerson())
+        return std::string();
+
+    if (baseGroup == "runforward")
+        return "RWalkForward";
+    if (baseGroup == "walkforward" || baseGroup == "walkback" || baseGroup == "runback")
+        return "RSlowWalkForward";
+    if (baseGroup == "turnleft" || baseGroup == "turnright")
+        return "IRTurn";
+    return std::string();
+}
+
 std::string getBestAttack (const ESM::Weapon* weapon)
 {
     int slash = (weapon->mData.mSlash[0] + weapon->mData.mSlash[1])/2;
@@ -492,6 +514,7 @@ void CharacterController::refreshMovementAnims(const std::string& weapShortGroup
 
     std::string movementAnimName;
     bool usesDynamicMovement = false;
+    bool usesRidingMovement = false;
     bool usedDynamicMovementBefore = false;
     MWRender::Animation::BlendMask movemask;
     const StateInfo *movestate;
@@ -502,10 +525,12 @@ void CharacterController::refreshMovementAnims(const std::string& weapShortGroup
             = std::find_if(sMovementList, sMovementListEnd, FindCharState(mMovementState));
         if (previousState != sMovementListEnd)
         {
+            const std::string previousRiding
+                = getRidingMovementAnimation(mPtr, previousState->groupname);
             const std::string previousDynamic
                 = ArenaMW::getDynamicMovementAnimation(mPtr, previousState->groupname);
-            usedDynamicMovementBefore = !previousDynamic.empty()
-                && previousDynamic == mCurrentMovement;
+            usedDynamicMovementBefore = (!previousRiding.empty() && previousRiding == mCurrentMovement)
+                || (!previousDynamic.empty() && previousDynamic == mCurrentMovement);
         }
     }
 
@@ -514,8 +539,10 @@ void CharacterController::refreshMovementAnims(const std::string& weapShortGroup
     if(movestate != sMovementListEnd)
     {
         movementAnimName = movestate->groupname;
-        const std::string dynamicMovement
-            = ArenaMW::getDynamicMovementAnimation(mPtr, movementAnimName);
+        std::string dynamicMovement = getRidingMovementAnimation(mPtr, movementAnimName);
+        usesRidingMovement = !dynamicMovement.empty();
+        if (dynamicMovement.empty())
+            dynamicMovement = ArenaMW::getDynamicMovementAnimation(mPtr, movementAnimName);
         if (!dynamicMovement.empty() && mAnimation->hasAnimation(dynamicMovement))
         {
             movementAnimName = dynamicMovement;
@@ -631,11 +658,15 @@ void CharacterController::refreshMovementAnims(const std::string& weapShortGroup
                 idle = CharState_None;
             }
 
-            // For non-flying creatures, MW uses the Walk animation to calculate the animation velocity
-            // even if we are running. This must be replicated, otherwise the observed speed would differ drastically.
+            // Rider animation speed is authored independently from the stationary player root.
+            // The mount provides physical motion, so never scale these cycles from player velocity.
             std::string anim = mCurrentMovement;
-            mAdjustMovementAnimSpeed = true;
-            if (mPtr.getClass().getTypeName() == typeid(ESM::Creature).name()
+            mAdjustMovementAnimSpeed = !usesRidingMovement;
+            if (usesRidingMovement)
+            {
+                mMovementAnimSpeed = 1.f;
+            }
+            else if (mPtr.getClass().getTypeName() == typeid(ESM::Creature).name()
                     && !(mPtr.get<ESM::Creature>()->mBase->mFlags & ESM::Creature::Flies))
             {
                 CharacterState walkState = runStateToWalkState(mMovementState);
@@ -672,6 +703,15 @@ void CharacterController::refreshMovementAnims(const std::string& weapShortGroup
 
             mAnimation->play(mCurrentMovement, Priority_Movement, movemask, false,
                              1.f, "start", "stop", startpoint, ~0ul, true);
+            if (usesRidingMovement)
+            {
+                float ridingAnimSpeed = 1.f;
+                if (mCurrentMovement == "RWalkForward")
+                    ridingAnimSpeed = 1.5f;
+                else if (mCurrentMovement == "RSlowWalkForward")
+                    ridingAnimSpeed = 0.95f;
+                mAnimation->adjustSpeedMult(mCurrentMovement, ridingAnimSpeed);
+            }
         }
         else
             mMovementState = CharState_None;
@@ -695,9 +735,21 @@ void CharacterController::refreshIdleAnims(const std::string& weapShortGroup, Ch
 
         std::string idleGroup;
         MWRender::Animation::AnimPriority idlePriority (Priority_Default);
+        MWRender::Animation::BlendMask idleMask = MWRender::Animation::BlendMask_All;
+        // Riding clips from Immersive Riding keep the pelvis and legs seated.
+        // Weapon/casting state may still own the upper body for mounted combat.
+        const bool ridingPlayer = isMountedLocalPlayer(mPtr)
+            && !MWBase::Environment::get().getWorld()->isFirstPerson()
+            && mAnimation->hasAnimation("RIdle");
+        if (ridingPlayer && mIdleState != CharState_None)
+        {
+            idleGroup = "RIdle";
+            if (!weapShortGroup.empty())
+                idleMask = MWRender::Animation::BlendMask_LowerBody;
+        }
         // Only play "idleswim" or "idlesneak" if they exist. Otherwise, fallback to
         // "idle"+weapon or "idle".
-        if(mIdleState == CharState_IdleSwim && mAnimation->hasAnimation("idleswim"))
+        else if(mIdleState == CharState_IdleSwim && mAnimation->hasAnimation("idleswim"))
         {
             idleGroup = "idleswim";
             idlePriority = Priority_SwimIdle;
@@ -737,7 +789,7 @@ void CharacterController::refreshIdleAnims(const std::string& weapShortGroup, Ch
 
         mCurrentIdle = idleGroup;
         if(!mCurrentIdle.empty())
-            mAnimation->play(mCurrentIdle, idlePriority, MWRender::Animation::BlendMask_All, false,
+            mAnimation->play(mCurrentIdle, idlePriority, idleMask, false,
                              1.0f, "start", "stop", startPoint, numLoops, true);
     }
 }
@@ -2130,6 +2182,15 @@ void CharacterController::update(float duration)
             mAnimation->setUpperBodyYawRadians(mAnimation->getUpperBodyYawRadians() + mAnimation->getHeadYaw() / 2);
 
         speed = cls.getCurrentSpeed(mPtr);
+
+        // Vanilla/OpenMW 0.47 creatures use the same walk and run speed. A ridden
+        // guar therefore needs an explicit gallop multiplier or the Run control only
+        // changes animation. Keep this local to the player's active mount so normal
+        // creatures and AI balance are untouched.
+        if (world->getPlayer().isMounted() && world->getPlayer().getMount() == mPtr
+            && world->getPlayer().isMountRunning())
+            speed *= 1.45f;
+
         vec.x() *= speed;
         vec.y() *= speed;
 
@@ -2403,6 +2464,26 @@ void CharacterController::update(float duration)
                     movestate = mMovementState;
                 }
             }
+        }
+
+        if (isPlayer && world->getPlayer().isMounted())
+        {
+            const float mountForward = world->getPlayer().getMountForwardBackward();
+            const float mountTurn = world->getPlayer().getMountLeftRight();
+            jumpstate = JumpState_None;
+            sneak = false;
+            if (std::abs(mountForward) > 0.05f)
+            {
+                if (mountForward < 0.f)
+                    movestate = CharState_WalkBack;
+                else
+                    movestate = world->getPlayer().isMountRunning()
+                        ? CharState_RunForward : CharState_WalkForward;
+            }
+            else if (!isFirstPersonPlayer && std::abs(mountTurn) > 0.05f)
+                movestate = mountTurn > 0.f ? CharState_TurnRight : CharState_TurnLeft;
+            else
+                movestate = CharState_None;
         }
 
         if(movestate != CharState_None && !isTurning())

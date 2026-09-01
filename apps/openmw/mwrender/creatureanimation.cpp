@@ -32,11 +32,17 @@ CreatureAnimation::CreatureAnimation(const MWWorld::Ptr &ptr,
 
     if(!model.empty())
     {
-        setObjectRoot(model, false, false, true);
+        std::string effectiveModel = model;
+        const std::string ridingModel = "meshes\\arena_riding\\saddled_guar.nif";
+        if (Misc::StringUtils::ciEqual(mPtr.getCellRef().getRefId(), "guar_pack")
+            && mResourceSystem->getVFS()->exists(ridingModel))
+            effectiveModel = ridingModel;
+
+        setObjectRoot(effectiveModel, false, false, true);
 
         if((ref->mBase->mFlags&ESM::Creature::Bipedal))
-            addAnimSource(Settings::Manager::getString("xbaseanim", "Models"), model);
-        addAnimSource(model, model);
+            addAnimSource(Settings::Manager::getString("xbaseanim", "Models"), effectiveModel);
+        addAnimSource(effectiveModel, effectiveModel);
     }
 }
 

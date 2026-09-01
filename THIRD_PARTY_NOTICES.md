@@ -13,3 +13,7 @@ Documentation for bundled Arena interaction/dynamic-animation resources is retai
 
 ## Morrowind
 Morrowind and related names/assets are property of Bethesda Softworks and their respective owners. ArenaMW does not include the original game data and requires a legal copy.
+
+## Immersive Riding 1.4 assets
+
+Arena riding uses selected NIF/KF/DDS assets from the user-supplied **Immersive Riding 1.4** package. Keep the original mod author's distribution and licensing terms when redistributing these assets. ArenaMW/ArenaMP does not require the original ESP/OMWAddon/Lua scripts at runtime.

@@ -65,3 +65,7 @@ See [Building ArenaMW](docs/BUILDING.md), [feature overview](docs/FEATURES.md), 
 | `docs/` | ArenaMW documentation plus retained upstream OpenMW history |
 
 ArenaMW is an independent fork. OpenMW, TES3MP, EncoreMP contributors and Bethesda Softworks do not endorse this project.
+
+## Riding animations
+
+Y004s embeds the required Immersive Riding animation/model resources directly in the engine resource tree. `guar_pack` uses a saddled visual and authored guar locomotion/attack cycles; the player uses a short saddling transition plus seated idle/walk/gallop/turn poses. No ESP, OMWAddon or OpenMW Lua dependency is required.
