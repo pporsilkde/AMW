@@ -82,3 +82,7 @@ This file consolidates ArenaMW development notes that previously existed as sepa
 ## Foundation through X011
 - Established ArenaMW as a standalone OpenMW 0.47 branch.
 - Ported Arena gameplay balance, XP leveling, equipment requirements, Refined Alchemy/poisons, interaction animations, Arena dialogue/HUD, QuickLoot, HDR/Bloom/PBR/water work, object placement and related single-player systems.
+
+## Y005s-r1
+
+- Fixed MSVC build failure in `mwrender/creatureanimation.cpp` by including the full `VFS::Manager` definition required by the riding-model existence check.
