@@ -1,5 +1,6 @@
-ArenaMW Y002s
+ArenaMW Y003s
 Base engine: OpenMW 0.47.0
 Profile: standalone / single-player
-Source cleanup generation: Y002s
-Base snapshot: ArenaMW Y001s
+Source cleanup generation: Y003s
+Base snapshot: ArenaMW Y002s
+Feature focus: native engine-only guar_pack riding foundation

@@ -505,7 +505,9 @@ namespace MWInput
                 MWBase::Environment::get().getWindowManager()->cycleWeapon(true);
             break;
         case A_Sneak:
-            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            if (MWBase::Environment::get().getWorld()->getPlayer().isMounted())
+                MWBase::Environment::get().getWorld()->getPlayer().requestDismount();
+            else if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
                 MWBase::Environment::get().getWorld()->resetPhysicsGrabTransform();
             else
             {

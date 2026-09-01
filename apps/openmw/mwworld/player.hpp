@@ -5,6 +5,7 @@
 
 #include "../mwworld/refdata.hpp"
 #include "../mwworld/livecellref.hpp"
+#include "../mwworld/ptr.hpp"
 
 #include "../mwmechanics/drawstate.hpp"
 #include "../mwmechanics/stat.hpp"
@@ -59,6 +60,15 @@ namespace MWWorld
         bool mAttackingOrSpell;
         bool mJumping;
 
+        // Y003s: native riding state. The mount remains an ordinary creature;
+        // only its movement authority is temporarily driven by player input.
+        MWWorld::Ptr mMount;
+        float mMountLeftRight;
+        float mMountForwardBackward;
+        float mMountYawDelta;
+        bool mMountRun;
+        bool mDismountSneakLatch;
+
     public:
 
         Player(const ESM::NPC *player);
@@ -92,6 +102,15 @@ namespace MWWorld
 
         /// Activate the object under the crosshair, if any
         void activate();
+
+        /// Y003s native riding. `guar_pack` is the engine-level rideable mount.
+        bool isMounted() const;
+        MWWorld::Ptr getMount() const;
+        bool tryMount(const MWWorld::Ptr& mount);
+        void requestDismount();
+        void dismount();
+        void applyMountControls(float duration);
+        void updateRiding();
 
         bool getAutoMove() const;
         void setAutoMove (bool enable);

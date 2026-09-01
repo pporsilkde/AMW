@@ -2,6 +2,22 @@
 
 This file consolidates ArenaMW development notes that previously existed as separate root-level patch, review, checksum and harness files. Original OpenMW 0.47 history is preserved in `docs/upstream/OPENMW_CHANGELOG.md`.
 
+## Y003s — native guar riding foundation
+
+### Added
+- Engine-level riding for any live creature reference whose base/ref ID is `guar_pack`; no ESP, OMWAddon or OpenMW Lua runtime is required.
+- Activating `guar_pack` mounts it, redirects forward/back/run/autorun and A/D steering to the guar, and keeps mouse/stick yaw steering available.
+- Sneak is the dedicated dismount action. A release latch prevents the same press from immediately leaving the player crouched after dismounting.
+- The rider remains an ordinary player actor and can use the existing weapon/spell combat path while mounted.
+- The ridden guar remains an ordinary damageable creature: its existing health/death mechanics are authoritative, and death automatically forces a safe dismount.
+- A green mount-health row is pinned directly above the stamina area while riding, even when ordinary NPC combat bars are disabled.
+
+### Engine behavior
+- The guar's existing AI sequence is preserved. Rider locomotion/steering overrides AI movement after actor AI and immediately before physics, so Wander/Combat resumes naturally on dismount; the player is attached to the guar after physics.
+- The player's internal movement collision/gravity is disabled while mounted but its external collision body stays enabled, so mounted combat does not make the rider non-targetable.
+- Doors/containers are not activated while mounted in this first foundation build; dismount first. Exterior cell traversal remains possible.
+- Y003s intentionally reuses the normal player/guar models and animations. Dedicated seated animations/models, mounted inventory actions and save-game persistence of the mounted state are later layers, not required by this engine-only foundation.
+
 ## Y002s — CharGen crosshair continuity
 
 ### Changed

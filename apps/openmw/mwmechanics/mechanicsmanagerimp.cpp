@@ -343,7 +343,12 @@ namespace MWMechanics
         mActors.update(duration, paused);
         mObjects.update(duration, paused);
         if (!paused)
+        {
+            // Y003s: AI has had its turn; player mount controls are authoritative
+            // for the ridden guar immediately before the physics step.
+            MWBase::Environment::get().getWorld()->getPlayer().applyMountControls(duration);
             MWWorld::ActionTeleport::updateDelayedTeleports(duration);
+        }
     }
 
     void MechanicsManager::processChangedSettings(const Settings::CategorySettingVector &changed)
