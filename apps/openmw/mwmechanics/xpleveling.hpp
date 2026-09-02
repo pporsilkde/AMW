@@ -21,7 +21,10 @@ namespace MWMechanics
         bool isEnabled();
 
         float getXpForNextLevel(const MWWorld::Ptr& player);
+        // Base price from current skill value only (1/2/3/4 SP).
         int getSkillPointCost(float skillBase);
+        // Final class-aware price: Major x1, Minor x2, Misc x3.
+        int getSkillPointCost(const MWWorld::Ptr& player, int skillId, float skillBase);
 
         // Converts a normal OpenMW skill-use event into character XP. The
         // original skill itself is not advanced while native XP leveling is on.

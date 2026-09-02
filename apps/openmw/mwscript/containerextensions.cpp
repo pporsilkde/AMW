@@ -152,24 +152,9 @@ namespace MWScript
                     else
                         addToStore(itemPtr, count, ptr, store);
 
-                    // Spawn a messagebox (only for items added to player's inventory and if player is talking to someone)
-                    if (ptr == MWBase::Environment::get().getWorld ()->getPlayerPtr() )
-                    {
-                        // The two GMST entries below expand to strings informing the player of what, and how many of it has been added to their inventory
-                        std::string msgBox;
-                        std::string itemName = itemPtr.getClass().getName(itemPtr);
-                        if (count == 1)
-                        {
-                            msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage60}");
-                            msgBox = ::Misc::StringUtils::format(msgBox, itemName);
-                        }
-                        else
-                        {
-                            msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage61}");
-                            msgBox = ::Misc::StringUtils::format(msgBox, count, itemName);
-                        }
-                        MWBase::Environment::get().getWindowManager()->messageBox(msgBox, MWGui::ShowInDialogueMode_Only);
-                    }
+                    // Arena Y013: automatic AddItem changes for the player are already
+                    // represented by the right-side item notification feed. The old
+                    // sNotifyMessage60/61 centered MessageBox is intentionally suppressed.
                 }
         };
 

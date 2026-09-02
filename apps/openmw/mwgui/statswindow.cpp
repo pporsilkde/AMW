@@ -703,7 +703,7 @@ namespace MWGui
                     const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
                     const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
                     const float base = stats.getSkill(skillId).getBase();
-                    const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
+                    const int cost = MWMechanics::XPLeveling::getSkillPointCost(playerPtr, skillId, base);
 
                     std::string description = skill->mDescription;
                     if (!description.empty())
@@ -748,7 +748,7 @@ namespace MWGui
                 const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
                 const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
                 const float base = stats.getSkill(skillId).getBase();
-                const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
+                const int cost = MWMechanics::XPLeveling::getSkillPointCost(playerPtr, skillId, base);
                 const bool maxed = base >= 100.f;
                 const bool affordable = !maxed && stats.getSkillPoints() >= cost;
                 const int buttonLeft = coord2.left + coord2.width + 4;

@@ -360,6 +360,33 @@ namespace MWMechanics
             return 4;
         }
 
+        int getSkillPointCost(const MWWorld::Ptr& player, int skillId, float skillBase)
+        {
+            const int baseCost = getSkillPointCost(skillBase);
+            if (player.isEmpty() || !player.getClass().isNpc()
+                || skillId < 0 || skillId >= ESM::Skill::Length)
+                return baseCost * 3;
+
+            // Arena Y014: class importance scales the normal XP/SP price.
+            // ESM::Class stores [minor, major] skill columns.
+            const ESM::Class& class_ = getPlayerClass(player);
+            int multiplier = 3; // Miscellaneous skill.
+            for (int i = 0; i < 5; ++i)
+            {
+                if (class_.mData.mSkills[i][1] == skillId)
+                {
+                    multiplier = 1; // Major.
+                    break;
+                }
+                if (class_.mData.mSkills[i][0] == skillId)
+                {
+                    multiplier = 2; // Minor.
+                    break;
+                }
+            }
+            return baseCost * multiplier;
+        }
+
         void awardSkillUse(const MWWorld::Ptr& player, int skillId, int usageType,
             float extraFactor, const ESM::Class& class_)
         {
@@ -625,7 +652,7 @@ namespace MWMechanics
                 return false;
             }
 
-            const int cost = getSkillPointCost(before);
+            const int cost = getSkillPointCost(player, skillId, before);
             if (stats.getSkillPoints() < cost)
             {
                 std::ostringstream message;

@@ -1,5 +1,18 @@
 # ArenaMW changelog
 
+## Y014s — class-weighted Skill Point costs
+
+- XP skill purchases now keep the existing base 1/2/3/4 SP curve by current skill value, then apply the player class importance multiplier: Major ×1, Minor ×2, Misc ×3.
+- The Statistics window tooltip and +1 button use the same class-aware cost as the actual purchase, so displayed and charged SP cannot diverge.
+- All Y013s HUD dedupe and Y012s water/XP/death/jail fixes remain included.
+
+
+## Y013s — HUD item notification dedupe
+
+- Harvest and scripted AddItem changes for the player no longer also create the old centered sNotifyMessage60/61 MessageBox when the right HUD item feed already reports the inventory delta.
+- All Y012s water/XP/cooldown fixes are preserved.
+
+
 ## Y012s — shader-water ripple isolation + XP HUD/penalties
 
 - Legacy osgParticle movement rings are now disabled whenever shader water is active; turning shader ripples off no longer re-enables the old effect.
