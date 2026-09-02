@@ -187,6 +187,12 @@ namespace MWGui
         struct HudNotificationState
         {
             MyGUI::Widget* mPanel = nullptr;
+            // Arena Y010: borderless three-step shadow creates a cheap right-weighted
+            // gradient without adding texture resources. The parent itself is
+            // transparent, so the event feed no longer draws an MW_Box frame.
+            MyGUI::Widget* mShadeLeft = nullptr;
+            MyGUI::Widget* mShadeMiddle = nullptr;
+            MyGUI::Widget* mShadeRight = nullptr;
             MyGUI::ImageBox* mIcon = nullptr;
             MyGUI::TextBox* mTitle = nullptr;
             MyGUI::TextBox* mValue = nullptr;
@@ -201,6 +207,11 @@ namespace MWGui
             int mSpellTimestampDay = -1;
             float mSpellTimestampHour = -1.f;
             int mAmount = 0;
+            // Arena Y010: for pickup/gold events, keep the committed inventory
+            // total so a delta can be rendered as +5 (10). A negative value means
+            // that the item did not exist before this pickup and the compact +5
+            // form should be used.
+            int mTotalCount = -1;
             float mAge = 0.f;
             float mLifetime = 4.2f;
             std::uint64_t mSequence = 0;
@@ -314,7 +325,7 @@ namespace MWGui
         void scanHudEventSources();
         HudNotificationState* pushHudNotification(HudEventKind kind, const std::string& key,
             const std::string& icon, const std::string& title, int amount,
-            const std::string& valueText = std::string());
+            const std::string& valueText = std::string(), int totalCount = -1);
         void resetHudEventFeed();
         void refreshHudMagicDurations();
         // Y009: only a strong "inventory was mostly removed" signature arms the

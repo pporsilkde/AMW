@@ -468,12 +468,33 @@ namespace MWGui
         for (std::size_t i = 0; i < hudNotificationPoolSize; ++i)
         {
             HudNotificationState state;
+            // Arena Y010: use a transparent parent and a soft three-step shadow
+            // instead of HUD_Box_Transparent (which is only an MW_Box border).
+            // The darker end faces the right screen edge, so the card visually
+            // dissolves into the game world toward the left. No new texture is
+            // required and no per-frame widgets are allocated.
             state.mPanel = mGameplayHud->createWidget<MyGUI::Widget>(
-                "HUD_Box_Transparent", MyGUI::IntCoord(0, 0, 300, 38),
+                "", MyGUI::IntCoord(0, 0, 300, 38),
                 MyGUI::Align::Left | MyGUI::Align::Top,
                 "HudEventCard" + MyGUI::utility::toString(i));
             state.mPanel->setNeedMouseFocus(false);
             state.mPanel->setVisible(false);
+
+            state.mShadeLeft = state.mPanel->createWidget<MyGUI::Widget>(
+                "BlackBG", MyGUI::IntCoord(0, 0, 92, 38), MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventShadeLeft" + MyGUI::utility::toString(i));
+            state.mShadeMiddle = state.mPanel->createWidget<MyGUI::Widget>(
+                "BlackBG", MyGUI::IntCoord(92, 0, 96, 38), MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventShadeMiddle" + MyGUI::utility::toString(i));
+            state.mShadeRight = state.mPanel->createWidget<MyGUI::Widget>(
+                "BlackBG", MyGUI::IntCoord(188, 0, 112, 38), MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventShadeRight" + MyGUI::utility::toString(i));
+            state.mShadeLeft->setNeedMouseFocus(false);
+            state.mShadeMiddle->setNeedMouseFocus(false);
+            state.mShadeRight->setNeedMouseFocus(false);
+            state.mShadeLeft->setAlpha(0.12f);
+            state.mShadeMiddle->setAlpha(0.22f);
+            state.mShadeRight->setAlpha(0.34f);
 
             state.mIcon = state.mPanel->createWidget<MyGUI::ImageBox>(
                 "ImageBox", MyGUI::IntCoord(4, 4, 30, 30), MyGUI::Align::Left | MyGUI::Align::VCenter,
@@ -481,7 +502,7 @@ namespace MWGui
             state.mIcon->setNeedMouseFocus(false);
 
             state.mTitle = state.mPanel->createWidget<MyGUI::TextBox>(
-                "SandBrightText", MyGUI::IntCoord(40, 1, 196, 36),
+                "SandBrightText", MyGUI::IntCoord(40, 1, 170, 36),
                 MyGUI::Align::Left | MyGUI::Align::VCenter,
                 "HudEventTitle" + MyGUI::utility::toString(i));
             state.mTitle->setNeedMouseFocus(false);
@@ -491,7 +512,7 @@ namespace MWGui
             state.mTitle->setTextShadowColour(MyGUI::Colour::Black);
 
             state.mValue = state.mPanel->createWidget<MyGUI::TextBox>(
-                "SandBrightText", MyGUI::IntCoord(236, 1, 58, 36),
+                "SandBrightText", MyGUI::IntCoord(210, 1, 86, 36),
                 MyGUI::Align::Right | MyGUI::Align::VCenter,
                 "HudEventValue" + MyGUI::utility::toString(i));
             state.mValue->setNeedMouseFocus(false);
@@ -2568,10 +2589,20 @@ namespace MWGui
 
     HUD::HudNotificationState* HUD::pushHudNotification(HudEventKind kind, const std::string& key,
         const std::string& icon, const std::string& title, int amount,
-        const std::string& valueText)
+        const std::string& valueText, int totalCount)
     {
         if (title.empty() || mHudNotifications.empty())
             return nullptr;
+
+        const auto updatePickupCaption = [](HudNotificationState& state)
+        {
+            if (!state.mValue)
+                return;
+            std::string caption = "+" + MyGUI::utility::toString(state.mAmount);
+            if (state.mTotalCount > state.mAmount)
+                caption += " (" + MyGUI::utility::toString(state.mTotalCount) + ")";
+            state.mValue->setCaption(caption);
+        };
 
         // Pickups of the same item (especially gold) coalesce while their card is
         // alive. This turns rapid +5/+20/+100 changes into one stable +125 card.
@@ -2583,12 +2614,11 @@ namespace MWGui
                     continue;
 
                 state.mAmount += amount;
+                if (totalCount > 0)
+                    state.mTotalCount = totalCount;
                 state.mAge = 0.f;
                 state.mSequence = ++mHudNotificationSequence;
-                if (state.mValue)
-                    state.mValue->setCaption(kind == HudEventKind::Gold
-                        ? "+" + MyGUI::utility::toString(state.mAmount)
-                        : "x" + MyGUI::utility::toString(state.mAmount));
+                updatePickupCaption(state);
                 return &state;
             }
         }
@@ -2616,6 +2646,7 @@ namespace MWGui
         target->mTitleText = title;
         target->mValueText = valueText;
         target->mAmount = std::max(1, amount);
+        target->mTotalCount = totalCount > 0 ? totalCount : -1;
         target->mSpellId.clear();
         target->mSpellCasterActorId = -1;
         target->mSpellTimestampDay = -1;
@@ -2629,10 +2660,8 @@ namespace MWGui
             target->mTitle->setCaption(title);
         if (target->mValue)
         {
-            if (kind == HudEventKind::Gold)
-                target->mValue->setCaption("+" + MyGUI::utility::toString(target->mAmount));
-            else if (kind == HudEventKind::Item)
-                target->mValue->setCaption("x" + MyGUI::utility::toString(target->mAmount));
+            if (kind == HudEventKind::Gold || kind == HudEventKind::Item)
+                updatePickupCaption(*target);
             else
                 target->mValue->setCaption(valueText);
         }
@@ -2755,8 +2784,12 @@ namespace MWGui
                 const int gained = entry.second.mCount - previous;
                 if (gained <= 0)
                     continue;
+                // Arena Y010: if this stack already existed before the pickup,
+                // append the committed total, e.g. +5 (10). First acquisition
+                // stays compact (+5). Later coalesced pickups update both numbers.
+                const int totalCount = previous > 0 ? entry.second.mCount : -1;
                 pushHudNotification(entry.first == "__arena_gold__" ? HudEventKind::Gold : HudEventKind::Item,
-                    entry.first, entry.second.mIcon, entry.second.mName, gained);
+                    entry.first, entry.second.mIcon, entry.second.mName, gained, std::string(), totalCount);
             }
         }
         mHudInventorySnapshot.clear();
@@ -2916,12 +2949,14 @@ namespace MWGui
         if (mGameplayHud)
             origin = mGameplayHud->getAbsolutePosition();
         const MyGUI::IntSize viewSize = MyGUI::RenderManager::getInstance().getViewSize();
-        int anchorRight = viewSize.width - 10 - origin.left;
+        // Arena Y010: event cards hug the actual right edge with a 2 px safety
+        // margin. The stamina frame remains the vertical anchor only; its own
+        // horizontal inset no longer pushes the feed inward.
+        int anchorRight = viewSize.width - 2 - origin.left;
         int anchorBottom = viewSize.height - 44 - origin.top;
         if (mFatigueFrame)
         {
             const MyGUI::IntCoord frame = mFatigueFrame->getAbsoluteCoord();
-            anchorRight = frame.left + frame.width - origin.left;
             anchorBottom = frame.top - origin.top - CombatBar::sDockGap
                 - static_cast<int>(dockedRows) * CombatBar::sDockRowStride - 8;
         }
@@ -2961,6 +2996,7 @@ namespace MWGui
             state.mActive = false;
             state.mAge = 0.f;
             state.mAmount = 0;
+            state.mTotalCount = -1;
             state.mKey.clear();
             state.mSpellId.clear();
             state.mSpellCasterActorId = -1;

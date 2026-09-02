@@ -1,5 +1,14 @@
 # ArenaMW changelog
 
+## Y010s — HUD event-feed visual polish
+
+- Moved event cards to a 2 px right-edge margin instead of inheriting the stamina bar's horizontal inset.
+- Removed the framed `HUD_Box_Transparent` skin from event cards.
+- Added a resource-free three-step `BlackBG` shadow, fading from lightly transparent on the left to semi-transparent at the right edge.
+- Pickup and gold cards now use `+delta`; when the stack already existed, the committed inventory total is appended as `+5 (10)`.
+- Coalesced repeated pickups keep accumulating the delta while refreshing the displayed committed total.
+
+
 ## Y009s — HUD/event-feed stability
 
 - Ported the pooled combat-bar render-time Track reassertion from ArenaMP, including hiding a newly reused/re-skinned slot until verified HP exists for that actor.

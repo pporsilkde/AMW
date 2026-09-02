@@ -1,5 +1,10 @@
-ArenaMW Y002s
+ArenaMW Y010s
 Base engine: OpenMW 0.47.0
 Profile: standalone / single-player
-Source cleanup generation: Y002s
-Base snapshot: ArenaMW Y001s
+Source cleanup generation: Y010s
+Cumulative base: ArenaMW Y002s
+Riding subsystem: not included
+HUD event feed: enabled
+HUD event feed style: right-edge borderless gradient
+Pickup total counts: enabled
+Combat-bar pooled Track reassertion: enabled
