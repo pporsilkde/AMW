@@ -3027,12 +3027,6 @@ namespace MWMechanics
             if (avoidCollisions)
                 predictAndAvoidCollisions(duration);
 
-            // Riding control must be applied after AI/collision steering has written
-            // its desired movement, but before CharacterController::update queues
-            // physics movement. Applying it after mActors.update is one frame too late
-            // and lets the guar's AI drive the mount.
-            world->getPlayer().applyMountControls(duration);
-
             timerUpdateHeadTrack += duration;
             timerUpdateEquippedLight += duration;
             timerUpdateHello += duration;

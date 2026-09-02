@@ -31,7 +31,6 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/esmstore.hpp"
-#include "../mwworld/player.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
@@ -1869,7 +1868,6 @@ namespace MWGui
         {
             state.mActor = MWWorld::Ptr();
             state.mAlly = false;
-            state.mMount = false;
             // X024: clear the smoothed geometry too. Keeping it would make the next
             // actor to land in this slot start its fade-in at the previous actor's
             // screen position and slide across the view.
@@ -1962,10 +1960,7 @@ namespace MWGui
     {
         dt = std::max(0.f, dt);
 
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-        const MWWorld::Ptr ridingMount = world ? world->getPlayer().getMount() : MWWorld::Ptr();
-        const bool combatBarsEnabled = npcBarShowsCombat(getNpcBarMode());
-        const bool enabled = (combatBarsEnabled || !ridingMount.isEmpty())
+        const bool enabled = npcBarShowsCombat(getNpcBarMode())
             && mGameplayHud && mGameplayHud->getVisible()
             && !MWBase::Environment::get().getWindowManager()->containsMode(GM_Dialogue);
         if (!enabled)
@@ -1974,6 +1969,7 @@ namespace MWGui
             return;
         }
 
+        MWBase::World* world = MWBase::Environment::get().getWorld();
         MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
         if (!world || !mechanics)
         {
@@ -1999,33 +1995,26 @@ namespace MWGui
             {
                 MWWorld::Ptr mActor;
                 bool mAlly = false;
-                bool mMount = false;
                 float mDistanceSquared = 0.f;
             };
 
             std::map<MWWorld::Ptr, bool> participants; // false = enemy, true = ally
-            if (!ridingMount.isEmpty())
-                participants[ridingMount] = true;
-
-            if (combatBarsEnabled)
+            for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(player))
             {
-                for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(player))
-                {
-                    if (!enemy.isEmpty())
-                        participants[enemy] = false;
-                }
+                if (!enemy.isEmpty())
+                    participants[enemy] = false;
+            }
 
-                std::set<MWWorld::Ptr> allies;
-                mechanics->getActorsSidingWith(player, allies);
-                for (const MWWorld::Ptr& ally : allies)
-                {
-                    if (ally.isEmpty() || participants.count(ally) || !ally.getClass().isActor())
-                        continue;
+            std::set<MWWorld::Ptr> allies;
+            mechanics->getActorsSidingWith(player, allies);
+            for (const MWWorld::Ptr& ally : allies)
+            {
+                if (ally.isEmpty() || participants.count(ally) || !ally.getClass().isActor())
+                    continue;
 
-                    const MWMechanics::CreatureStats& stats = ally.getClass().getCreatureStats(ally);
-                    if (!stats.isDead() && stats.getAiSequence().isInCombat())
-                        participants[ally] = true;
-                }
+                const MWMechanics::CreatureStats& stats = ally.getClass().getCreatureStats(ally);
+                if (!stats.isDead() && stats.getAiSequence().isInCombat())
+                    participants[ally] = true;
             }
 
             const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
@@ -2046,8 +2035,7 @@ namespace MWGui
                 const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
                 if (stats.isDead() || stats.getHealth().getCurrent() <= 0.f)
                     continue;
-                const bool isMount = !ridingMount.isEmpty() && actor == ridingMount;
-                if (!isMount && !world->getLOS(player, actor))
+                if (!world->getLOS(player, actor))
                     continue;
 
                 const osg::Vec3f delta = actor.getRefData().getPosition().asVec3() - playerPosition;
@@ -2058,16 +2046,13 @@ namespace MWGui
                 Candidate candidate;
                 candidate.mActor = actor;
                 candidate.mAlly = participant.second;
-                candidate.mMount = isMount;
-                candidate.mDistanceSquared = isMount ? -1.f : distanceSquared;
+                candidate.mDistanceSquared = distanceSquared;
                 candidates.push_back(candidate);
             }
 
             std::sort(candidates.begin(), candidates.end(),
                 [](const Candidate& left, const Candidate& right)
                 {
-                    if (left.mMount != right.mMount)
-                        return left.mMount;
                     return left.mDistanceSquared < right.mDistanceSquared;
                 });
 
@@ -2095,7 +2080,6 @@ namespace MWGui
                         continue;
 
                     state.mAlly = candidates[c].mAlly;
-                    state.mMount = candidates[c].mMount;
                     candidatePlaced[c] = true;
                     slotTaken[i] = true;
                     stillFighting = true;
@@ -2109,7 +2093,6 @@ namespace MWGui
                     // actor held in the stack is released at once so the entries above
                     // it start sliding down immediately.
                     state.mActor = MWWorld::Ptr();
-                    state.mMount = false;
                     state.mDocked = false;
                     state.mDockRow = -1;
                 }
@@ -2143,7 +2126,6 @@ namespace MWGui
                 CombatHealthBarState& state = mCombatHealthBars[freeSlots[nextFree]];
                 state.mActor = candidates[c].mActor;
                 state.mAlly = candidates[c].mAlly;
-                state.mMount = candidates[c].mMount;
                 // A fresh occupant starts from scratch: no inherited screen position,
                 // no inherited row in the stack, no inherited health reading.
                 state.mHasScreenState = false;
@@ -2151,11 +2133,10 @@ namespace MWGui
                 state.mTargetAlpha = 0.f;
                 state.mDisplayHealth = -1.f;
                 state.mLingerTimer = 0.f;
-                state.mDocked = state.mMount;
-                state.mDockBlend = state.mMount ? 1.f : 0.f;
+                state.mDocked = false;
+                state.mDockBlend = 0.f;
                 state.mDockSwitchTimer = 0.f;
-                state.mDockSequence = state.mMount ? 0 : ++mCombatDockSequenceCounter;
-                state.mDockRow = state.mMount ? 0 : -1;
+                state.mDockRow = -1;
                 state.mNameCaption.clear();
                 slotTaken[freeSlots[nextFree]] = true;
                 ++nextFree;
@@ -2292,18 +2273,11 @@ namespace MWGui
             // Dock decision: two thresholds plus a dwell timer. An actor pacing
             // around the 15 pace mark holds the new side for sDockSwitchDelay before
             // anything moves, and only gives the row back at 18 paces.
-            const bool wantsDock = state.mMount || (state.mDocked
+            const bool wantsDock = state.mDocked
                 ? distance < CombatBar::sDockExitDistance
-                : distance < CombatBar::sDockEnterDistance);
+                : distance < CombatBar::sDockEnterDistance;
 
-            if (state.mMount)
-            {
-                state.mDocked = true;
-                state.mDockBlend = 1.f;
-                state.mDockSequence = 0;
-                state.mDockSwitchTimer = 0.f;
-            }
-            else if (wantsDock == state.mDocked)
+            if (wantsDock == state.mDocked)
             {
                 state.mDockSwitchTimer = 0.f;
             }

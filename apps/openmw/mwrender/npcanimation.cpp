@@ -542,14 +542,6 @@ void NpcAnimation::updateNpcBase()
 
         addAnimSource(smodel, smodel);
 
-        // Built-in riding clips from Immersive Riding. They are unique groups and
-        // are loaded only for the local player's ordinary third-person skeleton.
-        if (mPtr == MWBase::Environment::get().getWorld()->getPlayerPtr() && !isWerewolf)
-        {
-            addSingleAnimSource("animations\\arena_riding\\player\\riding_misc.kf", smodel);
-            addSingleAnimSource("animations\\arena_riding\\player\\riding_pose.kf", smodel);
-        }
-
         if(!isWerewolf && Misc::StringUtils::lowerCase(mNpc->mRace).find("argonian") != std::string::npos)
             addAnimSource("meshes\\xargonian_swimkna.nif", smodel);
 
@@ -615,9 +607,6 @@ void NpcAnimation::updateNpcBase()
             addAnimSource(base, smodel);
 
         addAnimSource(smodel, smodel);
-
-        if (mPtr == MWBase::Environment::get().getWorld()->getPlayerPtr() && !isWerewolf)
-            addSingleAnimSource("animations\\arena_riding\\player1st\\riding_misc.kf", smodel);
 
         mObjectRoot->setNodeMask(Mask_FirstPerson);
         mObjectRoot->addCullCallback(new OverrideFieldOfViewCallback(mFirstPersonFieldOfView));

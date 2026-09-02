@@ -1,4 +1,4 @@
-# ArenaMW Y003s
+# ArenaMW Y002s
 
 [Русский](README_RU.md) · **English**
 
@@ -10,19 +10,12 @@ ArenaMW is the standalone/single-player branch of the Arena engine work. It is b
 
 | Component | Value |
 | --- | --- |
-| ArenaMW source | **Y003s** |
+| ArenaMW source | **Y002s** |
 | Engine base | OpenMW 0.47.0 |
 | Runtime | Single-player `openmw` |
 | Launcher | `openmw-launcher` |
 | Network/server layer | Not included |
 | Primary release build | Windows x64 |
-
-## Y003s highlights
-
-- Native engine-only riding: activate a living `guar_pack` to mount it; no ESP/OMWAddon is required.
-- Forward/back, autorun, run and steering drive the guar; Sneak dismounts. Normal player weapon/spell combat remains available while mounted.
-- The guar keeps its normal creature HP/death rules. Its health is shown as a dedicated green row above the stamina HUD while mounted and death forces a dismount.
-- The first foundation deliberately reuses existing models/animations and blocks door/container activation while mounted. Dedicated rider animation/model and mounted-state save persistence are future layers.
 
 ## Y002s highlights
 
@@ -65,7 +58,3 @@ See [Building ArenaMW](docs/BUILDING.md), [feature overview](docs/FEATURES.md), 
 | `docs/` | ArenaMW documentation plus retained upstream OpenMW history |
 
 ArenaMW is an independent fork. OpenMW, TES3MP, EncoreMP contributors and Bethesda Softworks do not endorse this project.
-
-## Riding animations
-
-Y004s embeds the required Immersive Riding animation/model resources directly in the engine resource tree. `guar_pack` uses a saddled visual and authored guar locomotion/attack cycles; the player uses a short saddling transition plus seated idle/walk/gallop/turn poses. No ESP, OMWAddon or OpenMW Lua dependency is required.

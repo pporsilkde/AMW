@@ -3252,9 +3252,6 @@ namespace MWWorld
             updatePhysicsObjects(duration);
         }
 
-        if (!paused)
-            mPlayer->updateRiding(duration);
-
         updatePlayer();
 
         mPhysics->debugDraw();

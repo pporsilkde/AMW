@@ -37,7 +37,3 @@ ArenaMW runs local OpenMW world state only. It does not build or require the TES
 
 ## Experimental/limited areas
 Ragdoll, some advanced rendering paths and Android/gl4es support remain experimental. The source contains Android/gl4es-related code, but Y001s release validation is centered on the Windows x64 workflow.
-
-## Native riding (Y003s)
-
-`guar_pack` can be ridden directly by the engine with no plugin content. Activation mounts, Sneak dismounts, movement is applied to the creature before physics, and the rider is reattached after physics. The mount retains normal creature HP/death and receives a dedicated docked HUD health row. This foundation intentionally does not yet serialize mounted state or provide a dedicated seated animation.

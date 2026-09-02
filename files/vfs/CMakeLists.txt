@@ -52,8 +52,6 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
 # Consuming Animated pipe/smoke models reference these texture names directly.
 # Keep them at the VFS texture root to preserve the paths embedded in the NIFs.
 list(APPEND BUILTIN_VFS_FILES
-    "textures/tx_fabric_bag_01.dds"
-    "textures/tx_fabric_bag_02.dds"
     "textures/cigar logo.dds"
     "textures/cigar wrap.dds"
     "textures/metal_30w.dds"

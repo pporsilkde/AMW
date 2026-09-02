@@ -1,6 +1,5 @@
-ArenaMW Y005s
+ArenaMW Y002s
 Base engine: OpenMW 0.47.0
 Profile: standalone / single-player
-Source cleanup generation: Y005s
-Base snapshot: ArenaMW Y004s
-Feature focus: riding control authority, walk/gallop speed separation and braking
+Source cleanup generation: Y002s
+Base snapshot: ArenaMW Y001s

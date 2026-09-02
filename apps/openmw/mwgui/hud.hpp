@@ -114,7 +114,6 @@ namespace MWGui
             MyGUI::TextBox* mName = nullptr;
             MWWorld::Ptr mActor;
             bool mAlly = false;
-            bool mMount = false; // Y003s: ridden guar, always docked by the stamina bar.
             // Skin the widget is actually wearing right now. Kept apart from mAlly:
             // clearing a slot resets mAlly but must not claim the widget went back to
             // the red skin, otherwise the next enemy inherits a green bar.
