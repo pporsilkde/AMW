@@ -1,5 +1,12 @@
 # ArenaMW changelog
 
+## Y012s — shader-water ripple isolation + XP HUD/penalties
+
+- Legacy osgParticle movement rings are now disabled whenever shader water is active; turning shader ripples off no longer re-enables the old effect.
+- XP cards are iconless and localized. Gains use green text/backing, losses red, neutral XP statuses black.
+- Death/jail wipe all current-level XP only. Levels, Skill Points and skills are preserved; XP-mode jail skips vanilla random skill changes.
+- A death at exactly zero XP adds current level × 5 seconds to the ordinary respawn delay.
+
 ## Y011s — unified HUD notifications
 
 - Replaced the three-band Y010s event-card shadow with one uniform medium-opacity `BlackBG` backing (`0.22` alpha).

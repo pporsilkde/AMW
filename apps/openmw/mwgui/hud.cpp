@@ -2645,10 +2645,26 @@ namespace MWGui
         target->mSequence = ++mHudNotificationSequence;
         target->mActive = true;
 
+        // A recycled XP slot must not tint the next pickup/spell card. Restore
+        // the normal feed presentation first, then XP can deliberately restyle it.
+        const MyGUI::Colour headerColour = MyGUI::Colour::parse(
+            MyGUI::LanguageManager::getInstance().replaceTags("#{fontcolour=header}"));
+        if (target->mShade)
+        {
+            target->mShade->setColour(MyGUI::Colour::Black);
+            target->mShade->setAlpha(0.22f);
+        }
         if (target->mTitle)
+        {
             target->mTitle->setCaption(title);
+            target->mTitle->setTextColour(headerColour);
+            target->mTitle->setCoord(icon.empty()
+                ? MyGUI::IntCoord(6, 1, 204, 36)
+                : MyGUI::IntCoord(40, 1, 170, 36));
+        }
         if (target->mValue)
         {
+            target->mValue->setTextColour(headerColour);
             if (kind == HudEventKind::Gold || kind == HudEventKind::Item)
                 updatePickupCaption(*target);
             else
@@ -2656,18 +2672,25 @@ namespace MWGui
         }
         if (target->mIcon)
         {
-            std::string resolved = icon;
-            if (resolved.empty())
-                resolved = "default icon.tga";
-            try
+            if (icon.empty())
             {
-                resolved = MWBase::Environment::get().getWindowManager()->correctIconPath(resolved);
+                target->mIcon->setImageTexture("");
+                target->mIcon->setVisible(false);
             }
-            catch (const std::exception&)
+            else
             {
-                resolved.clear();
+                std::string resolved = icon;
+                try
+                {
+                    resolved = MWBase::Environment::get().getWindowManager()->correctIconPath(resolved);
+                }
+                catch (const std::exception&)
+                {
+                    resolved.clear();
+                }
+                target->mIcon->setImageTexture(resolved);
+                target->mIcon->setVisible(true);
             }
-            target->mIcon->setImageTexture(resolved);
         }
         if (target->mPanel)
         {
@@ -2695,14 +2718,23 @@ namespace MWGui
 
     void HUD::pushExperienceNotification(float amount, const std::string& reason)
     {
-        if (!std::isfinite(amount) || std::fabs(amount) < 0.0001f || mHudNotifications.empty())
+        if (!std::isfinite(amount) || mHudNotifications.empty())
             return;
 
-        const std::string title = reason.empty() ? std::string("XP") : reason;
-        const std::string key = "experience:" + title;
+        const bool neutral = std::fabs(amount) < 0.0001f;
+        if (neutral && reason.empty())
+            return;
+
+        const std::string label = MyGUI::LanguageManager::getInstance().replaceTags(
+            "#{arenamp=xp.label.experience}");
+        const std::string title = reason.empty() ? label : label + ": " + reason;
+        const char* signClass = amount > 0.f ? "positive" : (amount < 0.f ? "negative" : "neutral");
+        const std::string key = std::string("experience:") + signClass + ":" + reason;
 
         const auto formatExperience = [](float value)
         {
+            if (std::fabs(value) < 0.0001f)
+                return std::string();
             std::ostringstream stream;
             if (value > 0.f)
                 stream << "+";
@@ -2714,28 +2746,63 @@ namespace MWGui
             return stream.str();
         };
 
-        // Repeated rewards from the same source coalesce just like repeated
-        // pickups. Different reasons remain separate cards so the player can
-        // still tell kill, quest, travel and trade rewards apart.
-        for (HudNotificationState& state : mHudNotifications)
+        const auto styleExperience = [](HudNotificationState& state, float value)
         {
-            if (!state.mActive || state.mKind != HudEventKind::Experience || state.mKey != key)
-                continue;
+            MyGUI::Colour textColour = MyGUI::Colour::White;
+            MyGUI::Colour background = MyGUI::Colour::Black;
+            float alpha = 0.28f;
+            if (value > 0.0001f)
+            {
+                textColour = MyGUI::Colour(0.42f, 1.0f, 0.42f);
+                background = MyGUI::Colour(0.08f, 0.30f, 0.10f);
+                alpha = 0.36f;
+            }
+            else if (value < -0.0001f)
+            {
+                textColour = MyGUI::Colour(1.0f, 0.48f, 0.48f);
+                background = MyGUI::Colour(0.36f, 0.07f, 0.07f);
+                alpha = 0.36f;
+            }
 
-            state.mNumericAmount += amount;
-            state.mAge = 0.f;
-            state.mSequence = ++mHudNotificationSequence;
+            if (state.mShade)
+            {
+                state.mShade->setColour(background);
+                state.mShade->setAlpha(alpha);
+            }
+            if (state.mTitle)
+                state.mTitle->setTextColour(textColour);
             if (state.mValue)
-                state.mValue->setCaption(formatExperience(state.mNumericAmount));
-            return;
+                state.mValue->setTextColour(textColour);
+        };
+
+        // Repeated gains/losses of the same sign and source coalesce. A loss can
+        // never merge into a gain, which keeps the colour semantics unambiguous.
+        if (!neutral)
+        {
+            for (HudNotificationState& state : mHudNotifications)
+            {
+                if (!state.mActive || state.mKind != HudEventKind::Experience || state.mKey != key)
+                    continue;
+
+                state.mNumericAmount += amount;
+                state.mAge = 0.f;
+                state.mSequence = ++mHudNotificationSequence;
+                if (state.mValue)
+                    state.mValue->setCaption(formatExperience(state.mNumericAmount));
+                styleExperience(state, state.mNumericAmount);
+                return;
+            }
         }
 
-        HudNotificationState* state = pushHudNotification(HudEventKind::Experience, key,
-            "icons\\k\\tx_attribute_luck.dds", title, 1, formatExperience(amount));
+        // XP deliberately has no texture icon. This also removes the old missing
+        // Luck icon that rendered as a pink square on installations without it.
+        HudNotificationState* state = pushHudNotification(
+            HudEventKind::Experience, key, std::string(), title, 1, formatExperience(amount));
         if (!state)
             return;
         state->mNumericAmount = amount;
         state->mLifetime = 4.4f;
+        styleExperience(*state, amount);
     }
 
     void HUD::scanHudEventSources()

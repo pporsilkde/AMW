@@ -37,8 +37,15 @@ namespace MWMechanics
         void awardSuccessfulTheft(const MWWorld::Ptr& player, const MWWorld::Ptr& item, int count);
         void awardBookRead(const MWWorld::Ptr& player, const ESM::Book& book);
 
-        // Replaces ArenaMW's old random skill-loss death penalty.
+        // Arena Y012 penalties affect only unbanked XP in the current level.
+        // Earned levels, Skill Points and skills are never reduced.
         void applyDeathPenalty(const MWWorld::Ptr& player);
+        void applyJailPenalty(const MWWorld::Ptr& player);
+
+        // If XP is already zero at death, add level * configured seconds to the
+        // ordinary respawn delay. A non-zero XP pool is wiped instead, with no
+        // additional level cooldown.
+        float getDeathRespawnDelay(const MWWorld::Ptr& player, float baseDelay);
 
         // Statistics-window allocation. Returns true only when a skill was
         // actually increased and its point cost was paid.

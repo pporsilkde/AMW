@@ -9,6 +9,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/store.hpp"
@@ -87,7 +88,15 @@ namespace MWGui
             spell.second.mNextWorsening += mDays * 24;
         }
 
+        // Arena Y012: with native XP progression, jail is an XP penalty,
+        // not a random skill lottery. Clear only current-level XP and leave all
+        // skills, earned levels and Skill Points untouched.
+        const bool xpLevelingEnabled = MWMechanics::XPLeveling::isEnabled();
+        if (xpLevelingEnabled)
+            MWMechanics::XPLeveling::applyJailPenalty(player);
+
         std::set<int> skills;
+        if (!xpLevelingEnabled)
         for (int day=0; day<mDays; ++day)
         {
             int skill = Misc::Rng::rollDice(ESM::Skill::Length);

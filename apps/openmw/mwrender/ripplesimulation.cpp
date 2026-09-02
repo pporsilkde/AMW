@@ -255,7 +255,9 @@ void RippleSimulation::emitRipple(const osg::Vec3f &pos)
         return;
     }
 
-    if (mMaxNumberRipples <= 0)
+    // Arena Y012: shader water without shader-ripple simulation must stay
+    // visually clean. Do not resurrect the old osgParticle movement rings.
+    if (!mLegacyRipplesEnabled || mMaxNumberRipples <= 0)
         return;
 
     osgParticle::ParticleSystem::ScopedWriteLock lock(*mParticleSystem->getReadWriteMutex());

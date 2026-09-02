@@ -157,16 +157,10 @@ namespace
         if (!showNotifications() || text.empty())
             return;
 
-        // Arena Y011: gameplay XP-system notifications use the shared right-side
-        // feed. If an XP action is initiated from a GUI (for example spending
-        // skill points), keep the old MessageBox route so the feedback cannot
-        // expire invisibly behind a menu.
-        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
-        if (windowManager->isGuiMode())
-            windowManager->messageBox(text);
-        else
-            windowManager->hudNotification(
-                text, std::string(), "icons\\k\\tx_attribute_luck.dds");
+        // Arena Y012: every XP-system message uses the same right-side lane,
+        // including actions initiated while a GUI window is open. Neutral
+        // statuses use the black XP card rather than a legacy MessageBox.
+        MWBase::Environment::get().getWindowManager()->hudExperienceNotification(0.f, text);
     }
 
     void notifyXpGain(float amount, const std::string& legacyText)
@@ -174,21 +168,13 @@ namespace
         if (!showNotifications() || legacyText.empty() || !std::isfinite(amount))
             return;
 
-        // Existing XP call sites already build "+N XP - reason" strings. Keep
-        // their localized reason but let the HUD own amount formatting and
-        // coalescing so multiple rewards from the same source merge cleanly.
-        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
-        if (windowManager->isGuiMode())
-        {
-            windowManager->messageBox(legacyText);
-            return;
-        }
-
+        // Existing call sites build "+N XP - localized reason". Strip only the
+        // amount prefix; the HUD owns sign formatting, colours and coalescing.
         std::string reason;
         const std::size_t separator = legacyText.find(" - ");
         if (separator != std::string::npos && separator + 3 < legacyText.size())
             reason = legacyText.substr(separator + 3);
-        windowManager->hudExperienceNotification(amount, reason);
+        MWBase::Environment::get().getWindowManager()->hudExperienceNotification(amount, reason);
     }
 
     void completeLevelUp(const MWWorld::Ptr& player)
@@ -581,17 +567,47 @@ namespace MWMechanics
             if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
                 return;
 
+            // Arena Y012: death never touches the earned character level, Skill
+            // Points or skills. Only all unbanked XP inside the current level is lost.
             NpcStats& stats = player.getClass().getNpcStats(player);
-            const float fraction = clampFloat(Settings::Manager::getFloat(
-                "death xp loss fraction", "XP Leveling"), 0.f, 1.f);
-            const float loss = std::min(stats.getExperience(), std::max(0.f, stats.getExperience() * fraction));
+            const float loss = std::max(0.f, stats.getExperience());
             if (!(loss > 0.f))
                 return;
 
-            stats.setExperience(std::max(0.f, stats.getExperience() - loss));
-            std::ostringstream message;
-            message << arenaText("xp.msg.death") << ": -" << formatXp(loss) << " XP";
-            notifyXp(message.str());
+            stats.setExperience(0.f);
+            if (showNotifications())
+                MWBase::Environment::get().getWindowManager()->hudExperienceNotification(
+                    -loss, arenaText("xp.msg.death"));
+        }
+
+        void applyJailPenalty(const MWWorld::Ptr& player)
+        {
+            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+                return;
+
+            NpcStats& stats = player.getClass().getNpcStats(player);
+            const float loss = std::max(0.f, stats.getExperience());
+            if (!(loss > 0.f))
+                return;
+
+            stats.setExperience(0.f);
+            if (showNotifications())
+                MWBase::Environment::get().getWindowManager()->hudExperienceNotification(
+                    -loss, arenaText("xp.msg.jail"));
+        }
+
+        float getDeathRespawnDelay(const MWWorld::Ptr& player, float baseDelay)
+        {
+            baseDelay = std::max(0.f, baseDelay);
+            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+                return baseDelay;
+
+            const NpcStats& stats = player.getClass().getNpcStats(player);
+            if (stats.getExperience() > 0.f)
+                return baseDelay;
+
+            const float perLevel = nonNegativeSetting("zero xp death cooldown per level");
+            return baseDelay + std::max(1, stats.getLevel()) * perLevel;
         }
 
         bool spendSkillPoints(const MWWorld::Ptr& player, int skillId)

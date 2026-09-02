@@ -68,6 +68,10 @@ namespace MWRender
 
         void setRipples(Ripples* ripples) { mRipples = ripples; }
 
+        // Arena Y012: legacy particle rings are a real legacy-water effect, not
+        // a fallback for shader water when shader ripples are disabled.
+        void setLegacyRipplesEnabled(bool enabled) { mLegacyRipplesEnabled = enabled; }
+
     private:
         osg::ref_ptr<osg::Group> mParent;
 
@@ -77,6 +81,7 @@ namespace MWRender
         std::vector<Emitter> mEmitters;
 
         Ripples* mRipples = nullptr;
+        bool mLegacyRipplesEnabled = true;
 
         int mMaxNumberRipples;
     };

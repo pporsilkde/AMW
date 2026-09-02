@@ -629,6 +629,13 @@ void Water::updateWaterMaterial()
     const bool pbrWaterEnabled = shaderWaterMode == "new";
     const bool shaderWaterRipples = Settings::Manager::getBool("shader water ripples", "Water");
 
+    // Arena Y012: the legacy osgParticle ripple system belongs only to the
+    // non-shader water backend. Previously mRipples==nullptr made it an implicit
+    // fallback even for shader water, bringing the old movement rings back.
+    mSimulation->setLegacyRipplesEnabled(!shaderWaterEnabled);
+    if (shaderWaterEnabled)
+        mSimulation->clear();
+
     if (shaderWaterEnabled)
     {
         mReflection = new Reflection(mInterior);

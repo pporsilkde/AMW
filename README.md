@@ -1,4 +1,4 @@
-# ArenaMW Y009s
+# ArenaMW Y012s
 
 [Русский](README_RU.md) · **English**
 
@@ -10,7 +10,7 @@ ArenaMW is the standalone/single-player branch of the Arena engine work. It is b
 
 | Component | Value |
 | --- | --- |
-| ArenaMW source | **Y009s** |
+| ArenaMW source | **Y012s** |
 | Engine base | OpenMW 0.47.0 |
 | Runtime | Single-player `openmw` |
 | Launcher | `openmw-launcher` |
@@ -66,6 +66,12 @@ ArenaMW is an independent fork. OpenMW, TES3MP, EncoreMP contributors and Bethes
 
 - **Y007s HUD event feed:** six pooled icon cards report gained items, aggregated gold and newly applied lasting effects above the stamina/combat stack.
 - **Y009s HUD stability:** pooled combat-bar Track parity with MP, live exact-instance magic timers, safer clear/refill handling and corrected feed anchoring.
+
+### Y012s — water/XP penalty repair
+- Shader water no longer falls back to legacy particle movement rings when shader-ripple simulation is disabled.
+- XP cards are iconless and localized (`Experience` / `Опыт`); gains are green, losses red, neutral XP status uses a black backing.
+- Death and jail wipe only current-level XP. Earned level, Skill Points and skills stay intact; jail no longer rolls random skill changes while XP Leveling is enabled.
+- Dying at 0 current XP adds `level × 5s` to the normal respawn delay; non-zero XP is wiped instead with no extra level cooldown.
 
 ### Y011 unified HUD notifications
 The right-side event feed now uses one uniform medium-opacity backing instead of three shade bands. Arena XP rewards and gameplay XP status messages use the same lane with same-source coalescing; GUI-triggered XP feedback keeps its MessageBox fallback.

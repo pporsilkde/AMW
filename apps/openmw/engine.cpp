@@ -594,8 +594,11 @@ bool OMW::Engine::frame(float frametime)
                 if (!paused && stats.isDead())
                 {
                     mRespawnTimer += std::max(0.f, frametime);
-                    // Hardcoded to avoid requiring a new key in defaults.bin.
-                    constexpr float delay = 3.f;
+                    // Arena Y012: if the current-level XP pool was already zero
+                    // when the player died, add level*5s (configurable) before
+                    // resurrection. If XP exists it will be wiped instead.
+                    constexpr float baseDelay = 3.f;
+                    const float delay = MWMechanics::XPLeveling::getDeathRespawnDelay(player, baseDelay);
                     if (mRespawnTimer >= delay)
                     {
                         // Resurrect and finish all actor/inventory work before teleporting.
