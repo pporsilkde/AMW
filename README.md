@@ -1,4 +1,4 @@
-# ArenaMW Y002s
+# ArenaMW Y009s
 
 [Русский](README_RU.md) · **English**
 
@@ -10,12 +10,17 @@ ArenaMW is the standalone/single-player branch of the Arena engine work. It is b
 
 | Component | Value |
 | --- | --- |
-| ArenaMW source | **Y002s** |
+| ArenaMW source | **Y009s** |
 | Engine base | OpenMW 0.47.0 |
 | Runtime | Single-player `openmw` |
 | Launcher | `openmw-launcher` |
 | Network/server layer | Not included |
 | Primary release build | Windows x64 |
+
+
+## Y006s rollback note
+
+The experimental riding implementation from Y003s-Y005s is intentionally not included. Y006s returns to the Y002s gameplay baseline while riding is redesigned separately.
 
 ## Y002s highlights
 
@@ -58,3 +63,6 @@ See [Building ArenaMW](docs/BUILDING.md), [feature overview](docs/FEATURES.md), 
 | `docs/` | ArenaMW documentation plus retained upstream OpenMW history |
 
 ArenaMW is an independent fork. OpenMW, TES3MP, EncoreMP contributors and Bethesda Softworks do not endorse this project.
+
+- **Y007s HUD event feed:** six pooled icon cards report gained items, aggregated gold and newly applied lasting effects above the stamina/combat stack.
+- **Y009s HUD stability:** pooled combat-bar Track parity with MP, live exact-instance magic timers, safer clear/refill handling and corrected feed anchoring.

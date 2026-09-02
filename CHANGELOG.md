@@ -1,6 +1,30 @@
 # ArenaMW changelog
 
+## Y009s — HUD/event-feed stability
+
+- Ported the pooled combat-bar render-time Track reassertion from ArenaMP, including hiding a newly reused/re-skinned slot until verified HP exists for that actor.
+- MyGUI 3.2.2 range/position setters are reasserted directly at render time; no fake intermediate range is required.
+- Magic-effect notification durations now count down live and identify the exact stacked ActiveSpells entry by id, caster and timestamp.
+- Inventory clear/refill protection now triggers only after a strong loss-of-existing-items signature, so large legitimate Take All batches are not suppressed merely for containing many item kinds.
+- HUD event-feed fallback coordinates are relative to `mGameplayHud`.
+- Riding remains rolled back; gameplay baseline stays Y002s plus cumulative HUD improvements.
+
+## Y007s — HUD event feed
+
+- Added a fixed six-slot RPG-style HUD event feed above the stamina/combat-bar stack.
+- Positive inventory changes show the real item icon, localized name and gained quantity.
+- Repeated item/gold gains aggregate into the existing live card.
+- Newly applied lasting spell/potion effects show their magic-effect icon and remaining duration.
+- The feed automatically moves above docked NPC combat bars and allocates no widgets during gameplay.
+- Riding remains rolled back; this branch stays on the Y002s gameplay baseline plus the HUD feed.
+
 This file consolidates ArenaMW development notes that previously existed as separate root-level patch, review, checksum and harness files. Original OpenMW 0.47 history is preserved in `docs/upstream/OPENMW_CHANGELOG.md`.
+
+## Y006s — riding rollback
+
+- Rolled back the experimental Y003s-Y005s riding subsystem.
+- Restored the clean Y002s gameplay/source baseline while riding is redesigned separately.
+- Removed all riding-only C++ hooks and bundled riding NIF/KF/DDS resources.
 
 ## Y002s — CharGen crosshair continuity
 
