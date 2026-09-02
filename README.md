@@ -67,5 +67,8 @@ ArenaMW is an independent fork. OpenMW, TES3MP, EncoreMP contributors and Bethes
 - **Y007s HUD event feed:** six pooled icon cards report gained items, aggregated gold and newly applied lasting effects above the stamina/combat stack.
 - **Y009s HUD stability:** pooled combat-bar Track parity with MP, live exact-instance magic timers, safer clear/refill handling and corrected feed anchoring.
 
+### Y011 unified HUD notifications
+The right-side event feed now uses one uniform medium-opacity backing instead of three shade bands. Arena XP rewards and gameplay XP status messages use the same lane with same-source coalescing; GUI-triggered XP feedback keeps its MessageBox fallback.
+
 ### Y010 HUD feed polish
 Event cards now hug the right edge with a 2 px margin, use a borderless soft shadow background, and show existing inventory totals as `+5 (10)` after pickups.

@@ -1,5 +1,13 @@
 # ArenaMW changelog
 
+## Y011s — unified HUD notifications
+
+- Replaced the three-band Y010s event-card shadow with one uniform medium-opacity `BlackBG` backing (`0.22` alpha).
+- Arena XP gameplay rewards now appear in the same right-side event feed, with same-reason coalescing and fractional XP support.
+- XP level/system notifications also use the feed during gameplay; XP feedback produced from an open GUI remains a MessageBox so menu interactions stay visible. Vanilla/scripted game MessageBoxes are unchanged.
+- Riding remains rolled back; the cumulative gameplay base is still Y002s.
+
+
 ## Y010s — HUD event-feed visual polish
 
 - Moved event cards to a 2 px right-edge margin instead of inheriting the stamina bar's horizontal inset.

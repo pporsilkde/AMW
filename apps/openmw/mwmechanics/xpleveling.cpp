@@ -154,8 +154,41 @@ namespace
 
     void notifyXp(const std::string& text)
     {
-        if (showNotifications() && !text.empty())
-            MWBase::Environment::get().getWindowManager()->messageBox(text);
+        if (!showNotifications() || text.empty())
+            return;
+
+        // Arena Y011: gameplay XP-system notifications use the shared right-side
+        // feed. If an XP action is initiated from a GUI (for example spending
+        // skill points), keep the old MessageBox route so the feedback cannot
+        // expire invisibly behind a menu.
+        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+        if (windowManager->isGuiMode())
+            windowManager->messageBox(text);
+        else
+            windowManager->hudNotification(
+                text, std::string(), "icons\\k\\tx_attribute_luck.dds");
+    }
+
+    void notifyXpGain(float amount, const std::string& legacyText)
+    {
+        if (!showNotifications() || legacyText.empty() || !std::isfinite(amount))
+            return;
+
+        // Existing XP call sites already build "+N XP - reason" strings. Keep
+        // their localized reason but let the HUD own amount formatting and
+        // coalescing so multiple rewards from the same source merge cleanly.
+        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+        if (windowManager->isGuiMode())
+        {
+            windowManager->messageBox(legacyText);
+            return;
+        }
+
+        std::string reason;
+        const std::size_t separator = legacyText.find(" - ");
+        if (separator != std::string::npos && separator + 3 < legacyText.size())
+            reason = legacyText.substr(separator + 3);
+        windowManager->hudExperienceNotification(amount, reason);
     }
 
     void completeLevelUp(const MWWorld::Ptr& player)
@@ -208,7 +241,7 @@ namespace
         stats.setExperience(std::max(0.f, stats.getExperience()) + amount);
 
         if (!notification.empty())
-            notifyXp(notification);
+            notifyXpGain(amount, notification);
 
         // XP is banked immediately. No vanilla sleep gate or attribute picker is
         // involved; each completed level grants spendable skill points instead.

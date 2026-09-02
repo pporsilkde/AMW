@@ -291,6 +291,9 @@ namespace MWGui
     void exitCurrentGuiMode() override;
 
     void messageBox(const std::string & message, enum MWGui::ShowInDialogueMode showInDialogueMode = MWGui::ShowInDialogueMode_IfPossible) override;
+    void hudNotification(const std::string& title, const std::string& value = std::string(),
+        const std::string& icon = std::string(), const std::string& key = std::string()) override;
+    void hudExperienceNotification(float amount, const std::string& reason = std::string()) override;
     void staticMessageBox(const std::string& message) override;
     void removeStaticMessageBox() override;
     void interactiveMessageBox(const std::string& message,

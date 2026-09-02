@@ -468,11 +468,9 @@ namespace MWGui
         for (std::size_t i = 0; i < hudNotificationPoolSize; ++i)
         {
             HudNotificationState state;
-            // Arena Y010: use a transparent parent and a soft three-step shadow
-            // instead of HUD_Box_Transparent (which is only an MW_Box border).
-            // The darker end faces the right screen edge, so the card visually
-            // dissolves into the game world toward the left. No new texture is
-            // required and no per-frame widgets are allocated.
+            // Arena Y011: transparent parent plus one uniform medium-opacity
+            // backing. This keeps the clean borderless card from Y010 while
+            // removing the visible three-band gradient.
             state.mPanel = mGameplayHud->createWidget<MyGUI::Widget>(
                 "", MyGUI::IntCoord(0, 0, 300, 38),
                 MyGUI::Align::Left | MyGUI::Align::Top,
@@ -480,21 +478,11 @@ namespace MWGui
             state.mPanel->setNeedMouseFocus(false);
             state.mPanel->setVisible(false);
 
-            state.mShadeLeft = state.mPanel->createWidget<MyGUI::Widget>(
-                "BlackBG", MyGUI::IntCoord(0, 0, 92, 38), MyGUI::Align::Left | MyGUI::Align::VCenter,
-                "HudEventShadeLeft" + MyGUI::utility::toString(i));
-            state.mShadeMiddle = state.mPanel->createWidget<MyGUI::Widget>(
-                "BlackBG", MyGUI::IntCoord(92, 0, 96, 38), MyGUI::Align::Left | MyGUI::Align::VCenter,
-                "HudEventShadeMiddle" + MyGUI::utility::toString(i));
-            state.mShadeRight = state.mPanel->createWidget<MyGUI::Widget>(
-                "BlackBG", MyGUI::IntCoord(188, 0, 112, 38), MyGUI::Align::Left | MyGUI::Align::VCenter,
-                "HudEventShadeRight" + MyGUI::utility::toString(i));
-            state.mShadeLeft->setNeedMouseFocus(false);
-            state.mShadeMiddle->setNeedMouseFocus(false);
-            state.mShadeRight->setNeedMouseFocus(false);
-            state.mShadeLeft->setAlpha(0.12f);
-            state.mShadeMiddle->setAlpha(0.22f);
-            state.mShadeRight->setAlpha(0.34f);
+            state.mShade = state.mPanel->createWidget<MyGUI::Widget>(
+                "BlackBG", MyGUI::IntCoord(0, 0, 300, 38), MyGUI::Align::Stretch,
+                "HudEventShade" + MyGUI::utility::toString(i));
+            state.mShade->setNeedMouseFocus(false);
+            state.mShade->setAlpha(0.22f);
 
             state.mIcon = state.mPanel->createWidget<MyGUI::ImageBox>(
                 "ImageBox", MyGUI::IntCoord(4, 4, 30, 30), MyGUI::Align::Left | MyGUI::Align::VCenter,
@@ -2646,6 +2634,7 @@ namespace MWGui
         target->mTitleText = title;
         target->mValueText = valueText;
         target->mAmount = std::max(1, amount);
+        target->mNumericAmount = 0.f;
         target->mTotalCount = totalCount > 0 ? totalCount : -1;
         target->mSpellId.clear();
         target->mSpellCasterActorId = -1;
@@ -2686,6 +2675,67 @@ namespace MWGui
             target->mPanel->setVisible(true);
         }
         return target;
+    }
+
+
+    void HUD::pushSystemNotification(const std::string& title, const std::string& value,
+        const std::string& icon, const std::string& key)
+    {
+        if (title.empty())
+            return;
+
+        const std::string notificationKey = key.empty()
+            ? "system:" + MyGUI::utility::toString(mHudNotificationSequence + 1)
+            : key;
+        HudNotificationState* state = pushHudNotification(
+            HudEventKind::System, notificationKey, icon, title, 1, value);
+        if (state)
+            state->mLifetime = 4.4f;
+    }
+
+    void HUD::pushExperienceNotification(float amount, const std::string& reason)
+    {
+        if (!std::isfinite(amount) || std::fabs(amount) < 0.0001f || mHudNotifications.empty())
+            return;
+
+        const std::string title = reason.empty() ? std::string("XP") : reason;
+        const std::string key = "experience:" + title;
+
+        const auto formatExperience = [](float value)
+        {
+            std::ostringstream stream;
+            if (value > 0.f)
+                stream << "+";
+            if (std::fabs(value - std::round(value)) < 0.05f)
+                stream << static_cast<int>(std::round(value));
+            else
+                stream << std::fixed << std::setprecision(1) << value;
+            stream << " XP";
+            return stream.str();
+        };
+
+        // Repeated rewards from the same source coalesce just like repeated
+        // pickups. Different reasons remain separate cards so the player can
+        // still tell kill, quest, travel and trade rewards apart.
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            if (!state.mActive || state.mKind != HudEventKind::Experience || state.mKey != key)
+                continue;
+
+            state.mNumericAmount += amount;
+            state.mAge = 0.f;
+            state.mSequence = ++mHudNotificationSequence;
+            if (state.mValue)
+                state.mValue->setCaption(formatExperience(state.mNumericAmount));
+            return;
+        }
+
+        HudNotificationState* state = pushHudNotification(HudEventKind::Experience, key,
+            "icons\\k\\tx_attribute_luck.dds", title, 1, formatExperience(amount));
+        if (!state)
+            return;
+        state->mNumericAmount = amount;
+        state->mLifetime = 4.4f;
     }
 
     void HUD::scanHudEventSources()
@@ -2996,6 +3046,7 @@ namespace MWGui
             state.mActive = false;
             state.mAge = 0.f;
             state.mAmount = 0;
+            state.mNumericAmount = 0.f;
             state.mTotalCount = -1;
             state.mKey.clear();
             state.mSpellId.clear();

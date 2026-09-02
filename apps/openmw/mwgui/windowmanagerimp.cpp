@@ -930,6 +930,20 @@ namespace MWGui
             mMessageBoxManager->createMessageBox(message);
     }
 
+
+    void WindowManager::hudNotification(const std::string& title, const std::string& value,
+        const std::string& icon, const std::string& key)
+    {
+        if (mHud)
+            mHud->pushSystemNotification(title, value, icon, key);
+    }
+
+    void WindowManager::hudExperienceNotification(float amount, const std::string& reason)
+    {
+        if (mHud)
+            mHud->pushExperienceNotification(amount, reason);
+    }
+
     void WindowManager::staticMessageBox(const std::string& message)
     {
         mMessageBoxManager->createMessageBox(message, true);

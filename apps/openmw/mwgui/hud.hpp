@@ -73,6 +73,12 @@ namespace MWGui
 
         void clear() override;
 
+        // Arena Y011: one shared right-side notification lane for Arena systems.
+        // Game message boxes remain on the vanilla MessageBoxManager path.
+        void pushSystemNotification(const std::string& title, const std::string& value = std::string(),
+            const std::string& icon = std::string(), const std::string& key = std::string());
+        void pushExperienceNotification(float amount, const std::string& reason = std::string());
+
     private:
         MyGUI::Widget* mGameplayHud;
         MyGUI::ProgressBar *mHealth, *mMagicka, *mStamina, *mEnemyHealth, *mDrowning;
@@ -181,18 +187,17 @@ namespace MWGui
         {
             Item,
             Gold,
-            Magic
+            Magic,
+            Experience,
+            System
         };
 
         struct HudNotificationState
         {
             MyGUI::Widget* mPanel = nullptr;
-            // Arena Y010: borderless three-step shadow creates a cheap right-weighted
-            // gradient without adding texture resources. The parent itself is
-            // transparent, so the event feed no longer draws an MW_Box frame.
-            MyGUI::Widget* mShadeLeft = nullptr;
-            MyGUI::Widget* mShadeMiddle = nullptr;
-            MyGUI::Widget* mShadeRight = nullptr;
+            // Arena Y011: one uniform medium-opacity backing. The card keeps the
+            // borderless look from Y010 without the three different shade bands.
+            MyGUI::Widget* mShade = nullptr;
             MyGUI::ImageBox* mIcon = nullptr;
             MyGUI::TextBox* mTitle = nullptr;
             MyGUI::TextBox* mValue = nullptr;
@@ -207,6 +212,9 @@ namespace MWGui
             int mSpellTimestampDay = -1;
             float mSpellTimestampHour = -1.f;
             int mAmount = 0;
+            // Arena Y011: floating point amount is used by XP cards so fractional
+            // rewards can coalesce without being rounded away.
+            float mNumericAmount = 0.f;
             // Arena Y010: for pickup/gold events, keep the committed inventory
             // total so a delta can be rendered as +5 (10). A negative value means
             // that the item did not exist before this pickup and the compact +5

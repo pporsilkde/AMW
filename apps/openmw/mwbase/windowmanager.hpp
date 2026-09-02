@@ -246,6 +246,12 @@ namespace MWBase
             virtual void exitCurrentGuiMode() = 0;
 
             virtual void messageBox (const std::string& message, enum MWGui::ShowInDialogueMode showInDialogueMode = MWGui::ShowInDialogueMode_IfPossible) = 0;
+            // Arena Y011: non-modal Arena event feed. This is deliberately
+            // separate from game MessageBox handling, so vanilla/scripted messages
+            // keep their original placement and semantics.
+            virtual void hudNotification(const std::string& title, const std::string& value = std::string(),
+                const std::string& icon = std::string(), const std::string& key = std::string()) = 0;
+            virtual void hudExperienceNotification(float amount, const std::string& reason = std::string()) = 0;
             virtual void staticMessageBox(const std::string& message) = 0;
             virtual void removeStaticMessageBox() = 0;
             virtual void interactiveMessageBox(const std::string& message,
