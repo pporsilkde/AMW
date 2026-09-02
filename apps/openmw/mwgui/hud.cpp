@@ -191,7 +191,12 @@ namespace
         // distance ramp produces at the vanishing distance, otherwise the bar
         // would stop shrinking early and the falloff would look truncated.
         constexpr int sHeadMinWidthPixels = 22;
-        constexpr int sHeadMinHeightPixels = 2;
+        // Y017: at long range a 2 px ProgressBar is almost all skin border,
+        // so the coloured HP track visually merges into the frame.  Keep the
+        // original distance curve until it naturally reaches 4 px (~25 paces),
+        // then stop shrinking vertically. Width/fade continue to shrink normally.
+        // Close and medium range therefore remain pixel-identical to Y016.
+        constexpr int sHeadMinHeightPixels = 4;
         constexpr int sScreenMargin = 6;
 
         // ------------------------------------------------------------------
@@ -654,7 +659,7 @@ namespace MWGui
             if (mHealthText)
                 mHealthText->setCaption(valStr);
             mHealthFrame->setUserString("Caption_HealthDescription", "#{sHealthDesc}\n" + valStr);
-            registerBarChange(mHealthBarState, current, modified);
+            registerBarChange(mHealthBarState, current, modified, true);
         }
         else if (id == "MBar")
         {
@@ -1396,19 +1401,21 @@ namespace MWGui
         }
     }
 
-    void HUD::registerBarChange(AutoHideBarState& state, int current, int modified)
+    void HUD::registerBarChange(AutoHideBarState& state, int current, int modified, bool wakeOnIncrease)
     {
         const bool firstUpdate = !state.initialized;
         const bool maximumChanged = state.initialized && state.modified != modified;
         const bool valueDecreased = state.initialized && current < state.current;
+        const bool valueIncreased = state.initialized && current > state.current;
 
         state.current = current;
         state.modified = modified;
         state.initialized = true;
 
-        // Show a bar when the resource is actually spent/damaged or its maximum changes.
-        // Passive regeneration must not continuously restart the auto-hide timer.
-        if (firstUpdate || maximumChanged || valueDecreased)
+        // Y017: health healing is actionable feedback and must wake the HP bar even
+        // when it has already auto-hidden. Magicka/fatigue keep wakeOnIncrease=false
+        // so passive regeneration does not continuously restart their hide timer.
+        if (firstUpdate || maximumChanged || valueDecreased || (wakeOnIncrease && valueIncreased))
         {
             state.idleTimer = 0.f;
             state.alpha = 1.f;

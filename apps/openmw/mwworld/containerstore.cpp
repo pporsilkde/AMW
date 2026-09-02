@@ -45,8 +45,15 @@ namespace
 
         for (const auto& iter : cellRefList.mList)
         {
-            if (iter.mData.getCount()>0)
-                sum += iter.mData.getCount()*iter.mBase->mData.mWeight;
+            if (iter.mData.getCount() > 0)
+            {
+                // Y017: carried gold has a tiny but real encumbrance. Inventory
+                // gold is normalized to gold_001 by ContainerStore::add(), so use
+                // the override here as well as in MWClass::Miscellaneous::getWeight.
+                const float unitWeight = Misc::StringUtils::ciEqual(iter.mBase->mId, "gold_001")
+                    ? 0.0001f : iter.mBase->mData.mWeight;
+                sum += iter.mData.getCount() * unitWeight;
+            }
         }
 
         return sum;

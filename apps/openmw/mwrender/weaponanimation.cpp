@@ -8,6 +8,7 @@
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/soundmanager.hpp"
+#include "../mwbase/windowmanager.hpp"
 
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/class.hpp"
@@ -22,6 +23,34 @@
 
 namespace MWRender
 {
+namespace
+{
+    // Y017: show the local player one compact right-side card after an actual
+    // projectile is released. Count the whole inventory stack set before the
+    // removal so the displayed remainder is correct even if compatible stacks
+    // happen to be split internally.
+    void notifyPlayerAmmunitionSpent(const MWWorld::Ptr& actor, const MWWorld::Ptr& projectile,
+        const MWWorld::InventoryStore& inventory)
+    {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (actor != world->getPlayerPtr())
+            return;
+
+        const std::string refId = projectile.getCellRef().getRefId();
+        int remaining = inventory.count(refId);
+        if (remaining > 0)
+            --remaining;
+
+        std::string name = projectile.getClass().getName(projectile);
+        if (name.empty())
+            name = refId;
+
+        MWBase::Environment::get().getWindowManager()->hudNotification(
+            std::string("-1 ") + name + " (" + std::to_string(remaining) + ")",
+            std::string(), std::string(), std::string("ammo:") + refId);
+    }
+}
+
 
 float WeaponAnimationTime::getValue(osg::NodeVisitor*)
 {
@@ -141,6 +170,7 @@ void WeaponAnimation::releaseArrow(MWWorld::Ptr actor, float attackStrength)
 
         showWeapon(false);
 
+        notifyPlayerAmmunitionSpent(actor, weaponPtr, inv);
         inv.remove(*weapon, 1, actor);
     }
     else
@@ -167,6 +197,7 @@ void WeaponAnimation::releaseArrow(MWWorld::Ptr actor, float attackStrength)
         MWWorld::Ptr ammoPtr = *ammo;
         MWBase::Environment::get().getWorld()->launchProjectile(actor, ammoPtr, launchPos, orient, weaponPtr, speed, attackStrength);
 
+        notifyPlayerAmmunitionSpent(actor, ammoPtr, inv);
         inv.remove(ammoPtr, 1, actor);
         mAmmunition.reset();
     }

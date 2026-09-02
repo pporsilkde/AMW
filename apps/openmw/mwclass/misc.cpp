@@ -235,6 +235,12 @@ namespace MWClass
 
     float Miscellaneous::getWeight(const MWWorld::ConstPtr &ptr) const
     {
+        // Y017: Arena economy gives carried gold a tiny but real encumbrance.
+        // ContainerStore normalizes picked-up gold piles to gold_001, so this
+        // affects the player's actual carried gold without rewriting game data.
+        if (Misc::StringUtils::ciEqual(ptr.getCellRef().getRefId(), "gold_001"))
+            return 0.0001f;
+
         const MWWorld::LiveCellRef<ESM::Miscellaneous> *ref = ptr.get<ESM::Miscellaneous>();
         return ref->mBase->mData.mWeight;
     }

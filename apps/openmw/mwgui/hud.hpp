@@ -308,7 +308,7 @@ namespace MWGui
         AutoHideBarState mStaminaBarState;
         bool mHmsBaseVisible;
 
-        void registerBarChange(AutoHideBarState& state, int current, int modified);
+        void registerBarChange(AutoHideBarState& state, int current, int modified, bool wakeOnIncrease = false);
         void updateAutoHideBar(MyGUI::Widget* frame, AutoHideBarState& state, float dt, bool forceVisible,
             MyGUI::Widget* persistentIcon = nullptr);
         void applyBarAlpha(MyGUI::Widget* widget, float alpha);
