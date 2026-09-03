@@ -1,3 +1,27 @@
+## Arena Y023 — direct combat HP fill
+
+- Combat HP no longer uses MyGUI::ProgressBar or Track state.
+- Overhead enemy HP is a thin red direct-width fill with no frame.
+- The frame is a separate widget shown only after docking into the HUD.
+- Last verified HP is retained through the existing short linger/fade window.
+- A living actor always gets at least a 1 px fill, preventing an empty framed bar.
+
+## Arena Y022s
+
+- Replaced distance-based combat ProgressBar skin swapping with one permanent `Arena_Progress_Red_Combat` skin.
+- Aggressive NPC overhead HP is always a thin 3–4 px red line with no decorative frame.
+- The frame is a permanent child widget and fades in only near the end of docking into the HUD stack above stamina.
+- Removed combat `changeWidgetSkin()` calls, so MyGUI no longer destroys/recreates ProgressBar Track while a fight is running.
+- Combat HP slots are enemy-only; Y021 floating damage numbers remain enabled.
+
+## Arena Y021s
+
+- Added compact floating weapon-damage numbers beside the crosshair.
+- Numbers use final physical HP loss after resistance, armor and difficulty scaling.
+- Misses, blocks, zero damage and spell damage stay silent.
+- Numbers alternate left/right, drift upward/outward and fade in about 0.85 seconds.
+
+
 # ArenaMW changelog
 
 ## Y017 — combat HP readability, healing feedback, ammunition and gold weight
@@ -116,3 +140,7 @@ This file consolidates ArenaMW development notes that previously existed as sepa
 ## Foundation through X011
 - Established ArenaMW as a standalone OpenMW 0.47 branch.
 - Ported Arena gameplay balance, XP leveling, equipment requirements, Refined Alchemy/poisons, interaction animations, Arena dialogue/HUD, QuickLoot, HDR/Bloom/PBR/water work, object placement and related single-player systems.
+
+## Y018 — weather fog / land optimization stability
+- Fixed weather fog flicker/popping while adaptive land optimization changes the live view distance.
+- Preserve fog depth values above 1.0 instead of clamping them to 1.0 during far-plane updates.

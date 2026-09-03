@@ -1,5 +1,7 @@
 #include "misc.hpp"
 
+#include <algorithm>
+
 #include <components/esm/loadmisc.hpp>
 #include <components/settings/settings.hpp>
 
@@ -156,7 +158,7 @@ namespace MWClass
 
         std::string text;
 
-        text += MWGui::ToolTips::getWeightString(ref->mBase->mData.mWeight, "#{sWeight}");
+        text += MWGui::ToolTips::getWeightString(getWeight(ptr), "#{sWeight}");
         if (!gold && !ref->mBase->mData.mIsKey)
             text += MWGui::ToolTips::getValueString(getValue(ptr), "#{sValue}");
 
@@ -235,11 +237,12 @@ namespace MWClass
 
     float Miscellaneous::getWeight(const MWWorld::ConstPtr &ptr) const
     {
-        // Y017: Arena economy gives carried gold a tiny but real encumbrance.
-        // ContainerStore normalizes picked-up gold piles to gold_001, so this
-        // affects the player's actual carried gold without rewriting game data.
-        if (Misc::StringUtils::ciEqual(ptr.getCellRef().getRefId(), "gold_001"))
-            return 0.0001f;
+        // Y020: one coin weighs 0.0001. Carried currency is normalized to
+        // gold_001, while world-space piles can use gold_005/010/025/100. Apply
+        // the same per-coin rule to every gold representation so the tooltip and
+        // dropped piles agree with the real ContainerStore encumbrance.
+        if (isGold(ptr))
+            return 0.0001f * static_cast<float>(std::max(1, getValue(ptr)));
 
         const MWWorld::LiveCellRef<ESM::Miscellaneous> *ref = ptr.get<ESM::Miscellaneous>();
         return ref->mBase->mData.mWeight;

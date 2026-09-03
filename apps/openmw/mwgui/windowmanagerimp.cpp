@@ -944,6 +944,12 @@ namespace MWGui
             mHud->pushExperienceNotification(amount, reason);
     }
 
+    void WindowManager::hudDamageNumber(float damage)
+    {
+        if (mHud)
+            mHud->pushDamageNumber(damage);
+    }
+
     void WindowManager::staticMessageBox(const std::string& message)
     {
         mMessageBoxManager->createMessageBox(message, true);

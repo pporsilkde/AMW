@@ -71,7 +71,13 @@ namespace
         // that this cell/weather intentionally has no distance fog.
         if (mLandFogEnd != noFog && mLandFogEnd > 0.f)
         {
-            const float fogDepth = std::clamp(1.f - mLandFogStart / mLandFogEnd, 0.f, 1.f);
+            // Weather fog depth is intentionally allowed to exceed 1.0. Vanilla/fallback
+            // values reach 1.9 for Foggy nights and 3.0 for Blizzard. Clamping the
+            // reconstructed depth to 1.0 made adaptive land optimization alternate
+            // between the real weather depth (configured every weather update) and 1.0
+            // (whenever the live view distance moved), which produced visible fog
+            // popping/flicker. Preserve the full positive depth while the far plane moves.
+            const float fogDepth = std::max(0.f, 1.f - mLandFogStart / mLandFogEnd);
             mLandFogEnd = viewDistance;
             mLandFogStart = mLandFogEnd * (1.f - fogDepth);
         }

@@ -462,6 +462,12 @@ namespace MWClass
 
                 MWBase::Environment::get().getSoundManager()->playSound3D(ptr, "Health Damage", 1.0f, 1.0f);
 
+                // Arena Y021: report only confirmed local-player weapon damage, after
+                // armor/difficulty scaling. Spell hits use an empty object and stay silent.
+                if (damage > 0.f && !object.isEmpty() && !attacker.isEmpty()
+                    && attacker == MWMechanics::getPlayer())
+                    MWBase::Environment::get().getWindowManager()->hudDamageNumber(damage);
+
                 MWMechanics::DynamicStat<float> health(stats.getHealth());
                 health.setCurrent(health.getCurrent() - damage);
                 stats.setHealth(health);

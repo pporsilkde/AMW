@@ -252,6 +252,8 @@ namespace MWBase
             virtual void hudNotification(const std::string& title, const std::string& value = std::string(),
                 const std::string& icon = std::string(), const std::string& key = std::string()) = 0;
             virtual void hudExperienceNotification(float amount, const std::string& reason = std::string()) = 0;
+            // Arena Y021: small weapon-damage number animated beside the crosshair.
+            virtual void hudDamageNumber(float damage) = 0;
             virtual void staticMessageBox(const std::string& message) = 0;
             virtual void removeStaticMessageBox() = 0;
             virtual void interactiveMessageBox(const std::string& message,

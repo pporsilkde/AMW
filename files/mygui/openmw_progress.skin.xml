@@ -73,6 +73,21 @@
         <Child type="Widget" skin="TransparentBG" offset="2 2 60 8" align="Stretch" name="Client"/>
     </Resource>
 
+    <!-- Arena Y020: borderless world-space combat bars for the far 2/3 of the
+         overhead range.  The Client occupies the full widget, so the coloured
+         track remains readable when the HUD bar is only a few pixels tall. -->
+    <Resource type="ResourceSkin" name="Arena_Progress_Red_Frameless" size="64 8">
+        <Property key="TrackSkin" value="MW_Track_Red"/>
+        <Property key="TrackFill" value="1"/>
+        <Child type="Widget" skin="TransparentBG" offset="0 0 64 8" align="Stretch" name="Client"/>
+    </Resource>
+
+    <Resource type="ResourceSkin" name="Arena_Progress_Green_Frameless" size="64 8">
+        <Property key="TrackSkin" value="MW_Track_Green"/>
+        <Property key="TrackFill" value="1"/>
+        <Child type="Widget" skin="TransparentBG" offset="0 0 64 8" align="Stretch" name="Client"/>
+    </Resource>
+
     <Resource type="ResourceSkin" name="MW_Progress_Drowning_Full" size="64 6">
         <Property key="TrackSkin" value="MW_Progress_Drowning_Full_Small"/>
         <Property key="TrackFill" value="1"/>

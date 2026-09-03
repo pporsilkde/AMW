@@ -1,3 +1,22 @@
+## Arena Y023 — direct combat HP fill
+
+- Combat HP no longer uses MyGUI::ProgressBar or Track state.
+- Overhead enemy HP is a thin red direct-width fill with no frame.
+- The frame is a separate widget shown only after docking into the HUD.
+- Last verified HP is retained through the existing short linger/fade window.
+- A living actor always gets at least a 1 px fill, preventing an empty framed bar.
+
+## Y022 combat HP stability
+
+- Hostile NPC overhead HP is a thin red frameless line.
+- Frame appears only after docking into the HUD above stamina.
+- No runtime combat ProgressBar skin swaps.
+
+
+## Arena Y021
+
+Adds compact final weapon-damage numbers beside the crosshair. They alternate left/right, drift upward/outward and fade. Spell damage, misses and blocks do not create numbers.
+
 # ArenaMW Y013s cumulative
 
 Y013s добавляет suppression только дублирующих pickup/harvest AddItem MessageBox поверх полного Y012s.

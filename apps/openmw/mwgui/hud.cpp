@@ -181,7 +181,7 @@ namespace
         // just before it disappears. Deliberately small: the overhead bar is a
         // glance-value readout, the docked stack is where the detail lives.
         constexpr float sHeadWidthMax = 92.f;
-        constexpr float sHeadHeightMax = 7.f;
+        constexpr float sHeadHeightMax = 4.f;
         constexpr float sHeadScaleMin = 0.28f;
         // Gap between the top of the actor's hit box and the bar. Kept tight so
         // the bar reads as belonging to that actor and not as floating above the
@@ -191,12 +191,11 @@ namespace
         // distance ramp produces at the vanishing distance, otherwise the bar
         // would stop shrinking early and the falloff would look truncated.
         constexpr int sHeadMinWidthPixels = 22;
-        // Y017: at long range a 2 px ProgressBar is almost all skin border,
-        // so the coloured HP track visually merges into the frame.  Keep the
-        // original distance curve until it naturally reaches 4 px (~25 paces),
-        // then stop shrinking vertically. Width/fade continue to shrink normally.
-        // Close and medium range therefore remain pixel-identical to Y016.
-        constexpr int sHeadMinHeightPixels = 4;
+        // Y022: overhead combat HP is deliberately only a thin coloured line.
+        // There is no frame above actors at any distance; the frame belongs solely
+        // to the docked HUD presentation. Keep enough height for a stable 3 px track
+        // even at the far end of the distance fade.
+        constexpr int sHeadMinHeightPixels = 3;
         constexpr int sScreenMargin = 6;
 
         // ------------------------------------------------------------------
@@ -218,10 +217,6 @@ namespace
         constexpr float sDockSwitchDelay = 0.25f;
         // The name only becomes readable once the bar is essentially in the stack.
         constexpr float sNameFadeStart = 0.55f;
-
-        // Progress bars are driven at a fixed resolution so a smoothed value is
-        // still visible on an actor with very few hit points.
-        constexpr int sProgressResolution = 1000;
 
         inline float clamp01(float value)
         {
@@ -444,12 +439,27 @@ namespace MWGui
         for (std::size_t i = 0; i < combatHealthBarPoolSize; ++i)
         {
             CombatHealthBarState state;
-            state.mWidget = mGameplayHud->createWidget<MyGUI::ProgressBar>(
-                "MW_Progress_Red", MyGUI::IntCoord(0, 0, 118, 9),
+            state.mWidget = mGameplayHud->createWidget<MyGUI::Widget>(
+                "TransparentBG", MyGUI::IntCoord(0, 0, 118, 9),
                 MyGUI::Align::Left | MyGUI::Align::Top,
                 "CombatHealthBar" + MyGUI::utility::toString(i));
             state.mWidget->setNeedMouseFocus(false);
             state.mWidget->setVisible(false);
+
+            // Y023: direct geometry, no ProgressBar Track. MW_Track_Red is just a
+            // stretchable coloured widget, so an HP value can never leave a bare
+            // frame because an internal progress child went missing.
+            state.mFill = state.mWidget->createWidget<MyGUI::Widget>(
+                "MW_Track_Red", MyGUI::IntCoord(0, 0, 118, 9),
+                MyGUI::Align::Left | MyGUI::Align::Top, "Fill");
+            state.mFill->setNeedMouseFocus(false);
+            state.mFill->setVisible(false);
+
+            state.mFrame = state.mWidget->createWidget<MyGUI::Widget>(
+                "MW_Box", MyGUI::IntCoord(0, 0, 118, 9),
+                MyGUI::Align::Left | MyGUI::Align::Top, "Frame");
+            state.mFrame->setNeedMouseFocus(false);
+            state.mFrame->setVisible(false);
 
             // X025: one caption per slot, created here so no layout file has to
             // change. It is only shown while the bar sits in the docked stack.
@@ -515,6 +525,27 @@ namespace MWGui
             state.mValue->setTextShadowColour(MyGUI::Colour::Black);
 
             mHudNotifications.push_back(state);
+        }
+
+        // Arena Y021: fixed pool for small damage numbers beside the crosshair.
+        // No widgets are allocated while combat is running.
+        constexpr std::size_t floatingDamagePoolSize = 10;
+        mFloatingDamageNumbers.reserve(floatingDamagePoolSize);
+        for (std::size_t i = 0; i < floatingDamagePoolSize; ++i)
+        {
+            FloatingDamageState state;
+            state.mWidget = mGameplayHud->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(0, 0, 78, 26),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "FloatingDamage" + MyGUI::utility::toString(i));
+            state.mWidget->setNeedMouseFocus(false);
+            state.mWidget->setFontHeight(18);
+            state.mWidget->setTextAlign(MyGUI::Align::Center);
+            state.mWidget->setTextColour(MyGUI::Colour::White);
+            state.mWidget->setTextShadow(true);
+            state.mWidget->setTextShadowColour(MyGUI::Colour::Black);
+            state.mWidget->setVisible(false);
+            mFloatingDamageNumbers.push_back(state);
         }
 
         getWidget(mHealthText, "HealthText");
@@ -896,6 +927,7 @@ namespace MWGui
         }
 
         updateCombatHealthBars(dt);
+        updateFloatingDamageNumbers(dt);
         updateHudEventFeed(dt);
         updateFocusedTargetPanel(dt);
 
@@ -1924,6 +1956,86 @@ namespace MWGui
         }
     }
 
+    void HUD::pushDamageNumber(float damage)
+    {
+        if (damage <= 0.f || !mGameplayHud || !mGameplayHud->getVisible()
+            || !mCrosshair || !mCrosshair->getVisible() || mFloatingDamageNumbers.empty())
+            return;
+
+        FloatingDamageState* slot = nullptr;
+        for (FloatingDamageState& state : mFloatingDamageNumbers)
+        {
+            if (!state.mActive)
+            {
+                slot = &state;
+                break;
+            }
+        }
+
+        // If every slot is busy, recycle the oldest one. This is preferable to
+        // allocating a widget in the middle of a rapid multi-hit sequence.
+        if (!slot)
+        {
+            slot = &mFloatingDamageNumbers.front();
+            for (FloatingDamageState& state : mFloatingDamageNumbers)
+                if (state.mAge > slot->mAge)
+                    slot = &state;
+        }
+
+        const std::uint64_t sequence = mFloatingDamageSequence++;
+        slot->mAge = 0.f;
+        slot->mLifetime = 0.85f;
+        slot->mSide = (sequence & 1u) ? 1.f : -1.f;
+        const int lane = static_cast<int>((sequence / 2u) % 3u) - 1;
+        slot->mLaneOffset = static_cast<float>(lane * 7);
+        slot->mActive = true;
+
+        // Weapon damage in Morrowind can be fractional internally, but the compact
+        // RPG readout deliberately uses the nearest real HP point.
+        const int shownDamage = std::max(1, static_cast<int>(std::lround(damage)));
+        slot->mWidget->setCaption(MyGUI::utility::toString(shownDamage));
+        slot->mWidget->setAlpha(1.f);
+        slot->mWidget->setVisible(true);
+    }
+
+    void HUD::updateFloatingDamageNumbers(float dt)
+    {
+        if (mFloatingDamageNumbers.empty())
+            return;
+
+        const MyGUI::IntSize& view = MyGUI::RenderManager::getInstance().getViewSize();
+        const float centreX = static_cast<float>(view.width) * 0.5f;
+        const float centreY = static_cast<float>(view.height) * 0.5f;
+
+        for (FloatingDamageState& state : mFloatingDamageNumbers)
+        {
+            if (!state.mActive)
+                continue;
+
+            state.mAge += std::max(0.f, dt);
+            const float t = std::min(1.f, state.mAge / std::max(0.01f, state.mLifetime));
+            if (t >= 1.f)
+            {
+                state.mActive = false;
+                state.mWidget->setVisible(false);
+                continue;
+            }
+
+            // Start just outside the 64 px normal reticle, drift a little farther
+            // sideways and upwards, then dissolve. Font height 18 stays well below
+            // the reticle size even on the default HUD scale.
+            const float outward = 40.f + 28.f * t;
+            const float rise = 24.f * t;
+            const float x = centreX + state.mSide * outward - 39.f;
+            const float y = centreY - 13.f + state.mLaneOffset - rise;
+            state.mWidget->setPosition(static_cast<int>(std::lround(x)), static_cast<int>(std::lround(y)));
+
+            // Keep the first instant crisp, then fade progressively faster near the end.
+            const float fadeT = std::max(0.f, (t - 0.12f) / 0.88f);
+            state.mWidget->setAlpha(1.f - fadeT * fadeT);
+        }
+    }
+
     void HUD::hideCombatHealthBars()
     {
         mCombatHealthBarScanTimer = 0.f;
@@ -1946,33 +2058,20 @@ namespace MWGui
             state.mNameCaption.clear();
             if (state.mWidget)
                 state.mWidget->setVisible(false);
+            if (state.mFill)
+                state.mFill->setVisible(false);
+            if (state.mFrame)
+                state.mFrame->setVisible(false);
             if (state.mName)
                 state.mName->setVisible(false);
         }
     }
 
-    void HUD::pushCombatHealthBarProgress(CombatHealthBarState& state)
-    {
-        MyGUI::ProgressBar* bar = state.mWidget;
-        if (!bar || !state.mFrameHasProgress)
-            return;
-
-        const std::size_t realRange = static_cast<std::size_t>(CombatBar::sProgressResolution);
-        const std::size_t realPosition = std::min(state.mFrameProgressPosition, realRange);
-
-        // MyGUI 3.2.2 setProgressRange()/setProgressPosition() both call
-        // updateTrack() unconditionally. What matters after pool reuse or a skin
-        // swap is therefore not a fake intermediate numerical value, but making
-        // sure the real values are reasserted only once this frame has verified HP.
-        state.mNeedsTrackReset = false;
-        bar->setProgressRange(realRange);
-        bar->setProgressPosition(realPosition);
-    }
-
     void HUD::applyCombatHealthBar(CombatHealthBarState& state, float dt)
     {
-        MyGUI::ProgressBar* bar = state.mWidget;
-        if (!bar)
+        MyGUI::Widget* bar = state.mWidget;
+        MyGUI::Widget* fill = state.mFill;
+        if (!bar || !fill)
             return;
 
         const float fadeTau = state.mTargetAlpha > state.mAlpha
@@ -1986,28 +2085,23 @@ namespace MWGui
             {
                 state.mAlpha = 0.f;
                 state.mHasScreenState = false;
-                // A fully faded slot must not keep a place in the stack, otherwise
-                // it would hold a row open for an actor that is no longer there.
                 state.mDocked = false;
                 state.mDockBlend = 0.f;
                 state.mDockRow = -1;
+                state.mFrameHealthFraction = 0.f;
             }
             bar->setVisible(false);
+            fill->setVisible(false);
+            if (state.mFrame)
+                state.mFrame->setVisible(false);
             if (state.mName)
                 state.mName->setVisible(false);
             return;
         }
 
-        // Y008: a slot whose Track was invalidated must never expose a bare frame.
-        // If no verified health was resolved for the current actor this frame, keep
-        // the widget hidden and preserve mNeedsTrackReset for a later good frame.
-        if (state.mNeedsTrackReset && !state.mFrameHasProgress)
-        {
-            bar->setVisible(false);
-            if (state.mName)
-                state.mName->setVisible(false);
-            return;
-        }
+        // If this frame temporarily failed to resolve the actor, keep the last
+        // verified HP fraction during the existing linger/fade window. A fresh slot
+        // still has no screen state, so it cannot expose an empty frame.
 
         const int width = std::max(CombatBar::sHeadMinWidthPixels,
             static_cast<int>(std::lround(state.mWidth)));
@@ -2015,19 +2109,45 @@ namespace MWGui
             static_cast<int>(std::lround(state.mHeight)));
         const int left = static_cast<int>(std::lround(state.mCentreX - width * 0.5f));
         const int top = static_cast<int>(std::lround(state.mCentreY - height * 0.5f));
-
         const float alpha = std::min(1.f, state.mAlpha);
+
         bar->setCoord(left, top, width, height);
-        bar->setAlpha(alpha);
-        pushCombatHealthBarProgress(state);
         bar->setVisible(true);
 
-        // X025: the caption rides directly on top of the bar for the whole trip, so
-        // it never detaches or slides in from somewhere else. It is invisible over
-        // the head (unreadable at range, and it would clutter a busy fight) and
-        // fades in over the last part of the dock transition.
+        // The world-space representation is always a simple thin red line. The
+        // frame does not exist visually until the travel into the HUD is complete.
+        const bool inHudFrame = state.mDocked && state.mDockBlend >= 0.985f;
+        const int inset = inHudFrame ? 2 : 0;
+        const int fillHeight = std::max(1, height - inset * 2);
+        const int availableWidth = std::max(1, width - inset * 2);
+        const float healthFraction = CombatBar::clamp01(state.mFrameHealthFraction);
+        int fillWidth = static_cast<int>(std::lround(availableWidth * healthFraction));
+        if (healthFraction > 0.f)
+            fillWidth = std::max(1, fillWidth);
+        fillWidth = std::min(availableWidth, std::max(0, fillWidth));
+
+        if (fillWidth > 0)
+        {
+            fill->setCoord(inset, inset, fillWidth, fillHeight);
+            fill->setAlpha(alpha);
+            fill->setVisible(true);
+        }
+        else
+        {
+            fill->setVisible(false);
+        }
+
+        if (state.mFrame)
+        {
+            state.mFrame->setCoord(0, 0, width, height);
+            state.mFrame->setAlpha(alpha);
+            state.mFrame->setVisible(inHudFrame);
+        }
+
         if (state.mName)
         {
+            // Name remains a dock-only affordance. It fades during the final part
+            // of the trip, while the actual frame appears only at the destination.
             const float nameReveal = CombatBar::clamp01(
                 (state.mDockBlend - CombatBar::sNameFadeStart)
                 / std::max(0.001f, 1.f - CombatBar::sNameFadeStart));
@@ -2098,17 +2218,8 @@ namespace MWGui
                     participants[enemy] = false;
             }
 
-            std::set<MWWorld::Ptr> allies;
-            mechanics->getActorsSidingWith(player, allies);
-            for (const MWWorld::Ptr& ally : allies)
-            {
-                if (ally.isEmpty() || participants.count(ally) || !ally.getClass().isActor())
-                    continue;
-
-                const MWMechanics::CreatureStats& stats = ally.getClass().getCreatureStats(ally);
-                if (!stats.isDead() && stats.getAiSequence().isInCombat())
-                    participants[ally] = true;
-            }
+            // Y022: this combat HP system is enemy-only. Friendly actors retain
+            // their compass relationship markers but do not consume combat-bar slots.
 
             const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
             constexpr float maximumBarDistanceSquared
@@ -2138,7 +2249,7 @@ namespace MWGui
 
                 Candidate candidate;
                 candidate.mActor = actor;
-                candidate.mAlly = participant.second;
+                candidate.mAlly = false;
                 candidate.mDistanceSquared = distanceSquared;
                 candidates.push_back(candidate);
             }
@@ -2231,32 +2342,14 @@ namespace MWGui
                 state.mDockSwitchTimer = 0.f;
                 state.mDockRow = -1;
                 state.mNameCaption.clear();
+                if (state.mFrame)
+                    state.mFrame->setVisible(false);
 
-                // Y008: owner reuse invalidates the pooled ProgressBar Track. Only
-                // mark it here; the reset is consumed at the first successful draw
-                // with real health data.
-                state.mNeedsTrackReset = true;
+                state.mFrameHealthFraction = 0.f;
                 slotTaken[freeSlots[nextFree]] = true;
                 ++nextFree;
             }
 
-            // Re-skin against what the widget is actually wearing, not against the
-            // previous ally flag: a slot cleared by hideCombatHealthBars resets that
-            // flag to "enemy" while the widget still carries the green skin.
-            for (CombatHealthBarState& state : mCombatHealthBars)
-            {
-                if (state.mActor.isEmpty() || !state.mWidget || state.mSkinAlly == state.mAlly)
-                    continue;
-
-                state.mWidget->changeWidgetSkin(state.mAlly ? "MW_Progress_Green" : "MW_Progress_Red");
-                state.mWidget->setNeedMouseFocus(false);
-
-                // Y008: changeWidgetSkin() can replace the internal Track widget.
-                // Deferred to applyCombatHealthBar() for the same reason as above.
-                state.mNeedsTrackReset = true;
-                state.mDisplayHealth = -1.f;
-                state.mSkinAlly = state.mAlly;
-            }
         }
 
         const MyGUI::IntSize& viewSize = MyGUI::RenderManager::getInstance().getViewSize();
@@ -2283,10 +2376,9 @@ namespace MWGui
             state.mFrameResolved = false;
             state.mFrameDrop = false;
             state.mFrameAlpha = 1.f;
-            state.mFrameHasProgress = false;
             state.mFrameDistance = 0.f;
 
-            MyGUI::ProgressBar* bar = state.mWidget;
+            MyGUI::Widget* bar = state.mWidget;
             if (!bar)
                 continue;
 
@@ -2307,7 +2399,8 @@ namespace MWGui
             MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
             const float maximumHealth = stats.getHealth().getModified();
             const float currentHealth = stats.getHealth().getCurrent();
-            if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
+            if (stats.isDead() || !std::isfinite(maximumHealth) || !std::isfinite(currentHealth)
+                || maximumHealth <= 0.f || currentHealth <= 0.f)
             {
                 // Death still fades rather than blinking, but without the grace
                 // period: there is nothing left to track.
@@ -2369,6 +2462,9 @@ namespace MWGui
             state.mFrameDistance = distance;
             state.mFrameResolved = true;
 
+            // Y022: the same stable ProgressBar skin is used for every distance.
+            // No live skin replacement occurs while the actor approaches the HUD.
+
             if (distance > CombatBar::sFadeOutStartDistance)
                 state.mFrameAlpha = CombatBar::clamp01(
                     (CombatBar::sVanishDistance - distance)
@@ -2420,9 +2516,7 @@ namespace MWGui
                     state.mDisplayHealth, currentHealth, CombatBar::sSmoothTauHealth, dt);
 
             const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
-            state.mFrameProgressPosition = static_cast<std::size_t>(
-                std::lround(healthFraction * CombatBar::sProgressResolution));
-            state.mFrameHasProgress = true;
+            state.mFrameHealthFraction = healthFraction;
 
             if (state.mName)
             {

@@ -957,6 +957,12 @@ namespace MWClass
                 if (!attacker.isEmpty())
                     MWBase::Environment::get().getWorld()->spawnBloodEffect(ptr, hitPosition);
             }
+            // Arena Y021: report only confirmed local-player weapon damage, after
+            // resistance, armor and difficulty scaling have produced the real HP loss.
+            if (damage > 0.f && !object.isEmpty() && !attacker.isEmpty()
+                && attacker == MWMechanics::getPlayer())
+                MWBase::Environment::get().getWindowManager()->hudDamageNumber(damage);
+
             MWMechanics::DynamicStat<float> health(getCreatureStats(ptr).getHealth());
             health.setCurrent(health.getCurrent() - damage);
             stats.setHealth(health);

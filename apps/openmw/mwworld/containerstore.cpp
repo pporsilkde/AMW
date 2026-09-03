@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include <components/debug/debuglog.hpp>
+#include <components/misc/stringops.hpp>
 #include <components/esm/inventorystate.hpp>
 
 #include "../mwbase/environment.hpp"
