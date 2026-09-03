@@ -1,3 +1,22 @@
+## Y028s
+- Floating damage numbers are smaller (15 px), red, and use a negative HP format such as `-12`.
+- Hostile overhead HP is thinner (3 px near / 2 px minimum far) while the docked HUD bar remains 9 px.
+- The decorative HP frame fades continuously with dockBlend; it still cannot render without a positive fill.
+
+## Y027s
+- Combat HP frame cannot render without a positive fill width.
+
+## Arena Y025s — combat HP cell reset / damage-number recovery
+
+- Hard reset of combat HP slots on CellStore changes.
+- Valid-health ownership gate prevents empty combat frames.
+- Floating damage numbers no longer depend on transient crosshair visibility or a non-empty weapon Ptr.
+
+## Arena Y024s — packaging sync
+
+- No ArenaMW gameplay change in Y024; the functional change is ArenaMP-only chat behaviour.
+- All Y023s combat HP fixes remain unchanged.
+
 ## Arena Y023 — direct combat HP fill
 
 - Combat HP no longer uses MyGUI::ProgressBar or Track state.

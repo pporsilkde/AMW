@@ -959,7 +959,7 @@ namespace MWClass
             }
             // Arena Y021: report only confirmed local-player weapon damage, after
             // resistance, armor and difficulty scaling have produced the real HP loss.
-            if (damage > 0.f && !object.isEmpty() && !attacker.isEmpty()
+            if (damage > 0.f && !attacker.isEmpty()
                 && attacker == MWMechanics::getPlayer())
                 MWBase::Environment::get().getWindowManager()->hudDamageNumber(damage);
 

@@ -464,7 +464,7 @@ namespace MWClass
 
                 // Arena Y021: report only confirmed local-player weapon damage, after
                 // armor/difficulty scaling. Spell hits use an empty object and stay silent.
-                if (damage > 0.f && !object.isEmpty() && !attacker.isEmpty()
+                if (damage > 0.f && !attacker.isEmpty()
                     && attacker == MWMechanics::getPlayer())
                     MWBase::Environment::get().getWindowManager()->hudDamageNumber(damage);
 

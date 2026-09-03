@@ -40,6 +40,7 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
     meshes/*.nif
     sound/*.wav
     sound/*.mp3
+    textures/*.dds
     textures/vfx/*.dds
     textures/vfx/*.tga
     textures/exploot/food/*.tga

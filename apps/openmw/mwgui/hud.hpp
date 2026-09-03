@@ -14,6 +14,7 @@
 namespace MWWorld
 {
     class Ptr;
+    class CellStore;
 }
 
 namespace MWGui
@@ -161,6 +162,10 @@ namespace MWGui
             // consumed by pass 3. Meaningless outside that function.
             bool mFrameResolved = false;
             bool mFrameDrop = false;
+            // Y025: a slot may only render after health has been successfully
+            // resolved for its current owner. This prevents a recycled/docked frame
+            // from appearing empty during cell/authority hand-offs.
+            bool mHasValidHealth = false;
             float mFrameDistance = 0.f;
             float mFrameAlpha = 1.f;
             float mFrameHealthFraction = 0.f;
@@ -172,6 +177,9 @@ namespace MWGui
 
         std::vector<CombatHealthBarState> mCombatHealthBars;
         float mCombatHealthBarScanTimer = 0.f;
+        // Y025: hard-reset presentation state whenever the player's CellStore changes.
+        // Linger is useful inside one cell, but must never bridge exterior/interior loads.
+        MWWorld::CellStore* mCombatPlayerCell = nullptr;
         // Monotonic counter handing out mDockSequence, so stack rows keep their order.
         unsigned int mCombatDockSequenceCounter = 0;
 

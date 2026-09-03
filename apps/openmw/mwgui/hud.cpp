@@ -181,7 +181,9 @@ namespace
         // just before it disappears. Deliberately small: the overhead bar is a
         // glance-value readout, the docked stack is where the detail lives.
         constexpr float sHeadWidthMax = 92.f;
-        constexpr float sHeadHeightMax = 4.f;
+        // Y028: hostile overhead HP is about one third thinner than Y027.
+        // The docked HUD row still expands to sDockBarHeight below.
+        constexpr float sHeadHeightMax = 3.f;
         constexpr float sHeadScaleMin = 0.28f;
         // Gap between the top of the actor's hit box and the bar. Kept tight so
         // the bar reads as belonging to that actor and not as floating above the
@@ -191,11 +193,10 @@ namespace
         // distance ramp produces at the vanishing distance, otherwise the bar
         // would stop shrinking early and the falloff would look truncated.
         constexpr int sHeadMinWidthPixels = 22;
-        // Y022: overhead combat HP is deliberately only a thin coloured line.
+        // Y028: overhead combat HP is deliberately only a thin coloured line.
         // There is no frame above actors at any distance; the frame belongs solely
-        // to the docked HUD presentation. Keep enough height for a stable 3 px track
-        // even at the far end of the distance fade.
-        constexpr int sHeadMinHeightPixels = 3;
+        // to the docked HUD presentation. Two pixels is the stable far-distance floor.
+        constexpr int sHeadMinHeightPixels = 2;
         constexpr int sScreenMargin = 6;
 
         // ------------------------------------------------------------------
@@ -215,6 +216,10 @@ namespace
         // bar actually moves. Without it an enemy circling at ~15 paces would make
         // its bar hop between the head and the stack.
         constexpr float sDockSwitchDelay = 0.25f;
+        // Y028: the decorative HUD frame is a presentation layer, not a second bar.
+        // It starts faintly appearing during the latter part of the trip into the HUD
+        // and starts fading immediately when the bar leaves the HUD again.
+        constexpr float sFrameFadeStart = 0.35f;
         // The name only becomes readable once the bar is essentially in the stack.
         constexpr float sNameFadeStart = 0.55f;
 
@@ -539,9 +544,11 @@ namespace MWGui
                 MyGUI::Align::Left | MyGUI::Align::Top,
                 "FloatingDamage" + MyGUI::utility::toString(i));
             state.mWidget->setNeedMouseFocus(false);
-            state.mWidget->setFontHeight(18);
+            // Y028: compact hostile feedback, smaller than Y027 and using the
+            // same red family as enemy HUD/compass feedback.
+            state.mWidget->setFontHeight(15);
             state.mWidget->setTextAlign(MyGUI::Align::Center);
-            state.mWidget->setTextColour(MyGUI::Colour::White);
+            state.mWidget->setTextColour(MyGUI::Colour(1.00f, 0.18f, 0.16f));
             state.mWidget->setTextShadow(true);
             state.mWidget->setTextShadowColour(MyGUI::Colour::Black);
             state.mWidget->setVisible(false);
@@ -1958,8 +1965,11 @@ namespace MWGui
 
     void HUD::pushDamageNumber(float damage)
     {
+        // Y025: damage feedback is anchored to the screen centre, not to the
+        // transient visibility state of the crosshair widget. ArenaMP may hide or
+        // rebuild the reticle in the exact frame a confirmed hit arrives.
         if (damage <= 0.f || !mGameplayHud || !mGameplayHud->getVisible()
-            || !mCrosshair || !mCrosshair->getVisible() || mFloatingDamageNumbers.empty())
+            || mFloatingDamageNumbers.empty())
             return;
 
         FloatingDamageState* slot = nullptr;
@@ -1993,7 +2003,7 @@ namespace MWGui
         // Weapon damage in Morrowind can be fractional internally, but the compact
         // RPG readout deliberately uses the nearest real HP point.
         const int shownDamage = std::max(1, static_cast<int>(std::lround(damage)));
-        slot->mWidget->setCaption(MyGUI::utility::toString(shownDamage));
+        slot->mWidget->setCaption("-" + MyGUI::utility::toString(shownDamage));
         slot->mWidget->setAlpha(1.f);
         slot->mWidget->setVisible(true);
     }
@@ -2022,8 +2032,8 @@ namespace MWGui
             }
 
             // Start just outside the 64 px normal reticle, drift a little farther
-            // sideways and upwards, then dissolve. Font height 18 stays well below
-            // the reticle size even on the default HUD scale.
+            // sideways and upwards, then dissolve. Font height 15 keeps the red
+            // negative damage readout subordinate to the reticle itself.
             const float outward = 40.f + 28.f * t;
             const float rise = 24.f * t;
             const float x = centreX + state.mSide * outward - 39.f;
@@ -2051,6 +2061,8 @@ namespace MWGui
             state.mTargetAlpha = 0.f;
             state.mDisplayHealth = -1.f;
             state.mLingerTimer = 0.f;
+            state.mHasValidHealth = false;
+            state.mFrameHealthFraction = 0.f;
             state.mDocked = false;
             state.mDockBlend = 0.f;
             state.mDockSwitchTimer = 0.f;
@@ -2074,6 +2086,21 @@ namespace MWGui
         if (!bar || !fill)
             return;
 
+        // Y027: a combat slot is drawable only when both the validity marker and
+        // the current health fraction agree. These values are updated on different
+        // paths, so treating either one alone as authoritative can expose a docked
+        // decorative frame while the actual fill is empty.
+        if (!state.mHasValidHealth || !(state.mFrameHealthFraction > 0.f))
+        {
+            bar->setVisible(false);
+            fill->setVisible(false);
+            if (state.mFrame)
+                state.mFrame->setVisible(false);
+            if (state.mName)
+                state.mName->setVisible(false);
+            return;
+        }
+
         const float fadeTau = state.mTargetAlpha > state.mAlpha
             ? CombatBar::sFadeInTime : CombatBar::sFadeOutTime;
         state.mAlpha = CombatBar::approach(state.mAlpha, state.mTargetAlpha, fadeTau, dt);
@@ -2089,6 +2116,7 @@ namespace MWGui
                 state.mDockBlend = 0.f;
                 state.mDockRow = -1;
                 state.mFrameHealthFraction = 0.f;
+                state.mHasValidHealth = false;
             }
             bar->setVisible(false);
             fill->setVisible(false);
@@ -2114,10 +2142,16 @@ namespace MWGui
         bar->setCoord(left, top, width, height);
         bar->setVisible(true);
 
-        // The world-space representation is always a simple thin red line. The
-        // frame does not exist visually until the travel into the HUD is complete.
-        const bool inHudFrame = state.mDocked && state.mDockBlend >= 0.985f;
-        const int inset = inHudFrame ? 2 : 0;
+        // Y028: overhead is always a bare red line. The decorative frame fades in
+        // continuously during the latter part of the trip to the HUD and fades out
+        // immediately as the same dockBlend runs backwards toward the actor's head.
+        // This avoids the old hard on/off threshold at 0.985.
+        const float frameRevealLinear = CombatBar::clamp01(
+            (state.mDockBlend - CombatBar::sFrameFadeStart)
+            / std::max(0.001f, 1.f - CombatBar::sFrameFadeStart));
+        const float frameReveal = frameRevealLinear * frameRevealLinear
+            * (3.f - 2.f * frameRevealLinear); // smoothstep
+        const int inset = static_cast<int>(std::lround(2.f * frameReveal));
         const int fillHeight = std::max(1, height - inset * 2);
         const int availableWidth = std::max(1, width - inset * 2);
         const float healthFraction = CombatBar::clamp01(state.mFrameHealthFraction);
@@ -2140,8 +2174,11 @@ namespace MWGui
         if (state.mFrame)
         {
             state.mFrame->setCoord(0, 0, width, height);
-            state.mFrame->setAlpha(alpha);
-            state.mFrame->setVisible(inHudFrame);
+            const float frameAlpha = alpha * frameReveal;
+            state.mFrame->setAlpha(frameAlpha);
+            // Structural safety rule retained from Y027: a frame is never visible
+            // without a visible fill, even while its alpha is being interpolated.
+            state.mFrame->setVisible(frameAlpha > 0.01f && fillWidth > 0);
         }
 
         if (state.mName)
@@ -2193,8 +2230,19 @@ namespace MWGui
         const MWWorld::Ptr player = world->getPlayerPtr();
         if (player.isEmpty() || !player.isInCell())
         {
+            mCombatPlayerCell = nullptr;
             hideCombatHealthBars();
             return;
+        }
+
+        // Y025: world-space combat widgets must not survive a CellStore hand-off.
+        // In particular exterior -> interior -> exterior used to preserve a docked
+        // frame while the new cell had not supplied valid actor stats yet.
+        MWWorld::CellStore* playerCell = player.getCell();
+        if (mCombatPlayerCell != playerCell)
+        {
+            hideCombatHealthBars();
+            mCombatPlayerCell = playerCell;
         }
 
         // Rebuild only the participant list at 10 Hz. Projection, distance scaling
@@ -2341,7 +2389,11 @@ namespace MWGui
                 state.mDockBlend = 0.f;
                 state.mDockSwitchTimer = 0.f;
                 state.mDockRow = -1;
+                state.mHasValidHealth = false;
+                state.mFrameHealthFraction = 0.f;
                 state.mNameCaption.clear();
+                if (state.mFill)
+                    state.mFill->setVisible(false);
                 if (state.mFrame)
                     state.mFrame->setVisible(false);
 
@@ -2517,6 +2569,7 @@ namespace MWGui
 
             const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
             state.mFrameHealthFraction = healthFraction;
+            state.mHasValidHealth = healthFraction > 0.f;
 
             if (state.mName)
             {
