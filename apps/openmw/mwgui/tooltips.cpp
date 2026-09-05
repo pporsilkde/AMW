@@ -1,5 +1,6 @@
 #include "tooltips.hpp"
 
+#include <exception>
 #include <iomanip>
 
 #include <MyGUI_Gui.h>
@@ -293,12 +294,8 @@ namespace MWGui
                             key.erase(key.begin(), key.begin() + caretPos + 1);
                         }
 
-                        // A user string may simply be payload the owner widget
-                        // carries around (ArenaXPSkillId and friends). Those must
-                        // never abort the whole pass: getWidget() throws, and the
-                        // exception used to escape all the way out of
-                        // WindowManager::update(), leaving the tooltip box visible
-                        // but empty and unpositioned.
+                        // Layout payload can contain owner-only user strings. Missing
+                        // widgets must not abort WindowManager::update().
                         MyGUI::Widget* w = nullptr;
                         try
                         {

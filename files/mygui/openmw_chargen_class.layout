@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <MyGUI type="Layout">
-    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 491 316" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 491 342" align="Center" name="_Main">
 
         <!-- Class list -->
         <Widget type="ListBox" skin="MW_List" position="8 8 194 138" name="ClassList"/>
@@ -11,8 +11,26 @@
             <Widget type="ImageBox" skin="ImageBox" position="2 2 261 134" name="ClassImage" align="Left Top"/>
         </Widget>
 
+        <!-- Y043: make the selected attribute-pair archetype obvious before accepting the class. -->
+        <Widget type="Widget" skin="MW_Box" position="8 152 467 28" align="Left Top HStretch">
+            <Widget type="TextBox" skin="SandBrightText" position="4 3 459 19" name="ArchetypeName" align="HStretch Top">
+                <Property key="TextAlign" value="Center VCenter"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="4 22 459 18" name="ArchetypePair" align="HStretch Top">
+                <Property key="Visible" value="false"/>
+                <Property key="TextAlign" value="Center VCenter"/>
+            </Widget>
+            <Widget type="ProgressBar" skin="MW_Progress_Green" position="4 40 459 14" name="ArchetypePowerBar" align="HStretch Top">
+                <Property key="Visible" value="false"/>
+                <Widget type="TextBox" skin="ProgressText" position="0 0 459 14" name="ArchetypePowerText" align="Stretch">
+                    <Property key="NeedMouse" value="false"/>
+                    <Property key="TextAlign" value="Center VCenter"/>
+                </Widget>
+            </Widget>
+        </Widget>
+
         <!-- Specialization -->
-        <Widget type="Widget" skin="" position="8 156 484 178" align="Left Top">
+        <Widget type="Widget" skin="" position="8 188 484 116" align="Left Top">
 
             <Widget type="TextBox" skin="HeaderText" position="0 0 166 18" name="SpecializationT" align="Left Top">
                 <Property key="Caption" value="#{sChooseClassMenu1}"/>
@@ -73,7 +91,7 @@
         </Widget>
 
         <!-- Dialog buttons -->
-        <Widget type="HBox" position="0 276 475 28">
+        <Widget type="HBox" position="0 308 475 28">
             <Widget type="Spacer"/>
             <Widget type="AutoSizedButton" skin="MW_Button" name="BackButton">
                 <Property key="Caption" value="#{sBack}"/>

@@ -18,14 +18,16 @@
 
         <!-- Character identity summary. -->
         <Widget type="Widget" skin="MW_Box" position="274 50 478 106">
-            <Widget type="TextBox" skin="SandText" position="12 10 90 20"><Property key="Caption" value="#{sName}"/></Widget>
-            <Widget type="TextBox" skin="SandTextRight" position="108 10 350 20" name="NameText"/>
-            <Widget type="TextBox" skin="SandText" position="12 34 90 20"><Property key="Caption" value="#{sRace}"/></Widget>
-            <Widget type="TextBox" skin="SandTextRight" position="108 34 350 20" name="RaceText"/>
-            <Widget type="TextBox" skin="SandText" position="12 58 90 20"><Property key="Caption" value="#{sClass}"/></Widget>
-            <Widget type="TextBox" skin="SandTextRight" position="108 58 350 20" name="ClassText"/>
-            <Widget type="TextBox" skin="SandText" position="12 82 90 20"><Property key="Caption" value="#{sBirthSign}"/></Widget>
-            <Widget type="TextBox" skin="SandTextRight" position="108 82 350 20" name="SignText"/>
+            <Widget type="TextBox" skin="SandText" position="12 6 90 18"><Property key="Caption" value="#{sName}"/></Widget>
+            <Widget type="TextBox" skin="SandTextRight" position="108 6 350 18" name="NameText"/>
+            <Widget type="TextBox" skin="SandText" position="12 25 90 18"><Property key="Caption" value="#{sRace}"/></Widget>
+            <Widget type="TextBox" skin="SandTextRight" position="108 25 350 18" name="RaceText"/>
+            <Widget type="TextBox" skin="SandText" position="12 44 90 18"><Property key="Caption" value="#{sClass}"/></Widget>
+            <Widget type="TextBox" skin="SandTextRight" position="108 44 350 18" name="ClassText"/>
+            <Widget type="TextBox" skin="SandText" position="12 63 90 18" name="ArchetypeLabel"><Property key="Caption" value="#{arenamp=archetype.label}"/></Widget>
+            <Widget type="TextBox" skin="SandTextRight" position="108 63 350 18" name="ArchetypeText"/>
+            <Widget type="TextBox" skin="SandText" position="12 82 90 18"><Property key="Caption" value="#{sBirthSign}"/></Widget>
+            <Widget type="TextBox" skin="SandTextRight" position="108 82 350 18" name="SignText"/>
         </Widget>
 
         <!-- Dynamic stats. -->

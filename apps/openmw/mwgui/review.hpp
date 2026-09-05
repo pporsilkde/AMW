@@ -123,7 +123,7 @@ namespace MWGui
         int mPreviewDragY;
         bool mPreviewInitPending;
 
-        MyGUI::TextBox *mNameWidget, *mRaceWidget, *mClassWidget, *mBirthSignWidget;
+        MyGUI::TextBox *mNameWidget, *mRaceWidget, *mClassWidget, *mArchetypeWidget, *mBirthSignWidget;
         MyGUI::ScrollView* mSkillView;
 
         Widgets::MWDynamicStatPtr mHealth, mMagicka, mFatigue;

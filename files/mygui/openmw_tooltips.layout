@@ -29,6 +29,50 @@
             </Widget>
         </Widget>
 
+        <!-- Y046c: archetype tooltip with a real progress bar.
+
+             Structural rules taken from the working LevelToolTip / SkillToolTip:
+             a non-auto-sized child of an auto-resizing Gui::VBox must NEVER use a
+             stretching MyGUI align. Gui::VBox::align() feeds the child's current
+             width back into the box size, MyGUI then re-stretches that child by the
+             same delta, and the two never converge -> endless align() recursion ->
+             0xC00000FD STATUS_STACK_OVERFLOW inside MyGUIEngine.
+             The bar therefore keeps a fixed width and align="HCenter Top", exactly
+             like LevelProgress and SkillProgress. Do not add Stretch/HStretch to it. -->
+        <!-- Y046d: full archetype tooltip. The real progress bar has a fixed width
+             and HCenter alignment; it must never Stretch inside AutoResize VBox. -->
+        <Widget type="VBox" skin="HUD_Box_NoTransp" position="0 0 0 0" align="Stretch" name="ArchetypeToolTip">
+            <Property key="AutoResize" value="true"/>
+            <Property key="Padding" value="8"/>
+            <Property key="Spacing" value="6"/>
+
+            <Widget type="AutoSizedTextBox" skin="SandBrightText" position="8 8 500 18" align="Left Top" name="ArchetypeTitle">
+                <Property key="TextAlign" value="Center"/>
+            </Widget>
+
+            <!-- Y046e: thicker bar. The caption widget is a child of the skin's
+                 "Client" area, which MW_Progress_Green insets by 2 px on every side
+                 (Client offset "2 2 60 8" in a 64x12 skin). Sizing the caption to the
+                 full bar rectangle therefore pushes it 2 px below the visual centre,
+                 so the caption is 4 px smaller than the bar in both axes.
+                 Keep align="HCenter Top" on the bar itself: a stretching align on a
+                 non-AutoSized child of an AutoResize VBox reintroduces the endless
+                 Gui::VBox::align() recursion (STATUS_STACK_OVERFLOW). -->
+            <Widget type="ProgressBar" skin="MW_Progress_Green" position="0 0 420 24" align="HCenter Top" name="ArchetypePowerBar">
+                <Widget type="TextBox" skin="ProgressText" position="0 0 416 20" align="Stretch" name="ArchetypePowerText">
+                    <Property key="NeedMouse" value="false"/>
+                    <Property key="TextAlign" value="Center"/>
+                </Widget>
+            </Widget>
+
+            <Widget type="AutoSizedEditBox" skin="SandText" position="8 8 500 0" align="Left Top" name="ArchetypeDetails">
+                <Property key="MultiLine" value="true"/>
+                <Property key="Shrink" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextAlign" value="Left Top"/>
+            </Widget>
+        </Widget>
+
         <!-- Faction tooltip -->
         <Widget type="VBox" skin="HUD_Box_NoTransp" position="0 0 0 0" align="Stretch" name="FactionToolTip">
             <Property key="AutoResize" value="true"/>
@@ -229,7 +273,7 @@
                 <Widget type="ImageBox" skin="ImageBox" position="8 8 32 32" align="Left Top" name="SkillNoProgressImage"/>
 
                 <Widget type="VBox">
-                    <Widget type="AutoSizedTextBox" skin="NormalText" position="44 8 0 16" align="Left Top" name="SkillNoProgressName">
+                    <Widget type="AutoSizedEditBox" skin="NormalText" position="44 8 0 16" align="Left Top" name="SkillNoProgressName">
                         <Property key="TextAlign" value="Left"/>
                         <UserString key="HStretch" value="true"/>
                     </Widget>
@@ -245,10 +289,8 @@
 
             <Widget type="AutoSizedEditBox" skin="SandText" position="8 44 430 0" align="Left Top" name="SkillNoProgressDescription">
                 <Property key="MultiLine" value="true"/>
-                <Property key="Shrink" value="true"/>
                 <Property key="WordWrap" value="true"/>
                 <Property key="TextAlign" value="Left Top"/>
-                <UserString key="HStretch" value="true"/>
             </Widget>
         </Widget>
 

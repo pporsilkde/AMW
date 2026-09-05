@@ -8,6 +8,7 @@
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_Gui.h>
+#include <MyGUI_LanguageManager.h>
 
 #include <osg/Texture2D>
 
@@ -19,9 +20,71 @@
 #include "../mwbase/windowmanager.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwmechanics/autocalcspell.hpp"
+#include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 #include "../mwrender/characterpreview.hpp"
 
 #include "tooltips.hpp"
+
+namespace
+{
+    std::string arenaText(const std::string& key)
+    {
+        return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    std::string archetypeText(const MWMechanics::ClassArchetype::DisplayInfo& info, const std::string& field)
+    {
+        return arenaText("archetype." + info.id + "." + field);
+    }
+
+    std::string archetypeAttributeName(int attribute)
+    {
+        return MWBase::Environment::get().getWindowManager()->getGameSettingString(
+            ESM::Attribute::sGmstAttributeIds[attribute], ESM::Attribute::sGmstAttributeIds[attribute]);
+    }
+
+    std::string archetypeTooltipText(
+        const MWMechanics::ClassArchetype::DisplayInfo& info, int attribute0, int attribute1)
+    {
+        std::string text = arenaText("archetype.attributes") + ": "
+            + archetypeAttributeName(attribute0) + " + " + archetypeAttributeName(attribute1);
+        text += "\n\n" + arenaText("archetype.buff") + ":\n" + archetypeText(info, "buff");
+        if (info.id == "thief" || info.id == "nightblade" || info.id == "rogue")
+            text += "\n" + arenaText("archetype.conditional_bonus") + ": " + arenaText("archetype.condition.sneak");
+        else if (info.id == "monk")
+            text += "\n" + arenaText("archetype.conditional_bonus") + ": " + arenaText("archetype.condition.unarmored");
+
+        text += "\n\n" + arenaText("archetype.debuff") + ":\n" + archetypeText(info, "debuff");
+        if (info.id == "fire_warrior" || info.id == "champion" || info.id == "monk"
+            || info.id == "spellsword" || info.id == "duelist")
+            text += "\n" + arenaText("archetype.conditional_penalty") + ": " + arenaText("archetype.condition.armor");
+        text += "\n\n" + arenaText("archetype.growth_hint");
+        return text;
+    }
+
+    void setArchetypeTooltip(MyGUI::Widget* widget, const MWMechanics::ClassArchetype::DisplayInfo& info,
+        int attribute0, int attribute1)
+    {
+        if (!widget)
+            return;
+
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        const int powerPercent = std::clamp(static_cast<int>(std::lround(
+            MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1) * 100.f)), 0, 100);
+
+        widget->setUserString("ToolTipType", "Layout");
+        widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
+        widget->setUserString(
+            "Caption_ArchetypeTitle", arenaText("archetype.label") + ": " + archetypeText(info, "name"));
+        widget->setUserString("Range_ArchetypePowerBar", "100");
+        widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+        widget->setUserString("Caption_ArchetypePowerText",
+            arenaText("archetype.power") + ": " + MyGUI::utility::toString(powerPercent) + "%");
+        widget->setUserString(
+            "Caption_ArchetypeDetails", archetypeTooltipText(info, attribute0, attribute1));
+    }
+}
 
 namespace MWGui
 {
@@ -62,6 +125,8 @@ namespace MWGui
         getWidget(mClassWidget, "ClassText");
         getWidget(button, "ClassButton");
         button->eventMouseButtonClick += MyGUI::newDelegate(this, &ReviewDialog::onClassClicked);
+
+        getWidget(mArchetypeWidget, "ArchetypeText");
 
         getWidget(mBirthSignWidget, "SignText");
         getWidget(button, "SignButton");
@@ -120,7 +185,7 @@ namespace MWGui
 
     void ReviewDialog::setPlayerScale(float scale)
     {
-        mPlayerScale = std::max(0.85f, std::min(1.08f, scale));
+        mPlayerScale = std::max(0.85f, std::min(1.15f, scale));
         if (mPreview)
             mPreview->setUserScale(mPlayerScale);
     }
@@ -238,6 +303,24 @@ namespace MWGui
         mKlass = class_;
         mClassWidget->setCaption(mKlass.mName);
         ToolTips::createClassToolTip(mClassWidget, mKlass);
+
+        MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+        const int attribute0 = mKlass.mData.mAttribute[0];
+        const int attribute1 = mKlass.mData.mAttribute[1];
+        if (MWMechanics::ClassArchetype::getDisplayInfo(attribute0, attribute1, false, archetypeInfo))
+        {
+            mArchetypeWidget->setCaption(archetypeText(archetypeInfo, "name"));
+            setArchetypeTooltip(mArchetypeWidget, archetypeInfo, attribute0, attribute1);
+
+            MyGUI::Widget* archetypeLabel = nullptr;
+            getWidget(archetypeLabel, "ArchetypeLabel");
+            setArchetypeTooltip(archetypeLabel, archetypeInfo, attribute0, attribute1);
+        }
+        else
+        {
+            mArchetypeWidget->setCaption("—");
+            mArchetypeWidget->setUserString("ToolTipType", "");
+        }
     }
 
     void ReviewDialog::setBirthSign(const std::string& signId)

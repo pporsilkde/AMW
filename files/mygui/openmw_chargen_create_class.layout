@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout">
-    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 498 198" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 498 202" align="Center" name="_Main">
 
         <!-- Class name -->
         <Widget type="TextBox" skin="NormalText" position="8 8 52 23" name="LabelT" align="Left Top">
@@ -73,8 +73,36 @@
 
         </Widget>
 
+        <!-- Y046b: keep all named widgets for the stable C++ contract, but the
+             class-name field above is the only visible archetype presentation. -->
+        <Widget type="Widget" skin="MW_Box" position="8 158 480 140" align="HStretch Top">
+            <Property key="Visible" value="false"/>
+            <Widget type="TextBox" skin="SandBrightText" position="4 3 472 20" name="ArchetypeName" align="HStretch Top">
+                <Property key="TextAlign" value="Center VCenter"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="4 23 472 18" name="ArchetypePair" align="HStretch Top">
+                <Property key="TextAlign" value="Center VCenter"/>
+            </Widget>
+            <Widget type="ProgressBar" skin="MW_Progress_Green" position="4 42 472 14" name="ArchetypePowerBar" align="HStretch Top">
+                <Widget type="TextBox" skin="ProgressText" position="0 0 472 14" name="ArchetypePowerText" align="Stretch">
+                    <Property key="NeedMouse" value="false"/>
+                    <Property key="TextAlign" value="Center VCenter"/>
+                </Widget>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="6 61 468 36" name="ArchetypePerk" align="HStretch Top">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextColour" value="0.62 0.86 0.56"/>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="6 100 468 36" name="ArchetypeDrawback" align="HStretch Top">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextColour" value="0.90 0.58 0.50"/>
+            </Widget>
+        </Widget>
+
         <!-- Dialog buttons -->
-        <Widget type="HBox" position="0 158 482 28">
+        <Widget type="HBox" position="0 164 482 28">
             <Widget type="Spacer"/>
             <Widget type="AutoSizedButton" skin="MW_Button" name="DescriptionButton">
                 <Property key="Caption" value="#{sCreateClassMenu1}"/>

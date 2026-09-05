@@ -8,6 +8,7 @@
 #include <MyGUI_Gui.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_ListBox.h>
+#include <MyGUI_LanguageManager.h>
 #include <MyGUI_ScrollBar.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TextBox.h>
@@ -30,6 +31,8 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 #include "../mwrender/characterpreview.hpp"
 #include "../mwworld/esmstore.hpp"
 
@@ -45,6 +48,58 @@ namespace
         const std::pair<std::string, const ESM::BirthSign*>& right)
     {
         return left.second->mName < right.second->mName;
+    }
+
+    std::string arenaText(const std::string& key)
+    {
+        return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    std::string archetypeText(const MWMechanics::ClassArchetype::DisplayInfo& info, const std::string& field)
+    {
+        return arenaText("archetype." + info.id + "." + field);
+    }
+
+    std::string archetypeAttributeName(int attribute)
+    {
+        return MWBase::Environment::get().getWindowManager()->getGameSettingString(
+            ESM::Attribute::sGmstAttributeIds[attribute], ESM::Attribute::sGmstAttributeIds[attribute]);
+    }
+
+    std::string archetypeTooltipText(const MWMechanics::ClassArchetype::DisplayInfo& info, int attribute0, int attribute1)
+    {
+        std::string text = arenaText("archetype.attributes") + ": "
+            + archetypeAttributeName(attribute0) + " + " + archetypeAttributeName(attribute1);
+        text += "\n\n" + arenaText("archetype.buff") + ":\n" + archetypeText(info, "buff");
+        if (info.id == "thief" || info.id == "nightblade" || info.id == "rogue")
+            text += "\n" + arenaText("archetype.conditional_bonus") + ": " + arenaText("archetype.condition.sneak");
+        else if (info.id == "monk")
+            text += "\n" + arenaText("archetype.conditional_bonus") + ": " + arenaText("archetype.condition.unarmored");
+
+        text += "\n\n" + arenaText("archetype.debuff") + ":\n" + archetypeText(info, "debuff");
+        if (info.id == "fire_warrior" || info.id == "champion" || info.id == "monk"
+            || info.id == "spellsword" || info.id == "duelist")
+            text += "\n" + arenaText("archetype.conditional_penalty") + ": " + arenaText("archetype.condition.armor");
+        text += "\n\n" + arenaText("archetype.growth_hint");
+        return text;
+    }
+
+    void setArchetypeTooltip(MyGUI::Widget* widget, const MWMechanics::ClassArchetype::DisplayInfo& info,
+        int attribute0, int attribute1)
+    {
+        if (!widget)
+            return;
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        const int powerPercent = std::clamp(static_cast<int>(std::lround(
+            MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1) * 100.f)), 0, 100);
+        widget->setUserString("ToolTipType", "Layout");
+        widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
+        widget->setUserString("Caption_ArchetypeTitle", arenaText("archetype.label") + ": " + archetypeText(info, "name"));
+        widget->setUserString("Range_ArchetypePowerBar", "100");
+        widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+        widget->setUserString("Caption_ArchetypePowerText", arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%");
+        widget->setUserString("Caption_ArchetypeDetails", archetypeTooltipText(info, attribute0, attribute1));
     }
 }
 
@@ -123,8 +178,8 @@ namespace MWGui
         getWidget(mFaceValue, "FaceValue");
         getWidget(mHairValue, "HairValue");
 
-        // 47 integer steps -> 0.85 .. 1.08 in 0.005 increments.
-        mScale->setScrollRange(47);
+        // 61 integer steps -> 0.85 .. 1.15 in 0.005 increments.
+        mScale->setScrollRange(61);
         mScale->setScrollPosition(30);
         mScale->setScrollViewPage(1);
         mScale->setScrollPage(1);
@@ -221,7 +276,7 @@ namespace MWGui
 
     void RaceDialog::setPlayerScale(float value)
     {
-        mPlayerScale = std::max(0.85f, std::min(1.08f, value));
+        mPlayerScale = std::max(0.85f, std::min(1.15f, value));
         if (mScale)
         {
             const size_t position = static_cast<size_t>(std::lround((mPlayerScale - 0.85f) / 0.005f));
@@ -945,9 +1000,26 @@ namespace MWGui
         ToolTips::createSpecializationToolTip(mSpecializationName, specName,
             static_cast<ESM::Class::Specialization>(specialization));
 
-        mClassName->setCaption(mClassResult.mName);
-        // Manual editing changes the logical profile to Adventurer, but the last
-        // selected class illustration is deliberately kept as visual context.
+        MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+        const bool hasArchetype = MWMechanics::ClassArchetype::getDisplayInfo(
+            mClassResult.mData.mAttribute[0], mClassResult.mData.mAttribute[1], false, archetypeInfo);
+        if (hasArchetype)
+        {
+            const std::string localizedArchetype = archetypeText(archetypeInfo, "name");
+            // Random/manual profiles are dynamic classes: persist the current
+            // archetype name instead of the stock "Adventurer" fallback. Premade
+            // ESM classes keep their data/name, while this page still presents the
+            // derived archetype as the profile heading.
+            if (mCustomClass)
+                mClassResult.mName = localizedArchetype;
+            mClassName->setCaption(localizedArchetype);
+            setArchetypeTooltip(mClassName, archetypeInfo,
+                mClassResult.mData.mAttribute[0], mClassResult.mData.mAttribute[1]);
+        }
+        else
+            mClassName->setCaption(mClassResult.mName);
+
+        // Manual editing keeps the last selected class illustration as visual context.
         if (!mClassImageId.empty())
             setClassImage(mClassImage, mClassImageId);
         else

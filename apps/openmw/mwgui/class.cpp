@@ -3,12 +3,18 @@
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_ListBox.h>
 #include <MyGUI_Gui.h>
+#include <MyGUI_LanguageManager.h>
+#include <MyGUI_ProgressBar.h>
+
+#include <algorithm>
+#include <cmath>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 
 #include "../mwworld/esmstore.hpp"
 
@@ -18,6 +24,72 @@
 
 namespace
 {
+    std::string arenaText(const std::string& key)
+    {
+        return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    std::string archetypeText(const MWMechanics::ClassArchetype::DisplayInfo& info, const std::string& field)
+    {
+        return arenaText("archetype." + info.id + "." + field);
+    }
+
+    std::string attributeName(int attribute)
+    {
+        return MWBase::Environment::get().getWindowManager()->getGameSettingString(
+            ESM::Attribute::sGmstAttributeIds[attribute], ESM::Attribute::sGmstAttributeIds[attribute]);
+    }
+
+    std::string archetypePairText(int attribute0, int attribute1)
+    {
+        return attributeName(attribute0) + " + " + attributeName(attribute1);
+    }
+
+    std::string archetypePreviewTitle(const MWMechanics::ClassArchetype::DisplayInfo& info)
+    {
+        return arenaText("archetype.label") + ": " + archetypeText(info, "name");
+    }
+
+    std::string archetypePreviewTooltip(const MWMechanics::ClassArchetype::DisplayInfo& info,
+        int attribute0, int attribute1)
+    {
+        // Keep the preview self-contained: every archetype pulls its own localized
+        // buff/debuff description, so no generic Adventurer text can leak into the
+        // tooltip when another attribute pair is selected.
+        std::string text = arenaText("archetype.attributes") + ": " + archetypePairText(attribute0, attribute1);
+        text += "\n\n" + arenaText("archetype.buff") + ":\n" + archetypeText(info, "buff");
+
+        if (info.id == "thief" || info.id == "nightblade" || info.id == "rogue")
+            text += "\n" + arenaText("archetype.conditional_bonus") + ": " + arenaText("archetype.condition.sneak");
+        else if (info.id == "monk")
+            text += "\n" + arenaText("archetype.conditional_bonus") + ": " + arenaText("archetype.condition.unarmored");
+
+        text += "\n\n" + arenaText("archetype.debuff") + ":\n" + archetypeText(info, "debuff");
+        if (info.id == "fire_warrior" || info.id == "champion" || info.id == "monk"
+            || info.id == "spellsword" || info.id == "duelist")
+            text += "\n" + arenaText("archetype.conditional_penalty") + ": " + arenaText("archetype.condition.armor");
+
+        text += "\n\n" + arenaText("archetype.growth_hint");
+        return text;
+    }
+
+    // Y046c: the archetype preview tooltip uses the ArchetypeToolTip layout, which
+    // carries a real ProgressBar. Range/RangePosition are the same dynamic-property
+    // names SkillToolTip and LevelToolTip already rely on.
+    void setTextTooltip(MyGUI::Widget* widget, const std::string& title,
+        const std::string& details, int powerPercent)
+    {
+        if (!widget)
+            return;
+        widget->setUserString("ToolTipType", "Layout");
+        widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
+        widget->setUserString("Caption_ArchetypeTitle", title);
+        widget->setUserString("Range_ArchetypePowerBar", "100");
+        widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+        widget->setUserString("Caption_ArchetypePowerText", arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%");
+        widget->setUserString("Caption_ArchetypeDetails", details);
+    }
 
     bool sortClasses(const std::pair<std::string, std::string>& left, const std::pair<std::string, std::string>& right)
     {
@@ -54,7 +126,9 @@ namespace MWGui
 
     std::string GenerateClassResultDialog::getClassId() const
     {
-        return mClassName->getCaption();
+        // The visible caption is the localized archetype name; keep the real ESM
+        // class id separate so presentation can never alter character creation.
+        return mCurrentClassId;
     }
 
     void GenerateClassResultDialog::setClassId(const std::string &classId)
@@ -63,7 +137,23 @@ namespace MWGui
 
         setClassImage(mClassImage, mCurrentClassId);
 
-        mClassName->setCaption(MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find(mCurrentClassId)->mName);
+        const ESM::Class* klass = MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find(mCurrentClassId);
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        if (klass && MWMechanics::ClassArchetype::getDisplayInfo(
+                klass->mData.mAttribute[0], klass->mData.mAttribute[1], false, info))
+        {
+            const MWWorld::Ptr player = MWMechanics::getPlayer();
+            const int powerPercent = std::clamp(static_cast<int>(std::lround(
+                MWMechanics::ClassArchetype::getPairPower(
+                    player, klass->mData.mAttribute[0], klass->mData.mAttribute[1]) * 100.f)), 0, 100);
+            const std::string title = archetypePreviewTitle(info);
+            const std::string details = archetypePreviewTooltip(
+                info, klass->mData.mAttribute[0], klass->mData.mAttribute[1]);
+            mClassName->setCaption(archetypeText(info, "name"));
+            setTextTooltip(mClassName, title, details, powerPercent);
+        }
+        else if (klass)
+            mClassName->setCaption(klass->mName);
 
         center();
     }
@@ -106,6 +196,11 @@ namespace MWGui
         mClassList->eventListChangePosition += MyGUI::newDelegate(this, &PickClassDialog::onSelectClass);
 
         getWidget(mClassImage, "ClassImage");
+        getWidget(mArchetypeName, "ArchetypeName");
+        getWidget(mArchetypePair, "ArchetypePair");
+        getWidget(mArchetypePowerBar, "ArchetypePowerBar");
+        getWidget(mArchetypePowerText, "ArchetypePowerText");
+        mArchetypePowerBar->setProgressRange(100);
 
         MyGUI::Button* backButton;
         getWidget(backButton, "BackButton");
@@ -273,6 +368,28 @@ namespace MWGui
         }
 
         setClassImage(mClassImage, mCurrentClassId);
+
+        MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+        if (MWMechanics::ClassArchetype::getDisplayInfo(
+                klass->mData.mAttribute[0], klass->mData.mAttribute[1], false, archetypeInfo))
+        {
+            const MWWorld::Ptr player = MWMechanics::getPlayer();
+            const float power = MWMechanics::ClassArchetype::getPairPower(
+                player, klass->mData.mAttribute[0], klass->mData.mAttribute[1]);
+            const int powerPercent = std::clamp(static_cast<int>(std::lround(power * 100.f)), 0, 100);
+            mArchetypeName->setCaption(archetypeText(archetypeInfo, "name"));
+            mArchetypePair->setCaption(archetypePairText(klass->mData.mAttribute[0], klass->mData.mAttribute[1]));
+            mArchetypePowerBar->setProgressPosition(static_cast<std::size_t>(powerPercent));
+            mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
+                + MyGUI::utility::toString(powerPercent) + "%");
+            const std::string title = archetypePreviewTitle(archetypeInfo);
+            const std::string tooltip = archetypePreviewTooltip(archetypeInfo,
+                klass->mData.mAttribute[0], klass->mData.mAttribute[1]);
+            setTextTooltip(mArchetypeName, title, tooltip, powerPercent);
+            setTextTooltip(mArchetypePair, title, tooltip, powerPercent);
+            setTextTooltip(mArchetypePowerBar, title, tooltip, powerPercent);
+            setTextTooltip(mArchetypePowerText, title, tooltip, powerPercent);
+        }
     }
 
     /* InfoBoxDialog */
@@ -434,6 +551,13 @@ namespace MWGui
 
         setText("LabelT", MWBase::Environment::get().getWindowManager()->getGameSettingString("sName", ""));
         getWidget(mEditName, "EditName");
+        getWidget(mArchetypeName, "ArchetypeName");
+        getWidget(mArchetypePair, "ArchetypePair");
+        getWidget(mArchetypePowerBar, "ArchetypePowerBar");
+        getWidget(mArchetypePowerText, "ArchetypePowerText");
+        getWidget(mArchetypePerk, "ArchetypePerk");
+        getWidget(mArchetypeDrawback, "ArchetypeDrawback");
+        mArchetypePowerBar->setProgressRange(100);
 
         // Make sure the edit box has focus
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mEditName);
@@ -489,6 +613,51 @@ namespace MWGui
 
         ToolTips::createAttributeToolTip(mFavoriteAttribute0, mFavoriteAttribute0->getAttributeId());
         ToolTips::createAttributeToolTip(mFavoriteAttribute1, mFavoriteAttribute1->getAttributeId());
+        updateArchetypePreview();
+    }
+
+    void CreateClassDialog::updateArchetypePreview()
+    {
+        const int attribute0 = mFavoriteAttribute0->getAttributeId();
+        const int attribute1 = mFavoriteAttribute1->getAttributeId();
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(attribute0, attribute1, false, info))
+        {
+            mArchetypeName->setCaption(arenaText("archetype.selected") + ": —");
+            mArchetypePair->setCaption("");
+            mArchetypePowerBar->setProgressPosition(0);
+            mArchetypePowerText->setCaption("");
+            mArchetypePerk->setCaption("");
+            mArchetypeDrawback->setCaption("");
+            return;
+        }
+
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        const float power = MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1);
+        const int powerPercent = std::clamp(static_cast<int>(std::lround(power * 100.f)), 0, 100);
+        const std::string localizedName = archetypeText(info, "name");
+        const std::string title = archetypePreviewTitle(info);
+        const std::string tooltip = archetypePreviewTooltip(info, attribute0, attribute1);
+
+        mArchetypeName->setCaption(arenaText("archetype.selected") + ": " + localizedName);
+        mArchetypePair->setCaption(archetypePairText(attribute0, attribute1));
+        mArchetypePowerBar->setProgressPosition(static_cast<std::size_t>(powerPercent));
+        mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%");
+        mArchetypePerk->setCaption(arenaText("archetype.buff") + ": " + archetypeText(info, "buff"));
+        mArchetypeDrawback->setCaption(arenaText("archetype.debuff") + ": " + archetypeText(info, "debuff"));
+        setTextTooltip(mArchetypeName, title, tooltip, powerPercent);
+        setTextTooltip(mArchetypePair, title, tooltip, powerPercent);
+        setTextTooltip(mArchetypePowerBar, title, tooltip, powerPercent);
+        setTextTooltip(mArchetypePowerText, title, tooltip, powerPercent);
+        setTextTooltip(mArchetypePerk, title, tooltip, powerPercent);
+        setTextTooltip(mArchetypeDrawback, title, tooltip, powerPercent);
+
+        // ArenaMP uses this field as the live archetype name. Keep the update in
+        // the existing dialog refresh path; no new event, timer or player-lifecycle hook.
+        mEditName->setCaption(localizedName);
+        setTextTooltip(mEditName, title, tooltip, powerPercent);
+        mLastAutoClassName = localizedName;
     }
 
     std::string CreateClassDialog::getName() const

@@ -56,7 +56,7 @@
                     </Widget>
                 </Widget>
             </Widget>
-            <Widget type="Widget" skin="MW_Box" position="8 78 212 62" align="Top HStretch" name="IdentityBox">
+            <Widget type="Widget" skin="MW_Box" position="8 78 212 82" align="Top HStretch" name="IdentityBox">
                 <Widget type="Widget" position="4 4 204 18" align="Top HStretch">
                     <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 150 18" name="Level_str" align="Left Top">
                         <Property key="Caption" value="#{sLevel}" />
@@ -96,8 +96,23 @@
                         <UserString key="HStretch" value="true" />
                     </Widget>
                 </Widget>
+                <Widget type="Widget" position="4 60 204 18" align="Top HStretch">
+                    <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 70 18" name="Archetype_str" align="Left Top">
+                        <Property key="Caption" value="#{arenamp=archetype.label}" />
+                    </Widget>
+                    <Widget type="TextBox" skin="SandTextRight" position="73 0 131 18" name="ArchetypeText" align="Left Top HStretch">
+                        <Property key="TextAlign" value="Right Top" />
+                    </Widget>
+                </Widget>
+                <Widget type="ProgressBar" skin="MW_Progress_Green" position="4 81 204 14" name="ArchetypePowerBar" align="Top HStretch">
+                    <Property key="Visible" value="false" />
+                    <Widget type="TextBox" skin="ProgressText" position="0 0 204 14" name="ArchetypePowerText" align="Stretch">
+                        <Property key="NeedMouse" value="false" />
+                        <Property key="TextAlign" value="Center VCenter" />
+                    </Widget>
+                </Widget>
             </Widget>
-            <Widget type="Widget" skin="MW_Box" position="8 148 212 152" align="Top HStretch" name="AttributesBox">
+            <Widget type="Widget" skin="MW_Box" position="8 168 212 152" align="Top HStretch" name="AttributesBox">
                 <Widget type="Widget" skin="" position="4 4 204 144" align="Left Top Stretch" name="AttributeView">
                     <Widget type="Button" skin="" position="0 0 204 18" name="Attrib1Box" align="Left Top HStretch">
                         <UserString key="ToolTipType" value="Layout" />
@@ -205,7 +220,7 @@
                     </Widget>
                 </Widget>
             </Widget>
-            <Widget type="Widget" skin="MW_Box" name="StatsSkillsBox" position="8 309 212 80" align="Left Top HStretch">
+            <Widget type="Widget" skin="MW_Box" name="StatsSkillsBox" position="8 329 212 80" align="Left Top HStretch">
                 <Widget type="ScrollView" skin="MW_ScrollView" position="4 2 204 76" align="Left Top HStretch" name="SkillView">
                     <Property key="CanvasAlign" value="Left Top" />
                 </Widget>

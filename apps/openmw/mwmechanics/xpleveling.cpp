@@ -8,11 +8,13 @@
 #include <sstream>
 
 #include <components/esm/attr.hpp>
+#include <components/esm/loadalch.hpp>
 #include <components/esm/loadbook.hpp>
 #include <components/esm/loadclas.hpp>
 #include <components/esm/loaddial.hpp>
 #include <components/esm/loadgmst.hpp>
 #include <components/esm/loadinfo.hpp>
+#include <components/esm/loadmgef.hpp>
 #include <components/esm/loadnpc.hpp>
 #include <components/esm/loadskil.hpp>
 #include <components/misc/stringops.hpp>
@@ -21,6 +23,7 @@
 
 #include "actorutil.hpp"
 #include "difficultyscaling.hpp"
+#include "drawstate.hpp"
 #include "npcstats.hpp"
 
 #include "../mwbase/environment.hpp"
@@ -29,12 +32,37 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwworld/class.hpp"
+#include "../mwworld/containerstore.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/timestamp.hpp"
 
 namespace
 {
+
+    struct DeathRecoveryState
+    {
+        bool active = false;
+        float elapsed = 0.f;
+        float duration = 30.f;
+        float initialXp = 0.f;
+    };
+
+    DeathRecoveryState sDeathRecovery;
+
+    bool isRestoreHealthPotion(const MWWorld::Ptr& item)
+    {
+        if (item.isEmpty() || item.getTypeName() != typeid(ESM::Potion).name())
+            return false;
+        const ESM::Potion* potion = item.get<ESM::Potion>()->mBase;
+        if (!potion)
+            return false;
+        for (const ESM::ENAMstruct& effect : potion->mEffects.mList)
+            if (effect.mEffectID == ESM::MagicEffect::RestoreHealth
+                && (effect.mMagnMin > 0 || effect.mMagnMax > 0))
+                return true;
+        return false;
+    }
     float clampFloat(float value, float low, float high)
     {
         return std::max(low, std::min(high, value));
@@ -154,27 +182,8 @@ namespace
 
     void notifyXp(const std::string& text)
     {
-        if (!showNotifications() || text.empty())
-            return;
-
-        // Arena Y012: every XP-system message uses the same right-side lane,
-        // including actions initiated while a GUI window is open. Neutral
-        // statuses use the black XP card rather than a legacy MessageBox.
-        MWBase::Environment::get().getWindowManager()->hudExperienceNotification(0.f, text);
-    }
-
-    void notifyXpGain(float amount, const std::string& legacyText)
-    {
-        if (!showNotifications() || legacyText.empty() || !std::isfinite(amount))
-            return;
-
-        // Existing call sites build "+N XP - localized reason". Strip only the
-        // amount prefix; the HUD owns sign formatting, colours and coalescing.
-        std::string reason;
-        const std::size_t separator = legacyText.find(" - ");
-        if (separator != std::string::npos && separator + 3 < legacyText.size())
-            reason = legacyText.substr(separator + 3);
-        MWBase::Environment::get().getWindowManager()->hudExperienceNotification(amount, reason);
+        if (showNotifications() && !text.empty())
+            MWBase::Environment::get().getWindowManager()->messageBox(text);
     }
 
     void completeLevelUp(const MWWorld::Ptr& player)
@@ -227,7 +236,7 @@ namespace
         stats.setExperience(std::max(0.f, stats.getExperience()) + amount);
 
         if (!notification.empty())
-            notifyXpGain(amount, notification);
+            notifyXp(notification);
 
         // XP is banked immediately. No vanilla sleep gate or attribute picker is
         // involved; each completed level grants spendable skill points instead.
@@ -358,33 +367,6 @@ namespace MWMechanics
             if (skillBase < 90.f)
                 return 3;
             return 4;
-        }
-
-        int getSkillPointCost(const MWWorld::Ptr& player, int skillId, float skillBase)
-        {
-            const int baseCost = getSkillPointCost(skillBase);
-            if (player.isEmpty() || !player.getClass().isNpc()
-                || skillId < 0 || skillId >= ESM::Skill::Length)
-                return baseCost * 3;
-
-            // Arena Y014: class importance scales the normal XP/SP price.
-            // ESM::Class stores [minor, major] skill columns.
-            const ESM::Class& class_ = getPlayerClass(player);
-            int multiplier = 3; // Miscellaneous skill.
-            for (int i = 0; i < 5; ++i)
-            {
-                if (class_.mData.mSkills[i][1] == skillId)
-                {
-                    multiplier = 1; // Major.
-                    break;
-                }
-                if (class_.mData.mSkills[i][0] == skillId)
-                {
-                    multiplier = 2; // Minor.
-                    break;
-                }
-            }
-            return baseCost * multiplier;
         }
 
         void awardSkillUse(const MWWorld::Ptr& player, int skillId, int usageType,
@@ -589,52 +571,111 @@ namespace MWMechanics
             addExperience(player, xp, message.str());
         }
 
-        void applyDeathPenalty(const MWWorld::Ptr& player)
+
+        void beginDeathRecovery(const MWWorld::Ptr& player)
         {
-            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc() || sDeathRecovery.active)
                 return;
+            sDeathRecovery.active = true;
+            sDeathRecovery.elapsed = 0.f;
+            sDeathRecovery.duration = 30.f;
+            sDeathRecovery.initialXp = std::max(0.f, player.getClass().getNpcStats(player).getExperience());
+        }
 
-            // Arena Y012: death never touches the earned character level, Skill
-            // Points or skills. Only all unbanked XP inside the current level is lost.
-            NpcStats& stats = player.getClass().getNpcStats(player);
-            const float loss = std::max(0.f, stats.getExperience());
-            if (!(loss > 0.f))
+        void updateDeathRecovery(const MWWorld::Ptr& player, float dt)
+        {
+            if (!sDeathRecovery.active || player.isEmpty() || !player.getClass().isNpc())
                 return;
+            sDeathRecovery.elapsed = std::min(sDeathRecovery.duration,
+                sDeathRecovery.elapsed + std::max(0.f, dt));
+            const float fraction = sDeathRecovery.duration > 0.f
+                ? std::max(0.f, 1.f - sDeathRecovery.elapsed / sDeathRecovery.duration) : 0.f;
+            player.getClass().getNpcStats(player).setExperience(sDeathRecovery.initialXp * fraction);
+        }
 
-            stats.setExperience(0.f);
-            if (showNotifications())
-                MWBase::Environment::get().getWindowManager()->hudExperienceNotification(
-                    -loss, arenaText("xp.msg.death"));
+        bool isDeathRecoveryActive() { return sDeathRecovery.active; }
+        bool isDeathRecoveryExpired() { return sDeathRecovery.active && sDeathRecovery.elapsed >= sDeathRecovery.duration; }
+        float getDeathRecoveryRemainingSeconds()
+        {
+            return sDeathRecovery.active ? std::max(0.f, sDeathRecovery.duration - sDeathRecovery.elapsed) : 0.f;
+        }
+        float getDeathRecoveryDurationSeconds() { return sDeathRecovery.duration; }
+        float getDeathRecoveryInitialXp() { return sDeathRecovery.initialXp; }
+
+        int getRestoreHealthPotionCount(const MWWorld::Ptr& player)
+        {
+            if (player.isEmpty() || !player.getClass().hasInventoryStore(player))
+                return 0;
+            int total = 0;
+            MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
+            for (MWWorld::ContainerStoreIterator it = store.begin(); it != store.end(); ++it)
+                if (isRestoreHealthPotion(*it))
+                    total += std::max(0, it->getRefData().getCount());
+            return total;
+        }
+
+        bool tryPotionRecovery(const MWWorld::Ptr& player)
+        {
+            if (!sDeathRecovery.active || player.isEmpty()
+                || !player.getClass().getCreatureStats(player).isDead())
+                return false;
+
+            MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
+            for (MWWorld::ContainerStoreIterator it = store.begin(); it != store.end(); ++it)
+            {
+                if (!isRestoreHealthPotion(*it))
+                    continue;
+                store.remove(*it, 1, player);
+                MWBase::Environment::get().getMechanicsManager()->resurrect(player);
+                MWWorld::Ptr revived = MWBase::Environment::get().getWorld()->getPlayerPtr();
+                CreatureStats& stats = revived.getClass().getCreatureStats(revived);
+                DynamicStat<float> health = stats.getHealth();
+                health.setCurrent(std::max(1.f, health.getModified() * 0.25f));
+                stats.setHealth(health);
+                stats.setDrawState(DrawState_Nothing);
+                finishDeathRecovery();
+                MWBase::Environment::get().getWindowManager()->messageBox(arenaText("death.recovery.success"));
+                return true;
+            }
+            return false;
+        }
+
+        void finishDeathRecovery()
+        {
+            sDeathRecovery = DeathRecoveryState();
         }
 
         void applyJailPenalty(const MWWorld::Ptr& player)
         {
             if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
                 return;
+            NpcStats& stats = player.getClass().getNpcStats(player);
+            const float before = std::max(0.f, stats.getExperience());
+            if (before <= 0.f)
+                return;
+            const float loss = before * 0.5f;
+            stats.setExperience(before - loss);
+            std::ostringstream message;
+            message << arenaText("xp.msg.jail") << ": -" << formatXp(loss) << " XP";
+            notifyXp(message.str());
+        }
+
+        void applyDeathPenalty(const MWWorld::Ptr& player)
+        {
+            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+                return;
 
             NpcStats& stats = player.getClass().getNpcStats(player);
-            const float loss = std::max(0.f, stats.getExperience());
+            const float fraction = clampFloat(Settings::Manager::getFloat(
+                "death xp loss fraction", "XP Leveling"), 0.f, 1.f);
+            const float loss = std::min(stats.getExperience(), std::max(0.f, stats.getExperience() * fraction));
             if (!(loss > 0.f))
                 return;
 
-            stats.setExperience(0.f);
-            if (showNotifications())
-                MWBase::Environment::get().getWindowManager()->hudExperienceNotification(
-                    -loss, arenaText("xp.msg.jail"));
-        }
-
-        float getDeathRespawnDelay(const MWWorld::Ptr& player, float baseDelay)
-        {
-            baseDelay = std::max(0.f, baseDelay);
-            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
-                return baseDelay;
-
-            const NpcStats& stats = player.getClass().getNpcStats(player);
-            if (stats.getExperience() > 0.f)
-                return baseDelay;
-
-            const float perLevel = nonNegativeSetting("zero xp death cooldown per level");
-            return baseDelay + std::max(1, stats.getLevel()) * perLevel;
+            stats.setExperience(std::max(0.f, stats.getExperience() - loss));
+            std::ostringstream message;
+            message << arenaText("xp.msg.death") << ": -" << formatXp(loss) << " XP";
+            notifyXp(message.str());
         }
 
         bool spendSkillPoints(const MWWorld::Ptr& player, int skillId)
@@ -652,7 +693,7 @@ namespace MWMechanics
                 return false;
             }
 
-            const int cost = getSkillPointCost(player, skillId, before);
+            const int cost = getSkillPointCost(before);
             if (stats.getSkillPoints() < cost)
             {
                 std::ostringstream message;

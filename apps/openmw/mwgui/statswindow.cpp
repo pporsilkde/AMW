@@ -1,5 +1,6 @@
 #include "statswindow.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <MyGUI_Window.h>
 #include <MyGUI_Button.h>
@@ -13,6 +14,7 @@
 #include <components/settings/settings.hpp>
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
@@ -22,6 +24,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 #include "../mwmechanics/xpleveling.hpp"
 
 #include "tooltips.hpp"
@@ -40,11 +43,44 @@ namespace MWGui
         {
             return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
         }
+
+        std::string archetypeText(const MWMechanics::ClassArchetype::DisplayInfo& info, const std::string& field)
+        {
+            return arenaText("archetype." + info.id + "." + field);
+        }
+
+        std::string attributeName(int attribute)
+        {
+            return MWBase::Environment::get().getWindowManager()->getGameSettingString(
+                ESM::Attribute::sGmstAttributeIds[attribute], ESM::Attribute::sGmstAttributeIds[attribute]);
+        }
+
+        // Y046c: the archetype tooltip carries a real MyGUI ProgressBar again.
+        // Range/RangePosition are the same dynamic-property names the existing
+        // SkillToolTip and LevelToolTip already use, so no new tooltip mechanism
+        // is introduced -- only the ArchetypeToolTip layout is new.
+        void setArchetypeTooltip(MyGUI::Widget* widget, const std::string& title,
+            const std::string& details, int powerPercent)
+        {
+            if (!widget)
+                return;
+            widget->setUserString("ToolTipType", "Layout");
+            widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
+            widget->setUserString("Caption_ArchetypeTitle", title);
+            widget->setUserString("Range_ArchetypePowerBar", "100");
+            widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+            widget->setUserString("Caption_ArchetypePowerText", arenaText("archetype.power") + ": "
+                + MyGUI::utility::toString(powerPercent) + "%");
+            widget->setUserString("Caption_ArchetypeDetails", details);
+        }
     }
 
     StatsWindow::StatsWindow (DragAndDrop* drag)
       : WindowPinnableBase("openmw_stats_window.layout")
       , NoDrop(drag, mMainWidget)
+      , mArchetypeText(nullptr)
+      , mArchetypePowerBar(nullptr)
+      , mArchetypePowerText(nullptr)
       , mSkillView(nullptr)
       , mMajorSkills()
       , mMinorSkills()
@@ -84,6 +120,10 @@ namespace MWGui
         getWidget(mSkillView, "SkillView");
         getWidget(mLeftPane, "LeftPane");
         getWidget(mRightPane, "RightPane");
+        getWidget(mArchetypeText, "ArchetypeText");
+        getWidget(mArchetypePowerBar, "ArchetypePowerBar");
+        getWidget(mArchetypePowerText, "ArchetypePowerText");
+        mArchetypePowerBar->setProgressRange(100);
 
         // The compact statistics window uses one continuous scroll area. Relay the
         // mouse wheel from every static child (attributes, status bars, race/class)
@@ -459,6 +499,7 @@ namespace MWGui
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWMechanics::NpcStats &PCstats = player.getClass().getNpcStats(player);
+        updateArchetypeInfo();
 
         // Level progress. XP Leveling completely replaces the vanilla sleep-based
         // LPRO counter while keeping the same tooltip/progress-bar layout.
@@ -527,6 +568,75 @@ namespace MWGui
 
         if (mChanged)
             updateSkillArea();
+    }
+
+    void StatsWindow::updateArchetypeInfo()
+    {
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        MWMechanics::ClassArchetype::RuntimeState state;
+        const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info)
+            || !MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
+        {
+            mArchetypeText->setCaption("—");
+            mArchetypePowerBar->setProgressPosition(0);
+            mArchetypePowerText->setCaption(arenaText("archetype.power") + ": 0%");
+            return;
+        }
+
+        const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
+        const int value0 = static_cast<int>(std::lround(stats.getAttribute(state.attribute0).getModified()));
+        const int value1 = static_cast<int>(std::lround(stats.getAttribute(state.attribute1).getModified()));
+        const int powerPercent = std::clamp(static_cast<int>(std::lround(state.power * 100.f)), 0, 100);
+        const std::string name = archetypeText(info, "name");
+        mArchetypeText->setCaption(name);
+        mArchetypePowerBar->setProgressPosition(static_cast<std::size_t>(powerPercent));
+        mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%");
+
+        const std::string tooltipTitle = arenaText("archetype.label") + ": " + name;
+        std::string tooltip = arenaText("archetype.attributes") + ": "
+            + attributeName(state.attribute0) + " " + MyGUI::utility::toString(value0) + " + "
+            + attributeName(state.attribute1) + " " + MyGUI::utility::toString(value1);
+        tooltip += "\n\n" + arenaText("archetype.buff") + ": " + archetypeText(info, "buff");
+        tooltip += "\n" + arenaText("archetype.state") + ": " + arenaText("archetype.active");
+        if (state.hasConditionalBuff)
+        {
+            const std::string conditionKey = info.id == "monk"
+                ? "archetype.condition.unarmored" : "archetype.condition.sneak";
+            tooltip += "\n" + arenaText("archetype.conditional_bonus") + ": "
+                + arenaText(state.conditionalBuffActive ? "archetype.active" : "archetype.inactive")
+                + " — " + arenaText(conditionKey);
+        }
+        tooltip += "\n\n" + arenaText("archetype.debuff") + ": " + archetypeText(info, "debuff");
+        tooltip += "\n" + arenaText("archetype.state") + ": "
+            + arenaText(state.conditionalDrawbackActive ? "archetype.active" : "archetype.inactive");
+        if (state.hasConditionalDrawback)
+            tooltip += "\n" + arenaText("archetype.conditional_penalty") + ": "
+                + arenaText(state.conditionalDrawbackActive ? "archetype.active" : "archetype.inactive")
+                + " — " + arenaText("archetype.condition.armor");
+        tooltip += "\n\n" + arenaText("archetype.growth_hint");
+
+        MyGUI::Widget* archetypeLabel = nullptr;
+        getWidget(archetypeLabel, "Archetype_str");
+        setArchetypeTooltip(archetypeLabel, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypeText, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypePowerBar, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypePowerText, tooltipTitle, tooltip, powerPercent);
+
+        // Existing characters created by the old generator may still have the
+        // generic custom-class caption (usually Adventurer). Only replace that
+        // generic presentation; real premade/custom names remain untouched.
+        MyGUI::TextBox* classText = nullptr;
+        getWidget(classText, "ClassText");
+        const std::string genericClassName = MWBase::Environment::get().getWindowManager()->getGameSettingString(
+            "sCustomClassName", "Adventurer");
+        if (classText->getCaption() == genericClassName || classText->getCaption() == "Adventurer")
+        {
+            classText->setCaption(name);
+            setArchetypeTooltip(classText, tooltipTitle, tooltip, powerPercent);
+        }
     }
 
     void StatsWindow::setFactions (const FactionList& factions)
@@ -703,7 +813,7 @@ namespace MWGui
                     const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
                     const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
                     const float base = stats.getSkill(skillId).getBase();
-                    const int cost = MWMechanics::XPLeveling::getSkillPointCost(playerPtr, skillId, base);
+                    const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
 
                     std::string description = skill->mDescription;
                     if (!description.empty())
@@ -748,7 +858,7 @@ namespace MWGui
                 const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
                 const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
                 const float base = stats.getSkill(skillId).getBase();
-                const int cost = MWMechanics::XPLeveling::getSkillPointCost(playerPtr, skillId, base);
+                const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
                 const bool maxed = base >= 100.f;
                 const bool affordable = !maxed && stats.getSkillPoints() >= cost;
                 const int buttonLeft = coord2.left + coord2.width + 4;
