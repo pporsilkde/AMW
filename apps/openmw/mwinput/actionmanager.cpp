@@ -1,3 +1,4 @@
+#include "../mwmechanics/xpleveling.hpp"
 #include "actionmanager.hpp"
 
 #include <algorithm>
@@ -660,6 +661,8 @@ namespace MWInput
 
     void ActionManager::toggleInventory()
     {
+        if (MWMechanics::XPLeveling::isDeathRecoveryActive())
+            return;
         if (!MWBase::Environment::get().getInputManager()->getControlSwitch("playercontrols"))
             return;
 
@@ -764,6 +767,12 @@ namespace MWInput
 
     void ActionManager::activate()
     {
+        if (MWMechanics::XPLeveling::isDeathRecoveryActive())
+        {
+            MWMechanics::XPLeveling::tryPotionRecovery(
+                MWBase::Environment::get().getWorld()->getPlayerPtr());
+            return;
+        }
         if (MWBase::Environment::get().getWindowManager()->isGuiMode())
         {
             bool joystickUsed = MWBase::Environment::get().getInputManager()->joystickLastUsed();

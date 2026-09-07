@@ -593,13 +593,19 @@ bool OMW::Engine::frame(float frametime)
                 MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
                 if (!paused && stats.isDead())
                 {
+                    if (MWMechanics::XPLeveling::isEnabled())
+                    {
+                        MWMechanics::XPLeveling::beginDeathRecovery(player);
+                        MWMechanics::XPLeveling::updateDeathRecovery(player, frametime);
+                    }
                     mRespawnTimer += std::max(0.f, frametime);
                     // Arena Y012: if the current-level XP pool was already zero
                     // when the player died, add level*5s (configurable) before
                     // resurrection. If XP exists it will be wiped instead.
                     constexpr float baseDelay = 3.f;
                     const float delay = MWMechanics::XPLeveling::getDeathRespawnDelay(player, baseDelay);
-                    if (mRespawnTimer >= delay)
+                    if (mRespawnTimer >= delay && (!MWMechanics::XPLeveling::isDeathRecoveryActive()
+                        || MWMechanics::XPLeveling::isDeathRecoveryExpired()))
                     {
                         // Resurrect and finish all actor/inventory work before teleporting.
                         // ActionTeleport may change or unload the current cell, invalidating
@@ -625,11 +631,15 @@ bool OMW::Engine::frame(float frametime)
                         mEnvironment.getWorld()->teleportToClosestMarker(revivedPlayer, "shrine");
                         mEnvironment.getWindowManager()->messageBox(
                             "По воле Азуры вы возвращены в игру");
+                        MWMechanics::XPLeveling::finishDeathRecovery();
                         mRespawnTimer = 0.f;
                     }
                 }
                 else if (!stats.isDead())
+                {
+                    MWMechanics::XPLeveling::finishDeathRecovery();
                     mRespawnTimer = 0.f;
+                }
             }
         }
 

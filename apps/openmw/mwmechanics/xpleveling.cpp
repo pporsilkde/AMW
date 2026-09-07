@@ -182,8 +182,27 @@ namespace
 
     void notifyXp(const std::string& text)
     {
-        if (showNotifications() && !text.empty())
-            MWBase::Environment::get().getWindowManager()->messageBox(text);
+        if (!showNotifications() || text.empty())
+            return;
+
+        // Arena Y012: every XP-system message uses the same right-side lane,
+        // including actions initiated while a GUI window is open. Neutral
+        // statuses use the black XP card rather than a legacy MessageBox.
+        MWBase::Environment::get().getWindowManager()->hudExperienceNotification(0.f, text);
+    }
+
+    void notifyXpGain(float amount, const std::string& legacyText)
+    {
+        if (!showNotifications() || legacyText.empty() || !std::isfinite(amount))
+            return;
+
+        // Existing call sites build "+N XP - localized reason". Strip only the
+        // amount prefix; the HUD owns sign formatting, colours and coalescing.
+        std::string reason;
+        const std::size_t separator = legacyText.find(" - ");
+        if (separator != std::string::npos && separator + 3 < legacyText.size())
+            reason = legacyText.substr(separator + 3);
+        MWBase::Environment::get().getWindowManager()->hudExperienceNotification(amount, reason);
     }
 
     void completeLevelUp(const MWWorld::Ptr& player)
@@ -236,7 +255,7 @@ namespace
         stats.setExperience(std::max(0.f, stats.getExperience()) + amount);
 
         if (!notification.empty())
-            notifyXp(notification);
+            notifyXpGain(amount, notification);
 
         // XP is banked immediately. No vanilla sleep gate or attribute picker is
         // involved; each completed level grants spendable skill points instead.
@@ -616,7 +635,7 @@ namespace MWMechanics
 
         bool tryPotionRecovery(const MWWorld::Ptr& player)
         {
-            if (!sDeathRecovery.active || player.isEmpty()
+            if (!sDeathRecovery.active || isDeathRecoveryExpired() || player.isEmpty()
                 || !player.getClass().getCreatureStats(player).isDead())
                 return false;
 

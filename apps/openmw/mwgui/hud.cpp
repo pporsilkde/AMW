@@ -28,6 +28,8 @@
 #include "../mwbase/world.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 
+#include "../mwworld/containerstore.hpp"
+#include "../mwmechanics/activespells.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -470,6 +472,80 @@ namespace MWGui
             mCombatHealthBars.push_back(state);
         }
 
+        // Arena Y007: modern RPG-style event feed above the stamina/combat stack.
+        // Widgets are allocated once; gameplay only recycles these six slots.
+        constexpr std::size_t hudNotificationPoolSize = 6;
+        mHudNotifications.reserve(hudNotificationPoolSize);
+        for (std::size_t i = 0; i < hudNotificationPoolSize; ++i)
+        {
+            HudNotificationState state;
+            // Arena Y011: transparent parent plus one uniform medium-opacity
+            // backing. This keeps the clean borderless card from Y010 while
+            // removing the visible three-band gradient.
+            state.mPanel = mGameplayHud->createWidget<MyGUI::Widget>(
+                "", MyGUI::IntCoord(0, 0, 300, 38),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "HudEventCard" + MyGUI::utility::toString(i));
+            state.mPanel->setNeedMouseFocus(false);
+            state.mPanel->setVisible(false);
+
+            state.mShade = state.mPanel->createWidget<MyGUI::Widget>(
+                "BlackBG", MyGUI::IntCoord(0, 0, 300, 38), MyGUI::Align::Stretch,
+                "HudEventShade" + MyGUI::utility::toString(i));
+            state.mShade->setNeedMouseFocus(false);
+            state.mShade->setAlpha(0.22f);
+
+            state.mIcon = state.mPanel->createWidget<MyGUI::ImageBox>(
+                "ImageBox", MyGUI::IntCoord(4, 4, 30, 30), MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventIcon" + MyGUI::utility::toString(i));
+            state.mIcon->setNeedMouseFocus(false);
+
+            state.mTitle = state.mPanel->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(40, 1, 170, 36),
+                MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventTitle" + MyGUI::utility::toString(i));
+            state.mTitle->setNeedMouseFocus(false);
+            state.mTitle->setFontHeight(16);
+            state.mTitle->setTextAlign(MyGUI::Align::Left | MyGUI::Align::VCenter);
+            state.mTitle->setTextShadow(true);
+            state.mTitle->setTextShadowColour(MyGUI::Colour::Black);
+
+            state.mValue = state.mPanel->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(210, 1, 86, 36),
+                MyGUI::Align::Right | MyGUI::Align::VCenter,
+                "HudEventValue" + MyGUI::utility::toString(i));
+            state.mValue->setNeedMouseFocus(false);
+            state.mValue->setFontHeight(16);
+            state.mValue->setTextAlign(MyGUI::Align::Right | MyGUI::Align::VCenter);
+            state.mValue->setTextShadow(true);
+            state.mValue->setTextShadowColour(MyGUI::Colour::Black);
+
+            mHudNotifications.push_back(state);
+        }
+
+        // Arena Y021: fixed pool for small damage numbers beside the crosshair.
+        // No widgets are allocated while combat is running.
+        constexpr std::size_t floatingDamagePoolSize = 10;
+        mFloatingDamageNumbers.reserve(floatingDamagePoolSize);
+        for (std::size_t i = 0; i < floatingDamagePoolSize; ++i)
+        {
+            FloatingDamageState state;
+            state.mWidget = mGameplayHud->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(0, 0, 78, 26),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "FloatingDamage" + MyGUI::utility::toString(i));
+            state.mWidget->setNeedMouseFocus(false);
+            // Y028: compact hostile feedback, smaller than Y027 and using the
+            // same red family as enemy HUD/compass feedback.
+            state.mWidget->setFontHeight(15);
+            state.mWidget->setTextAlign(MyGUI::Align::Center);
+            state.mWidget->setTextColour(MyGUI::Colour(1.00f, 0.18f, 0.16f));
+            state.mWidget->setTextShadow(true);
+            state.mWidget->setTextShadowColour(MyGUI::Colour::Black);
+            state.mWidget->setVisible(false);
+            mFloatingDamageNumbers.push_back(state);
+        }
+
         getWidget(mHealthText, "HealthText");
         getWidget(mMagickaText, "MagickaText");
         getWidget(mStaminaText, "StaminaText");
@@ -856,6 +932,8 @@ namespace MWGui
             mFpsFrameCount = 0;
         }
 
+        updateFloatingDamageNumbers(dt);
+        updateHudEventFeed(dt);
         updateCombatHealthBars(dt);
         updateFocusedTargetPanel(dt);
 
@@ -1968,7 +2046,7 @@ void HUD::pushDamageNumber(float damage)
         slot->mWidget->setVisible(true);
     }
 
-HUD::HudNotificationState* HUD::pushHudNotification(HudEventKind kind, const std::string& key,
+    HUD::HudNotificationState* HUD::pushHudNotification(HudEventKind kind, const std::string& key,
         const std::string& icon, const std::string& title, int amount,
         const std::string& valueText, int totalCount)
     {
@@ -2093,7 +2171,8 @@ HUD::HudNotificationState* HUD::pushHudNotification(HudEventKind kind, const std
         return target;
     }
 
-void HUD::pushSystemNotification(const std::string& title, const std::string& value,
+
+    void HUD::pushSystemNotification(const std::string& title, const std::string& value,
         const std::string& icon, const std::string& key)
     {
         if (title.empty())
@@ -2108,7 +2187,7 @@ void HUD::pushSystemNotification(const std::string& title, const std::string& va
             state->mLifetime = 4.4f;
     }
 
-void HUD::pushExperienceNotification(float amount, const std::string& reason)
+    void HUD::pushExperienceNotification(float amount, const std::string& reason)
     {
         if (!std::isfinite(amount) || mHudNotifications.empty())
             return;
@@ -2195,6 +2274,364 @@ void HUD::pushExperienceNotification(float amount, const std::string& reason)
         state->mNumericAmount = amount;
         state->mLifetime = 4.4f;
         styleExperience(*state, amount);
+    }
+
+    void HUD::scanHudEventSources()
+    {
+        const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        if (player.isEmpty())
+            return;
+
+        struct ItemSnapshot
+        {
+            int mCount = 0;
+            std::string mName;
+            std::string mIcon;
+        };
+
+        std::map<std::string, ItemSnapshot> inventoryNow;
+        MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
+        for (MWWorld::ContainerStoreIterator it = store.begin(); it != store.end(); ++it)
+        {
+            MWWorld::Ptr item = *it;
+            const int stackCount = item.getRefData().getCount();
+            if (stackCount <= 0)
+                continue;
+
+            const bool gold = item.getClass().isGold(item);
+            const std::string key = gold ? std::string("__arena_gold__")
+                : Misc::StringUtils::lowerCase(item.getCellRef().getRefId());
+            ItemSnapshot& snapshot = inventoryNow[key];
+            if (gold)
+            {
+                snapshot.mCount += stackCount * std::max(1, item.getClass().getValue(item));
+                if (snapshot.mName.empty())
+                    snapshot.mName = item.getClass().getName(item);
+            }
+            else
+                snapshot.mCount += stackCount;
+
+            if (snapshot.mName.empty())
+                snapshot.mName = item.getClass().getName(item);
+            if (snapshot.mName.empty())
+                snapshot.mName = item.getCellRef().getRefId();
+            if (snapshot.mIcon.empty())
+                snapshot.mIcon = item.getClass().getInventoryIcon(item);
+        }
+
+        const MWMechanics::ActiveSpells& activeSpells
+            = player.getClass().getCreatureStats(player).getActiveSpells();
+        std::map<std::string, int> spellsNow;
+        std::map<std::string, int> spellOccurrence;
+
+        // During load/new-game startup keep reseeding for a short grace period.
+        // This prevents the player's entire save inventory/effect list from being
+        // presented as newly acquired content.
+        if (!mHudEventSnapshotsReady || mHudEventWarmup > 0.f)
+        {
+            mHudInventorySnapshot.clear();
+            for (const auto& entry : inventoryNow)
+                mHudInventorySnapshot[entry.first] = entry.second.mCount;
+            mHudActiveSpellSnapshot.clear();
+            for (auto it = activeSpells.begin(); it != activeSpells.end(); ++it)
+            {
+                const std::string spellKey = Misc::StringUtils::lowerCase(it->first)
+                    + "\x1f" + it->second.mDisplayName;
+                ++mHudActiveSpellSnapshot[spellKey];
+            }
+            mHudEventSnapshotsReady = true;
+            return;
+        }
+
+        // Generic protection for clear/refill cycles: only arm it when most
+        // previously known item *kinds disappear entirely* in one scan. Mere count
+        // reductions (selling/consuming stacks) do not trigger it. Unlike a hard
+        // "more than N gained kinds" rule, this does not suppress a legitimate
+        // Take All that adds many different items at once.
+        std::size_t lostKinds = 0;
+        for (const auto& previous : mHudInventorySnapshot)
+        {
+            const auto nowIt = inventoryNow.find(previous.first);
+            if (nowIt == inventoryNow.end())
+                ++lostKinds;
+        }
+        if (mHudInventorySnapshot.size() >= sHudEventReseedMinKinds
+            && static_cast<float>(lostKinds)
+                >= static_cast<float>(mHudInventorySnapshot.size()) * sHudEventReseedLostFraction)
+        {
+            mHudInventoryReseedGrace = 0.5f;
+        }
+
+        const bool suppressInventoryEvents = mHudInventoryReseedGrace > 0.f;
+        if (!suppressInventoryEvents)
+        {
+            for (const auto& entry : inventoryNow)
+            {
+                const auto previousIt = mHudInventorySnapshot.find(entry.first);
+                const int previous = previousIt == mHudInventorySnapshot.end() ? 0 : previousIt->second;
+                const int gained = entry.second.mCount - previous;
+                if (gained <= 0)
+                    continue;
+                // Arena Y010: if this stack already existed before the pickup,
+                // append the committed total, e.g. +5 (10). First acquisition
+                // stays compact (+5). Later coalesced pickups update both numbers.
+                const int totalCount = previous > 0 ? entry.second.mCount : -1;
+                pushHudNotification(entry.first == "__arena_gold__" ? HudEventKind::Gold : HudEventKind::Item,
+                    entry.first, entry.second.mIcon, entry.second.mName, gained, std::string(), totalCount);
+            }
+        }
+        mHudInventorySnapshot.clear();
+        for (const auto& entry : inventoryNow)
+            mHudInventorySnapshot[entry.first] = entry.second.mCount;
+
+        for (auto it = activeSpells.begin(); it != activeSpells.end(); ++it)
+        {
+            const MWMechanics::ActiveSpells::ActiveSpellParams& params = it->second;
+            const std::string spellKey = Misc::StringUtils::lowerCase(it->first)
+                + "\x1f" + params.mDisplayName;
+            const int occurrence = ++spellOccurrence[spellKey];
+            ++spellsNow[spellKey];
+
+            const auto previousIt = mHudActiveSpellSnapshot.find(spellKey);
+            const int previousCount = previousIt == mHudActiveSpellSnapshot.end() ? 0 : previousIt->second;
+            if (occurrence <= previousCount)
+                continue;
+
+            std::string icon;
+            float timeLeft = -1.f;
+            if (!params.mEffects.empty())
+            {
+                const ESM::ActiveEffect& first = params.mEffects.front();
+                const ESM::MagicEffect* effect = MWBase::Environment::get().getWorld()
+                    ->getStore().get<ESM::MagicEffect>().find(first.mEffectId);
+                if (effect)
+                    icon = effect->mIcon;
+
+                for (const ESM::ActiveEffect& active : params.mEffects)
+                    timeLeft = std::max(timeLeft, active.mTimeLeft);
+            }
+
+            const std::string duration = timeLeft > 0.f
+                ? MyGUI::utility::toString(static_cast<int>(std::ceil(timeLeft))) + "s"
+                : std::string();
+            const std::string title = params.mDisplayName.empty() ? it->first : params.mDisplayName;
+            HudNotificationState* card = pushHudNotification(HudEventKind::Magic,
+                "magic:" + spellKey, icon, title, 1, duration);
+            if (card)
+            {
+                card->mSpellId = it->first;
+                card->mSpellCasterActorId = params.mCasterActorId;
+                card->mSpellTimestampDay = params.mTimeStamp.getDay();
+                card->mSpellTimestampHour = params.mTimeStamp.getHour();
+            }
+        }
+        mHudActiveSpellSnapshot.swap(spellsNow);
+    }
+
+    void HUD::refreshHudMagicDurations()
+    {
+        bool anyMagicCard = false;
+        for (const HudNotificationState& state : mHudNotifications)
+        {
+            if (state.mActive && state.mKind == HudEventKind::Magic && !state.mSpellId.empty())
+            {
+                anyMagicCard = true;
+                break;
+            }
+        }
+        if (!anyMagicCard)
+            return;
+
+        const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        if (player.isEmpty())
+            return;
+
+        const MWMechanics::ActiveSpells& activeSpells
+            = player.getClass().getCreatureStats(player).getActiveSpells();
+
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            if (!state.mActive || state.mKind != HudEventKind::Magic || state.mSpellId.empty())
+                continue;
+            if (!state.mValue)
+                continue;
+
+            float timeLeft = -1.f;
+            for (auto it = activeSpells.begin(); it != activeSpells.end(); ++it)
+            {
+                const MWMechanics::ActiveSpells::ActiveSpellParams& params = it->second;
+                if (it->first != state.mSpellId
+                    || params.mCasterActorId != state.mSpellCasterActorId
+                    || params.mTimeStamp.getDay() != state.mSpellTimestampDay
+                    || std::abs(params.mTimeStamp.getHour() - state.mSpellTimestampHour) > 0.0001f)
+                    continue;
+
+                for (const ESM::ActiveEffect& active : params.mEffects)
+                    timeLeft = std::max(timeLeft, active.mTimeLeft);
+                break;
+            }
+
+            if (timeLeft > 0.f)
+                state.mValue->setCaption(
+                    MyGUI::utility::toString(static_cast<int>(std::ceil(timeLeft))) + "s");
+            else
+                state.mValue->setCaption(std::string());
+        }
+    }
+
+    void HUD::updateHudEventFeed(float dt)
+    {
+        dt = std::max(0.f, dt);
+        if (mHudEventWarmup > 0.f)
+            mHudEventWarmup = std::max(0.f, mHudEventWarmup - dt);
+        if (mHudInventoryReseedGrace > 0.f)
+            mHudInventoryReseedGrace = std::max(0.f, mHudInventoryReseedGrace - dt);
+
+        mHudEventScanTimer -= dt;
+        if (mHudEventScanTimer <= 0.f)
+        {
+            mHudEventScanTimer = 0.12f;
+            scanHudEventSources();
+        }
+
+        refreshHudMagicDurations();
+
+        std::vector<std::size_t> active;
+        active.reserve(mHudNotifications.size());
+        for (std::size_t i = 0; i < mHudNotifications.size(); ++i)
+        {
+            HudNotificationState& state = mHudNotifications[i];
+            if (!state.mActive)
+                continue;
+            state.mAge += dt;
+            if (state.mAge >= state.mLifetime)
+            {
+                state.mActive = false;
+                if (state.mPanel)
+                    state.mPanel->setVisible(false);
+                continue;
+            }
+            active.push_back(i);
+        }
+
+        // Newest card stays closest to the combat/stamina block; older cards grow
+        // upward. If close-range combat bars are docked, the feed automatically
+        // starts above that stack instead of covering it.
+        std::sort(active.begin(), active.end(), [this](std::size_t left, std::size_t right)
+        {
+            return mHudNotifications[left].mSequence > mHudNotifications[right].mSequence;
+        });
+
+        std::size_t dockedRows = 0;
+        for (const CombatHealthBarState& combat : mCombatHealthBars)
+        {
+            if (combat.mDocked && combat.mAlpha > 0.05f)
+                ++dockedRows;
+        }
+        dockedRows = std::min<std::size_t>(dockedRows, CombatBar::sDockMaxRows);
+
+        // Y008: the cards are children of mGameplayHud, so every anchor has to be
+        // expressed relative to it. The old fallback assigned raw screen coordinates
+        // from RenderManager, which only lined up while mGameplayHud sat at 0,0.
+        MyGUI::IntPoint origin;
+        if (mGameplayHud)
+            origin = mGameplayHud->getAbsolutePosition();
+        const MyGUI::IntSize viewSize = MyGUI::RenderManager::getInstance().getViewSize();
+        // Arena Y010: event cards hug the actual right edge with a 2 px safety
+        // margin. The stamina frame remains the vertical anchor only; its own
+        // horizontal inset no longer pushes the feed inward.
+        int anchorRight = viewSize.width - 2 - origin.left;
+        int anchorBottom = viewSize.height - 44 - origin.top;
+        if (mFatigueFrame)
+        {
+            const MyGUI::IntCoord frame = mFatigueFrame->getAbsoluteCoord();
+            anchorBottom = frame.top - origin.top - CombatBar::sDockGap
+                - static_cast<int>(dockedRows) * CombatBar::sDockRowStride - 8;
+        }
+
+        constexpr int cardWidth = 300;
+        constexpr int cardHeight = 38;
+        constexpr int cardGap = 4;
+        const int cardLeft = std::max(6, anchorRight - cardWidth);
+        for (std::size_t row = 0; row < active.size(); ++row)
+        {
+            HudNotificationState& state = mHudNotifications[active[row]];
+            const float fadeIn = std::min(1.f, state.mAge / 0.14f);
+            const float fadeOut = state.mAge > state.mLifetime - 0.55f
+                ? std::max(0.f, (state.mLifetime - state.mAge) / 0.55f) : 1.f;
+            const float alpha = std::min(fadeIn, fadeOut);
+            const int top = anchorBottom - cardHeight
+                - static_cast<int>(row) * (cardHeight + cardGap);
+            if (state.mPanel)
+            {
+                state.mPanel->setCoord(cardLeft, top, cardWidth, cardHeight);
+                state.mPanel->setAlpha(alpha);
+                state.mPanel->setVisible(alpha > 0.01f);
+            }
+        }
+    }
+
+    void HUD::resetHudEventFeed()
+    {
+        mHudInventorySnapshot.clear();
+        mHudActiveSpellSnapshot.clear();
+        mHudEventSnapshotsReady = false;
+        mHudEventWarmup = 1.f;
+        mHudInventoryReseedGrace = 0.f;
+        mHudEventScanTimer = 0.f;
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            state.mActive = false;
+            state.mAge = 0.f;
+            state.mAmount = 0;
+            state.mNumericAmount = 0.f;
+            state.mTotalCount = -1;
+            state.mKey.clear();
+            state.mSpellId.clear();
+            state.mSpellCasterActorId = -1;
+            state.mSpellTimestampDay = -1;
+            state.mSpellTimestampHour = -1.f;
+            if (state.mPanel)
+                state.mPanel->setVisible(false);
+        }
+    }
+
+    void HUD::updateFloatingDamageNumbers(float dt)
+    {
+        if (mFloatingDamageNumbers.empty())
+            return;
+
+        const MyGUI::IntSize& view = MyGUI::RenderManager::getInstance().getViewSize();
+        const float centreX = static_cast<float>(view.width) * 0.5f;
+        const float centreY = static_cast<float>(view.height) * 0.5f;
+
+        for (FloatingDamageState& state : mFloatingDamageNumbers)
+        {
+            if (!state.mActive)
+                continue;
+
+            state.mAge += std::max(0.f, dt);
+            const float t = std::min(1.f, state.mAge / std::max(0.01f, state.mLifetime));
+            if (t >= 1.f)
+            {
+                state.mActive = false;
+                state.mWidget->setVisible(false);
+                continue;
+            }
+
+            // Start just outside the 64 px normal reticle, drift a little farther
+            // sideways and upwards, then dissolve. Font height 15 keeps the red
+            // negative damage readout subordinate to the reticle itself.
+            const float outward = 40.f + 28.f * t;
+            const float rise = 24.f * t;
+            const float x = centreX + state.mSide * outward - 39.f;
+            const float y = centreY - 13.f + state.mLaneOffset - rise;
+            state.mWidget->setPosition(static_cast<int>(std::lround(x)), static_cast<int>(std::lround(y)));
+
+            // Keep the first instant crisp, then fade progressively faster near the end.
+            const float fadeT = std::max(0.f, (t - 0.12f) / 0.88f);
+            state.mWidget->setAlpha(1.f - fadeT * fadeT);
+        }
     }
 
     void HUD::hideCombatHealthBars()
@@ -2952,6 +3389,7 @@ void HUD::pushExperienceNotification(float amount, const std::string& reason)
         unsetSelectedSpell();
         unsetSelectedWeapon();
         resetEnemy();
+        resetHudEventFeed();
         mFocusActor = MWWorld::Ptr();
         mFocusActorCurrentlyFaced = false;
         mFocusActorDistance = -1.f;
