@@ -1923,6 +1923,280 @@ namespace MWGui
         }
     }
 
+void HUD::pushDamageNumber(float damage)
+    {
+        // Y025: damage feedback is anchored to the screen centre, not to the
+        // transient visibility state of the crosshair widget. ArenaMP may hide or
+        // rebuild the reticle in the exact frame a confirmed hit arrives.
+        if (damage <= 0.f || !mGameplayHud || !mGameplayHud->getVisible()
+            || mFloatingDamageNumbers.empty())
+            return;
+
+        FloatingDamageState* slot = nullptr;
+        for (FloatingDamageState& state : mFloatingDamageNumbers)
+        {
+            if (!state.mActive)
+            {
+                slot = &state;
+                break;
+            }
+        }
+
+        // If every slot is busy, recycle the oldest one. This is preferable to
+        // allocating a widget in the middle of a rapid multi-hit sequence.
+        if (!slot)
+        {
+            slot = &mFloatingDamageNumbers.front();
+            for (FloatingDamageState& state : mFloatingDamageNumbers)
+                if (state.mAge > slot->mAge)
+                    slot = &state;
+        }
+
+        const std::uint64_t sequence = mFloatingDamageSequence++;
+        slot->mAge = 0.f;
+        slot->mLifetime = 0.85f;
+        slot->mSide = (sequence & 1u) ? 1.f : -1.f;
+        const int lane = static_cast<int>((sequence / 2u) % 3u) - 1;
+        slot->mLaneOffset = static_cast<float>(lane * 7);
+        slot->mActive = true;
+
+        // Weapon damage in Morrowind can be fractional internally, but the compact
+        // RPG readout deliberately uses the nearest real HP point.
+        const int shownDamage = std::max(1, static_cast<int>(std::lround(damage)));
+        slot->mWidget->setCaption("-" + MyGUI::utility::toString(shownDamage));
+        slot->mWidget->setAlpha(1.f);
+        slot->mWidget->setVisible(true);
+    }
+
+HUD::HudNotificationState* HUD::pushHudNotification(HudEventKind kind, const std::string& key,
+        const std::string& icon, const std::string& title, int amount,
+        const std::string& valueText, int totalCount)
+    {
+        if (title.empty() || mHudNotifications.empty())
+            return nullptr;
+
+        const auto updatePickupCaption = [](HudNotificationState& state)
+        {
+            if (!state.mValue)
+                return;
+            std::string caption = "+" + MyGUI::utility::toString(state.mAmount);
+            if (state.mTotalCount > state.mAmount)
+                caption += " (" + MyGUI::utility::toString(state.mTotalCount) + ")";
+            state.mValue->setCaption(caption);
+        };
+
+        // Pickups of the same item (especially gold) coalesce while their card is
+        // alive. This turns rapid +5/+20/+100 changes into one stable +125 card.
+        if (kind == HudEventKind::Item || kind == HudEventKind::Gold)
+        {
+            for (HudNotificationState& state : mHudNotifications)
+            {
+                if (!state.mActive || state.mKind != kind || state.mKey != key)
+                    continue;
+
+                state.mAmount += amount;
+                if (totalCount > 0)
+                    state.mTotalCount = totalCount;
+                state.mAge = 0.f;
+                state.mSequence = ++mHudNotificationSequence;
+                updatePickupCaption(state);
+                return &state;
+            }
+        }
+
+        HudNotificationState* target = nullptr;
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            if (!state.mActive)
+            {
+                target = &state;
+                break;
+            }
+        }
+        if (!target)
+        {
+            target = &*std::min_element(mHudNotifications.begin(), mHudNotifications.end(),
+                [](const HudNotificationState& left, const HudNotificationState& right)
+                {
+                    return left.mSequence < right.mSequence;
+                });
+        }
+
+        target->mKind = kind;
+        target->mKey = key;
+        target->mTitleText = title;
+        target->mValueText = valueText;
+        target->mAmount = std::max(1, amount);
+        target->mNumericAmount = 0.f;
+        target->mTotalCount = totalCount > 0 ? totalCount : -1;
+        target->mSpellId.clear();
+        target->mSpellCasterActorId = -1;
+        target->mSpellTimestampDay = -1;
+        target->mSpellTimestampHour = -1.f;
+        target->mAge = 0.f;
+        target->mLifetime = kind == HudEventKind::Magic ? 4.8f : 4.2f;
+        target->mSequence = ++mHudNotificationSequence;
+        target->mActive = true;
+
+        // A recycled XP slot must not tint the next pickup/spell card. Restore
+        // the normal feed presentation first, then XP can deliberately restyle it.
+        const MyGUI::Colour headerColour = MyGUI::Colour::parse(
+            MyGUI::LanguageManager::getInstance().replaceTags("#{fontcolour=header}"));
+        if (target->mShade)
+        {
+            target->mShade->setColour(MyGUI::Colour::Black);
+            target->mShade->setAlpha(0.22f);
+        }
+        if (target->mTitle)
+        {
+            target->mTitle->setCaption(title);
+            target->mTitle->setTextColour(headerColour);
+            target->mTitle->setCoord(icon.empty()
+                ? MyGUI::IntCoord(6, 1, 204, 36)
+                : MyGUI::IntCoord(40, 1, 170, 36));
+        }
+        if (target->mValue)
+        {
+            target->mValue->setTextColour(headerColour);
+            if (kind == HudEventKind::Gold || kind == HudEventKind::Item)
+                updatePickupCaption(*target);
+            else
+                target->mValue->setCaption(valueText);
+        }
+        if (target->mIcon)
+        {
+            if (icon.empty())
+            {
+                target->mIcon->setImageTexture("");
+                target->mIcon->setVisible(false);
+            }
+            else
+            {
+                std::string resolved = icon;
+                try
+                {
+                    resolved = MWBase::Environment::get().getWindowManager()->correctIconPath(resolved);
+                }
+                catch (const std::exception&)
+                {
+                    resolved.clear();
+                }
+                target->mIcon->setImageTexture(resolved);
+                target->mIcon->setVisible(true);
+            }
+        }
+        if (target->mPanel)
+        {
+            target->mPanel->setAlpha(0.f);
+            target->mPanel->setVisible(true);
+        }
+        return target;
+    }
+
+void HUD::pushSystemNotification(const std::string& title, const std::string& value,
+        const std::string& icon, const std::string& key)
+    {
+        if (title.empty())
+            return;
+
+        const std::string notificationKey = key.empty()
+            ? "system:" + MyGUI::utility::toString(mHudNotificationSequence + 1)
+            : key;
+        HudNotificationState* state = pushHudNotification(
+            HudEventKind::System, notificationKey, icon, title, 1, value);
+        if (state)
+            state->mLifetime = 4.4f;
+    }
+
+void HUD::pushExperienceNotification(float amount, const std::string& reason)
+    {
+        if (!std::isfinite(amount) || mHudNotifications.empty())
+            return;
+
+        const bool neutral = std::fabs(amount) < 0.0001f;
+        if (neutral && reason.empty())
+            return;
+
+        const std::string label = MyGUI::LanguageManager::getInstance().replaceTags(
+            "#{arenamp=xp.label.experience}");
+        const std::string title = reason.empty() ? label : label + ": " + reason;
+        const char* signClass = amount > 0.f ? "positive" : (amount < 0.f ? "negative" : "neutral");
+        const std::string key = std::string("experience:") + signClass + ":" + reason;
+
+        const auto formatExperience = [](float value)
+        {
+            if (std::fabs(value) < 0.0001f)
+                return std::string();
+            std::ostringstream stream;
+            if (value > 0.f)
+                stream << "+";
+            if (std::fabs(value - std::round(value)) < 0.05f)
+                stream << static_cast<int>(std::round(value));
+            else
+                stream << std::fixed << std::setprecision(1) << value;
+            stream << " XP";
+            return stream.str();
+        };
+
+        const auto styleExperience = [](HudNotificationState& state, float value)
+        {
+            MyGUI::Colour textColour = MyGUI::Colour::White;
+            MyGUI::Colour background = MyGUI::Colour::Black;
+            float alpha = 0.28f;
+            if (value > 0.0001f)
+            {
+                textColour = MyGUI::Colour(0.42f, 1.0f, 0.42f);
+                background = MyGUI::Colour(0.08f, 0.30f, 0.10f);
+                alpha = 0.36f;
+            }
+            else if (value < -0.0001f)
+            {
+                textColour = MyGUI::Colour(1.0f, 0.48f, 0.48f);
+                background = MyGUI::Colour(0.36f, 0.07f, 0.07f);
+                alpha = 0.36f;
+            }
+
+            if (state.mShade)
+            {
+                state.mShade->setColour(background);
+                state.mShade->setAlpha(alpha);
+            }
+            if (state.mTitle)
+                state.mTitle->setTextColour(textColour);
+            if (state.mValue)
+                state.mValue->setTextColour(textColour);
+        };
+
+        // Repeated gains/losses of the same sign and source coalesce. A loss can
+        // never merge into a gain, which keeps the colour semantics unambiguous.
+        if (!neutral)
+        {
+            for (HudNotificationState& state : mHudNotifications)
+            {
+                if (!state.mActive || state.mKind != HudEventKind::Experience || state.mKey != key)
+                    continue;
+
+                state.mNumericAmount += amount;
+                state.mAge = 0.f;
+                state.mSequence = ++mHudNotificationSequence;
+                if (state.mValue)
+                    state.mValue->setCaption(formatExperience(state.mNumericAmount));
+                styleExperience(state, state.mNumericAmount);
+                return;
+            }
+        }
+
+        // XP deliberately has no texture icon. This also removes the old missing
+        // Luck icon that rendered as a pink square on installations without it.
+        HudNotificationState* state = pushHudNotification(
+            HudEventKind::Experience, key, std::string(), title, 1, formatExperience(amount));
+        if (!state)
+            return;
+        state->mNumericAmount = amount;
+        state->mLifetime = 4.4f;
+        styleExperience(*state, amount);
+    }
+
     void HUD::hideCombatHealthBars()
     {
         mCombatHealthBarScanTimer = 0.f;

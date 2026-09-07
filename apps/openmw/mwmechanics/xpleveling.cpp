@@ -678,6 +678,20 @@ namespace MWMechanics
             notifyXp(message.str());
         }
 
+float getDeathRespawnDelay(const MWWorld::Ptr& player, float baseDelay)
+        {
+            baseDelay = std::max(0.f, baseDelay);
+            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+                return baseDelay;
+
+            const NpcStats& stats = player.getClass().getNpcStats(player);
+            if (stats.getExperience() > 0.f)
+                return baseDelay;
+
+            const float perLevel = nonNegativeSetting("zero xp death cooldown per level");
+            return baseDelay + std::max(1, stats.getLevel()) * perLevel;
+        }
+
         bool spendSkillPoints(const MWWorld::Ptr& player, int skillId)
         {
             if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
