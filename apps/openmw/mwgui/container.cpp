@@ -5,6 +5,9 @@
 #include <MyGUI_Button.h>
 #include <MyGUI_EditBox.h>
 #include <MyGUI_ImageBox.h>
+#include <MyGUI_LanguageManager.h>
+
+#include <components/settings/settings.hpp>
 
 #include <cmath>
 
@@ -40,6 +43,7 @@ namespace MWGui
         , mSortModel(nullptr)
         , mModel(nullptr)
         , mSelectedItem(-1)
+        , mSingleTransferButton(nullptr)
     {
         getWidget(mTakeButton, "TakeButton");
         getWidget(mCloseButton, "CloseButton");
@@ -52,6 +56,7 @@ namespace MWGui
         getWidget(mFilterEdit, "FilterEdit");
         getWidget(mEncumbranceBar, "EncumbranceBar");
         getWidget(mBottomBar, "BottomBar");
+        getWidget(mSingleTransferButton, "SingleTransferButton");
 
         getWidget(mItemView, "ItemView");
         mItemView->setExtendedMode(true);
@@ -79,11 +84,13 @@ namespace MWGui
         mFilterMisc->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onFilterChanged);
         mFilterKeys->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onFilterChanged);
         mViewModeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onViewModeClicked);
+        mSingleTransferButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onSingleTransferClicked);
         mCloseButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onCloseButtonClicked);
         mTakeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onTakeAllButtonClicked);
         mFilterEdit->eventEditTextChange += MyGUI::newDelegate(this, &ContainerWindow::onNameFilterChanged);
 
         updateBottomBarLayout();
+        updateSingleTransferButton();
 
         setCoord(160, 20, 680, 380);
     }
@@ -114,23 +121,26 @@ namespace MWGui
             return;
         }
 
-        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
-        const int sourceIndex = mSortModel->mapToSource(index);
-        if (sourceIndex < 0 || sourceIndex >= static_cast<int>(mModel->getItemCount()))
-            return;
-        if (!onTakeItem(mModel->getItem(sourceIndex), count))
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed()
+            || Settings::Manager::getBool("single item transfer", "GUI");
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const int count = control ? 1 : item.mCount;
+        mSelectedItem = mSortModel->mapToSource(index);
+        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
 
-        // One click now performs the transfer immediately. Drag-and-drop still
-        // uses onItemDragStarted, while Ctrl+click transfers a single unit.
-        ItemModel* playerModel = MWBase::Environment::get().getWindowManager()->getInventoryWindow()->getModel();
-        const std::string sound = item.mBase.getClass().getUpSoundId(item.mBase);
-        MWBase::Environment::get().getWindowManager()->playSound(sound);
-        mModel->moveItem(mModel->getItem(sourceIndex), count, playerModel);
-        mModel->update();
-        mItemView->update();
-        MWBase::Environment::get().getWindowManager()->getInventoryWindow()->updateItemView();
-        updateEncumbranceBar();
+        if (item.mCount > 1 && !control && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            const std::string name = item.mBase.getClass().getName(item.mBase)
+                + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &ContainerWindow::takeItem);
+            return;
+        }
+
+        takeItem(nullptr, count);
     }
 
     void ContainerWindow::onItemDragStarted(int index)
@@ -145,11 +155,26 @@ namespace MWGui
             return;
         }
 
-        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed()
+            || Settings::Manager::getBool("single item transfer", "GUI");
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const int count = control ? 1 : item.mCount;
         mSelectedItem = mSortModel->mapToSource(index);
-        if (!onTakeItem(mModel->getItem(mSelectedItem), count))
+        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
-        mDragAndDrop->startDrag(mSelectedItem, mSortModel, mModel, mItemView, count);
+
+        if (item.mCount > 1 && !control && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            const std::string name = item.mBase.getClass().getName(item.mBase)
+                + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &ContainerWindow::dragItem);
+            return;
+        }
+
+        dragItem(nullptr, count);
     }
 
     void ContainerWindow::onItemDoubleClicked(int index)
@@ -157,12 +182,36 @@ namespace MWGui
         (void)index;
     }
 
-    void ContainerWindow::dragItem(MyGUI::Widget* sender, int count)
+    void ContainerWindow::takeItem(MyGUI::Widget* sender, int count)
     {
-        if (!mModel)
+        (void)sender;
+        if (!mModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
 
-        if (!onTakeItem(mModel->getItem(mSelectedItem), count))
+        const ItemStack item = mModel->getItem(mSelectedItem);
+        count = std::max(1, std::min(count, static_cast<int>(item.mCount)));
+        if (!onTakeItem(item, count))
+            return;
+
+        ItemModel* playerModel = MWBase::Environment::get().getWindowManager()->getInventoryWindow()->getModel();
+        const std::string sound = item.mBase.getClass().getUpSoundId(item.mBase);
+        MWBase::Environment::get().getWindowManager()->playSound(sound);
+        mModel->moveItem(item, count, playerModel);
+        mModel->update();
+        mItemView->update();
+        MWBase::Environment::get().getWindowManager()->getInventoryWindow()->updateItemView();
+        updateEncumbranceBar();
+    }
+
+    void ContainerWindow::dragItem(MyGUI::Widget* sender, int count)
+    {
+        (void)sender;
+        if (!mModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
+            return;
+
+        const ItemStack item = mModel->getItem(mSelectedItem);
+        count = std::max(1, std::min(count, static_cast<int>(item.mCount)));
+        if (!onTakeItem(item, count))
             return;
 
         mDragAndDrop->startDrag(mSelectedItem, mSortModel, mModel, mItemView, count);
@@ -188,6 +237,7 @@ namespace MWGui
     void ContainerWindow::setPtr(const MWWorld::Ptr& container)
     {
         mPtr = container;
+        updateSingleTransferButton();
 
         bool loot = mPtr.getClass().isActor() && mPtr.getClass().getCreatureStats(mPtr).isDead();
 
@@ -385,9 +435,30 @@ namespace MWGui
                 + (mItemView->getViewMode() == ItemView::View_List ? "view_grid.dds" : "view_table.dds"));
     }
 
+    void ContainerWindow::onSingleTransferClicked(MyGUI::Widget* sender)
+    {
+        (void)sender;
+        const bool enabled = Settings::Manager::getBool("single item transfer", "GUI");
+        Settings::Manager::setBool("single item transfer", "GUI", !enabled);
+        Settings::Manager::saveUser();
+        updateSingleTransferButton();
+    }
+
+    void ContainerWindow::updateSingleTransferButton()
+    {
+        if (!mSingleTransferButton)
+            return;
+
+        const bool enabled = Settings::Manager::getBool("single item transfer", "GUI");
+        mSingleTransferButton->setStateSelected(enabled);
+        mSingleTransferButton->setCaption(MyGUI::LanguageManager::getInstance().replaceTags(
+            enabled ? "#{arenamp=inventory.single_transfer_on}" : "#{arenamp=inventory.single_transfer_off}"));
+    }
+
     void ContainerWindow::updateBottomBarLayout()
     {
-        if (!mBottomBar || !mEncumbranceBar || !mFilterEdit || !mViewModeButton || !mTakeButton || !mCloseButton)
+        if (!mBottomBar || !mEncumbranceBar || !mFilterEdit || !mViewModeButton || !mSingleTransferButton
+            || !mTakeButton || !mCloseButton)
             return;
 
         const int width = mBottomBar->getWidth();
@@ -403,6 +474,10 @@ namespace MWGui
 
         mViewModeButton->setCoord(x, 2, buttonW, 24);
         x += buttonW + gap;
+
+        const int singleW = 128;
+        mSingleTransferButton->setCoord(x, 2, singleW, 24);
+        x += singleW + gap;
 
         const int rightButtonsWidth = takeW + gap + closeW;
         const int filterWidth = std::max(80, width - x - gap - rightButtonsWidth);

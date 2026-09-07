@@ -531,7 +531,9 @@ namespace MWGui
 
         const ItemStack& item = mTradeModel->getItem(sourceIndex);
         int count = item.mCount;
-        if (MyGUI::InputManager::getInstance().isControlPressed())
+        const bool oneAtATime = Settings::Manager::getBool("single item transfer", "GUI")
+            && (mTrading || mGuiMode == GM_Container || mGuiMode == GM_Companion);
+        if (MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime)
             count = 1;
 
         mSelectedItem = sourceIndex;
@@ -549,19 +551,40 @@ namespace MWGui
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sBarterDialog4}");
                 return;
             }
-            mDragAndDrop->startBarterDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+            const bool control = MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime;
+            const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+            if (item.mCount > 1 && !control && !shift)
+            {
+                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+                const std::string name = item.mBase.getClass().getName(item.mBase)
+                    + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::startBarterDrag);
+                return;
+            }
+            startBarterDrag(nullptr, count);
             return;
         }
 
-        // Two-pane container/companion transfer keeps its existing instant,
-        // dialog-free drag (see the matching branch in
-        // onItemSelectedFromSourceModel, which handles the click path with
-        // the same intent): the whole stack moves immediately, Ctrl for one.
+        // Container/companion drags now ask for the amount just like a world
+        // drop. Ctrl = one, Shift = whole stack.
         if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
-            ensureSelectedItemUnequipped(count);
-            mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
-            notifyContentChanged();
+            const bool control = MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime;
+            const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+            if (item.mCount > 1 && !control && !shift)
+            {
+                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+                const std::string name = item.mBase.getClass().getName(item.mBase)
+                    + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::dragItem);
+                return;
+            }
+
+            dragItem(nullptr, count);
             return;
         }
 
@@ -681,7 +704,9 @@ namespace MWGui
         int count = item.mCount;
         bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
 
-        if (MyGUI::InputManager::getInstance().isControlPressed())
+        const bool oneAtATime = Settings::Manager::getBool("single item transfer", "GUI")
+            && (mTrading || mGuiMode == GM_Container || mGuiMode == GM_Companion);
+        if (MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime)
             count = 1;
 
         if (mTrading)
@@ -704,24 +729,35 @@ namespace MWGui
                 return;
             }
 
-            // ArenaMW two-pane barter uses single-click transfer by default.
-            // Ctrl+click still moves exactly one item.
             mSelectedItem = index;
-            sellItem(nullptr, count);
+            if (count > 1 && !shift)
+            {
+                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+                const std::string name = object.getClass().getName(object)
+                    + MWGui::ToolTips::getSoulString(object.getCellRef());
+                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", count);
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::sellItem);
+            }
+            else
+                sellItem(nullptr, count);
             return;
         }
 
         if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
-            // Containers and companions mirror barter: one click sends the whole
-            // stack to the opposite pane, Ctrl+click sends one. Reuse the existing
-            // DnD drop path so ownership/capacity/model callbacks stay identical to
-            // a manual drag rather than bypassing container validation.
             mSelectedItem = index;
-            ensureSelectedItemUnequipped(count);
-            mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
-            mDragAndDrop->getTransferTargetView()->eventBackgroundClicked();
-            notifyContentChanged();
+            if (count > 1 && !shift)
+            {
+                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+                const std::string name = object.getClass().getName(object)
+                    + MWGui::ToolTips::getSoulString(object.getCellRef());
+                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", count);
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::transferItemToOtherPane);
+            }
+            else
+                transferItemToOtherPane(nullptr, count);
             return;
         }
 
@@ -798,6 +834,33 @@ namespace MWGui
     {
         ensureSelectedItemUnequipped(count);
         mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+        notifyContentChanged();
+    }
+
+    void InventoryWindow::startBarterDrag(MyGUI::Widget* sender, int count)
+    {
+        (void)sender;
+        if (!mTradeModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        const ItemStack item = mTradeModel->getItem(mSelectedItem);
+        count = std::max(1, std::min(count, static_cast<int>(item.mCount)));
+        mDragAndDrop->startBarterDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+    }
+
+    void InventoryWindow::transferItemToOtherPane(MyGUI::Widget* sender, int count)
+    {
+        (void)sender;
+        ItemView* target = mDragAndDrop->getTransferTargetView();
+        if (!target || !mTradeModel || mSelectedItem < 0
+            || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        const ItemStack item = mTradeModel->getItem(mSelectedItem);
+        count = std::max(1, std::min(count, static_cast<int>(item.mCount)));
+        ensureSelectedItemUnequipped(count);
+        mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+        target->eventBackgroundClicked();
         notifyContentChanged();
     }
 

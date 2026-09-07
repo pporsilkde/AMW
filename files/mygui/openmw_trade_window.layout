@@ -34,6 +34,7 @@
 
             <!-- Row 2: barter actions, lifted fully inside the window. -->
             <Widget type="AutoSizedButton" skin="MW_Button" position="0 36 0 26" name="MaxSaleButton" align="Left Bottom"><Property key="Caption" value="#{sMaxSale}"/></Widget>
+            <Widget type="AutoSizedButton" skin="MW_Button" position="150 36 0 26" name="SingleTransferButton" align="Left Bottom"><Property key="Caption" value="#{arenamp=inventory.single_transfer_on}"/><Property key="NeedKey" value="false"/></Widget>
             <Widget type="AutoSizedButton" skin="MW_Button" position="490 40 0 26" name="OfferButton" align="Right Bottom"><Property key="Caption" value="#{sBarterDialog8}"/></Widget>
             <Widget type="AutoSizedButton" skin="MW_Button" position="590 40 0 26" name="CancelButton" align="Right Bottom"><Property key="Caption" value="#{sCancel}"/></Widget>
         </Widget>

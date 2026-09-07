@@ -71,11 +71,13 @@ namespace MWGui
         MyGUI::Widget* mBottomBar;
         MyGUI::Button* mViewModeButton;
         MyGUI::ImageBox* mViewModeIcon;
+        MyGUI::Button* mSingleTransferButton;
 
         void onItemSelected(int index);
         void onItemDragStarted(int index);
         void onItemDoubleClicked(int index);
         void onBackgroundSelected();
+        void takeItem(MyGUI::Widget* sender, int count);
         void dragItem(MyGUI::Widget* sender, int count);
         void dropItem();
         void onCloseButtonClicked(MyGUI::Widget* _sender);
@@ -83,8 +85,10 @@ namespace MWGui
         void onNameFilterChanged(MyGUI::EditBox* sender);
         void onFilterChanged(MyGUI::Widget* sender);
         void onViewModeClicked(MyGUI::Widget* sender);
+        void onSingleTransferClicked(MyGUI::Widget* sender);
         void updateEncumbranceBar();
         void updateBottomBarLayout();
+        void updateSingleTransferButton();
 
         /// @return is taking the item allowed?
         bool onTakeItem(const ItemStack& item, int count);

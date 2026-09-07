@@ -36,7 +36,11 @@
 
         <Widget type="Widget" skin="" position="8 292 646 28" align="Left Bottom HStretch" name="BottomBar">
             <Widget type="MWDynamicStat" skin="MW_ChargeBar_Blue" position="0 2 122 24" name="EncumbranceBar" align="Left Top"/>
-            <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="160 2 328 24" name="FilterEdit" align="Left Top HStretch">
+            <Widget type="AutoSizedButton" skin="MW_Button" position="160 2 0 24" name="SingleTransferButton" align="Left Top">
+                <Property key="Caption" value="#{arenamp=inventory.single_transfer_on}"/>
+                <Property key="NeedKey" value="false"/>
+            </Widget>
+            <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="276 2 212 24" name="FilterEdit" align="Left Top HStretch">
                 <Property key="MultiLine" value="false"/>
                 <UserString key="AcceptTab" value="true"/>
             </Widget>
