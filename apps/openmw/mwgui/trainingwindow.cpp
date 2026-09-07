@@ -17,6 +17,7 @@
 #include "../mwmechanics/actorutil.hpp"
 
 #include "tooltips.hpp"
+#include "../mwworld/timestamp.hpp"
 
 namespace
 {
@@ -46,6 +47,7 @@ namespace MWGui
         getWidget(mTrainingOptions, "TrainingOptions");
         getWidget(mCancelButton, "CancelButton");
         getWidget(mPlayerGold, "PlayerGold");
+        getWidget(mTrainingRemaining, "TrainingRemaining");
 
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &TrainingWindow::onCancelButtonClicked);
 
@@ -74,6 +76,12 @@ namespace MWGui
         int playerGold = player.getClass().getContainerStore(player).count(MWWorld::ContainerStore::sGoldId);
 
         mPlayerGold->setCaptionWithReplacing("#{sGold}: " + MyGUI::utility::toString(playerGold));
+
+        const MWWorld::TimeStamp now = MWBase::Environment::get().getWorld()->getTimeStamp();
+        const int used = actor.getClass().getNpcStats(actor).getTrainingCount(
+            double(now.getDay()) * 24.0 + now.getHour());
+        mTrainingRemaining->setCaptionWithReplacing(
+            "#{arenamp=training.remaining}: " + std::to_string(3 - used) + "/3");
 
         // NPC can train you in his best 3 skills
         std::vector< std::pair<int, float> > skills;
@@ -183,6 +191,15 @@ namespace MWGui
 
     void TrainingWindow::onTrainingSelected (MyGUI::Widget *sender)
     {
+        const MWWorld::TimeStamp now = MWBase::Environment::get().getWorld()->getTimeStamp();
+        const double gameHours = double(now.getDay()) * 24.0 + now.getHour();
+        MWMechanics::NpcStats& trainerStats = mPtr.getClass().getNpcStats(mPtr);
+        if (trainerStats.getTrainingCount(gameHours) >= 3)
+        {
+            MWBase::Environment::get().getWindowManager()->messageBox("#{arenamp=training.daily_limit}");
+            return;
+        }
+
         int skillId = *sender->getUserData<int>();
 
         MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
@@ -272,6 +289,7 @@ namespace MWGui
         const ESM::Class *class_ =
             store.get<ESM::Class>().find(playerRef->mBase->mClass);
         pcStats.increaseSkill (skillId, *class_, true);
+        trainerStats.recordTraining(gameHours);
 
         // remove gold
         player.getClass().getContainerStore(player).remove(MWWorld::ContainerStore::sGoldId, price, player);

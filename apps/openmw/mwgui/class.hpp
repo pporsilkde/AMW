@@ -6,6 +6,11 @@
 #include "widgets.hpp"
 #include "windowbase.hpp"
 
+namespace MyGUI
+{
+    class ProgressBar;
+}
+
 namespace MWGui
 {
     void setClassImage(MyGUI::ImageBox* imageBox, const std::string& classId);
@@ -135,6 +140,10 @@ namespace MWGui
         MyGUI::ImageBox* mClassImage;
         MyGUI::ListBox*  mClassList;
         MyGUI::TextBox*  mSpecializationName;
+        MyGUI::TextBox*  mArchetypeName;
+        MyGUI::TextBox*  mArchetypePair;
+        MyGUI::ProgressBar* mArchetypePowerBar;
+        MyGUI::TextBox*  mArchetypePowerText;
         Widgets::MWAttributePtr mFavoriteAttribute[2];
         Widgets::MWSkillPtr   mMajorSkill[5];
         Widgets::MWSkillPtr   mMinorSkill[5];
@@ -309,15 +318,23 @@ namespace MWGui
         void setSpecialization(int id);
 
         void update();
+        void updateArchetypePreview();
 
     private:
         MyGUI::EditBox*                   mEditName;
         MyGUI::TextBox*                  mSpecializationName;
+        MyGUI::TextBox*                  mArchetypeName;
+        MyGUI::TextBox*                  mArchetypePair;
+        MyGUI::ProgressBar*              mArchetypePowerBar;
+        MyGUI::TextBox*                  mArchetypePowerText;
+        MyGUI::TextBox*                  mArchetypePerk;
+        MyGUI::TextBox*                  mArchetypeDrawback;
         Widgets::MWAttributePtr          mFavoriteAttribute0, mFavoriteAttribute1;
         Widgets::MWSkillPtr              mMajorSkill[5];
         Widgets::MWSkillPtr              mMinorSkill[5];
         std::vector<Widgets::MWSkillPtr> mSkills;
         std::string                      mDescription;
+        std::string                      mLastAutoClassName;
 
         SelectSpecializationDialog       *mSpecDialog;
         SelectAttributeDialog            *mAttribDialog;

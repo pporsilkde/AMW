@@ -52,7 +52,14 @@ namespace MWMechanics
 
             bool mIsWerewolf;
 
+            double mTrainingWindowStart = -1.0;
+            int mTrainingCount = 0;
+
         public:
+            // A window starts with the first successful lesson, lasts 24 game hours.
+            int getTrainingCount(double gameHours) const;
+            void recordTraining(double gameHours);
+
 
             NpcStats();
 

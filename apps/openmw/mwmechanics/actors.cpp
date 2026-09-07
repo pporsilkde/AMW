@@ -1,3 +1,4 @@
+#include "classarchetype.hpp"
 #include "actors.hpp"
 
 #include <algorithm>
@@ -1488,6 +1489,15 @@ namespace MWMechanics
 
         now += creatureStats.getActiveSpells().getMagicEffects();
 
+        // Y038: the archetype is a property of the NPC class itself. Apply the
+        // same derived signature effects to players, dedicated players and ordinary
+        // NPCs. Creatures have no NPC class and stay on the vanilla path.
+        if (creature.getClass().isNpc())
+        {
+            const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(creature);
+            ClassArchetype::addPassiveMagicEffects(creature, sneaking, now);
+        }
+
         creatureStats.modifyMagicEffects(now);
     }
 
@@ -1594,6 +1604,39 @@ namespace MWMechanics
 
         MWMechanics::CreatureStats& stats = ptr.getClass().getCreatureStats (ptr);
 
+        // Y036: attribute-pair archetypes can provide slow natural recovery. The
+        // values scale with both favourite attributes. Combat keeps the perk useful
+        // without turning it into potion-level regeneration.
+        if (ptr.getClass().isNpc() && duration > 0.f)
+        {
+            const bool inCombat = stats.getAiSequence().isInCombat();
+
+            const float healthRate = ClassArchetype::getHealthRegenFractionPerSecond(ptr);
+            if (healthRate > 0.f)
+            {
+                DynamicStat<float> health = stats.getHealth();
+                if (health.getCurrent() < health.getModified())
+                {
+                    const float combatFactor = inCombat ? 0.20f : 1.f;
+                    health.setCurrent(health.getCurrent() + health.getModified() * healthRate * duration * combatFactor);
+                    stats.setHealth(health);
+                }
+            }
+
+            const bool stuntedMagicka = stats.getMagicEffects().get(ESM::MagicEffect::StuntedMagicka).getMagnitude() > 0.f;
+            const float magickaRate = ClassArchetype::getMagickaRegenFractionPerSecond(ptr);
+            if (!stuntedMagicka && magickaRate > 0.f)
+            {
+                DynamicStat<float> magicka = stats.getMagicka();
+                if (magicka.getCurrent() < magicka.getModified())
+                {
+                    const float combatFactor = inCombat ? 0.35f : 1.f;
+                    magicka.setCurrent(magicka.getCurrent() + magicka.getModified() * magickaRate * duration * combatFactor);
+                    stats.setMagicka(magicka);
+                }
+            }
+        }
+
         // Current fatigue can be above base value due to a fortify effect.
         // In that case stop here and don't try to restore.
         DynamicStat<float> fatigue = stats.getFatigue();
@@ -1607,6 +1650,8 @@ namespace MWMechanics
         static const float fFatigueReturnMult = settings.find("fFatigueReturnMult")->mValue.getFloat ();
 
         float x = fFatigueReturnBase + fFatigueReturnMult * endurance;
+        if (ptr.getClass().isNpc())
+            x *= ClassArchetype::getFatigueRegenMultiplier(ptr);
 
         fatigue.setCurrent (fatigue.getCurrent() + duration * x);
         stats.setFatigue (fatigue);

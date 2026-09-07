@@ -2,8 +2,10 @@
 
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 #include <MyGUI_ImageBox.h>
+#include <MyGUI_LanguageManager.h>
 
 #include <components/esm/loadmgef.hpp>
 #include <components/settings/settings.hpp>
@@ -11,6 +13,7 @@
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -18,6 +21,7 @@
 
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 
 #include "tooltips.hpp"
 
@@ -41,9 +45,76 @@ namespace MWGui
     }
 
 
+    /*
+        Start of AMP addition (Y044)
+
+        mWidgetMap holds raw MyGUI pointers to children of the effect box. Those
+        children can be destroyed without this class ever being told, which used
+        to leave dangling pointers that were dereferenced on the next frame -
+        reliably reproducible while casting, because casting is what adds a new
+        effect and forces the strip to be rebuilt.
+    */
+    SpellIcons::~SpellIcons()
+    {
+        invalidate();
+    }
+
+    void SpellIcons::invalidate()
+    {
+        mWidgetMap.clear();
+        mParent = nullptr;
+    }
+
+    void SpellIcons::pruneDeadWidgets(MyGUI::Widget* parent)
+    {
+        // A cache built for a different parent can never be reused.
+        if (parent != mParent)
+        {
+            mWidgetMap.clear();
+            mParent = parent;
+            return;
+        }
+
+        if (mWidgetMap.empty())
+            return;
+
+        // Only widgets that are still live children of the parent may be touched.
+        std::set<MyGUI::Widget*> liveChildren;
+        const size_t childCount = parent->getChildCount();
+        for (size_t i = 0; i < childCount; ++i)
+            liveChildren.insert(parent->getChildAt(i));
+
+        for (auto it = mWidgetMap.begin(); it != mWidgetMap.end();)
+        {
+            if (it->second == nullptr || liveChildren.find(it->second) == liveChildren.end())
+                it = mWidgetMap.erase(it);
+            else
+                ++it;
+        }
+    }
+    /*
+        End of AMP addition (Y044)
+    */
+
     void SpellIcons::updateWidgets(MyGUI::Widget *parent, bool adjustSize)
     {
         // TODO: Tracking add/remove/expire would be better than force updating every frame
+
+        /*
+            Start of AMP addition (Y044)
+
+            Never work with a cache that outlived its widgets.
+        */
+        if (parent == nullptr)
+        {
+            invalidate();
+            return;
+        }
+
+        pruneDeadWidgets(parent);
+        /*
+            End of AMP addition (Y044)
+        */
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
@@ -60,6 +131,32 @@ namespace MWGui
         // now add lasting effects
         visitor.mIsPermanent = false;
         stats.getActiveSpells().visitEffectSources(visitor);
+
+        // Y038: archetype signature effects are runtime-derived, so they do not
+        // exist in Spells/ActiveSpells as ordinary sources. Mirror them into the
+        // Active Effects strip for UI only, using the exact same effect list that
+        // Actors::adjustMagicEffects injects into CreatureStats.
+        MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+        if (MWMechanics::ClassArchetype::getDisplayInfo(player, false, archetypeInfo))
+        {
+            std::vector<MWMechanics::ClassArchetype::PassiveEffect> passiveEffects;
+            const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
+            MWMechanics::ClassArchetype::getPassiveMagicEffects(player, sneaking, passiveEffects);
+            const std::string sourceName = MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=archetype.label}")
+                + ": " + MyGUI::LanguageManager::getInstance().replaceTags(
+                    "#{arenamp=archetype." + archetypeInfo.id + ".name}");
+            for (const MWMechanics::ClassArchetype::PassiveEffect& passive : passiveEffects)
+            {
+                MagicEffectInfo info;
+                info.mKey = MWMechanics::EffectKey(passive.effectId);
+                info.mMagnitude = static_cast<int>(passive.magnitude);
+                info.mPermanent = true;
+                info.mRemainingTime = -1.f;
+                info.mTotalTime = -1.f;
+                info.mSource = sourceName;
+                visitor.mEffectSources[passive.effectId].push_back(info);
+            }
+        }
 
         std::map <int, std::vector<MagicEffectInfo> >& effects = visitor.mEffectSources;
 

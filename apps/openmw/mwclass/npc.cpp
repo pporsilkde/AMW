@@ -1,3 +1,5 @@
+#include <MyGUI_LanguageManager.h>
+#include "../mwmechanics/classarchetype.hpp"
 #include "npc.hpp"
 
 #include <memory>
@@ -949,6 +951,9 @@ namespace MWClass
                     }
                 }
             }
+            if (damage > 0.f && !godmode)
+                damage *= MWMechanics::ClassArchetype::getIncomingDamageMultiplier(ptr);
+
             if (damage > 0.0f)
             {
                 sndMgr->playSound3D(ptr, "Health Damage", 1.0f, 1.0f);
@@ -991,6 +996,10 @@ namespace MWClass
             fatigue.setCurrent(fatigue.getCurrent() - damage, true);
             stats.setFatigue(fatigue);
         }
+
+        // Alpha 0.01: apply elemental weapon proc before kill attribution.
+        if (successful && ishealth && !object.isEmpty() && damage > 0.f)
+            MWMechanics::applyClassArchetypeElementalHit(attacker, ptr, object, damage, hitPosition);
 
         if (!wasDead && getCreatureStats(ptr).isDead())
         {
@@ -1135,6 +1144,7 @@ namespace MWClass
         if(npcdata->mNpcStats.isWerewolf() && running && npcdata->mNpcStats.getDrawState() == MWMechanics::DrawState_Nothing)
             moveSpeed *= gmst.fWereWolfRunMult->mValue.getFloat();
 
+        moveSpeed *= MWMechanics::ClassArchetype::getMovementSpeedMultiplier(ptr);
         return moveSpeed;
     }
 
@@ -1236,6 +1246,33 @@ namespace MWClass
         if(fullHelp)
             info.text = MWGui::ToolTips::getMiscString(ref->mBase->mScript, "Script");
 
+        // Y038: ordinary NPCs use the same class-derived archetype system as
+        // players. Show the archetype on the world tooltip so the player can
+        // understand why an NPC may regenerate, evade, absorb magic or proc fire.
+        const ESM::Class* klass = MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().search(ref->mBase->mClass);
+        if (klass)
+        {
+            MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+            if (MWMechanics::ClassArchetype::getDisplayInfo(
+                    klass->mData.mAttribute[0], klass->mData.mAttribute[1], false, archetypeInfo))
+            {
+                auto arenaText = [](const std::string& key) {
+                    return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+                };
+                const std::string archetypeName = arenaText("archetype." + archetypeInfo.id + ".name");
+                if (!info.text.empty())
+                    info.text += "\n";
+                info.text += arenaText("archetype.label") + ": " + archetypeName;
+                if (fullHelp)
+                {
+                    info.text += "\n" + arenaText("archetype.buff") + ": "
+                        + arenaText("archetype." + archetypeInfo.id + ".buff");
+                    info.text += "\n" + arenaText("archetype.debuff") + ": "
+                        + arenaText("archetype." + archetypeInfo.id + ".debuff");
+                }
+            }
+        }
+
         return info;
     }
 
@@ -1243,7 +1280,9 @@ namespace MWClass
     {
         const MWMechanics::CreatureStats& stats = getCreatureStats (ptr);
         static const float fEncumbranceStrMult = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
-        return stats.getAttribute(ESM::Attribute::Strength).getModified()*fEncumbranceStrMult;
+        float capacity = stats.getAttribute(ESM::Attribute::Strength).getModified()*fEncumbranceStrMult;
+        capacity *= MWMechanics::ClassArchetype::getCarryCapacityMultiplier(ptr);
+        return capacity;
     }
 
     float Npc::getEncumbrance (const MWWorld::Ptr& ptr) const

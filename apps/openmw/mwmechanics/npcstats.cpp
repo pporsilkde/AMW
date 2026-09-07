@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "npcstats.hpp"
 
 #include <iomanip>
@@ -654,6 +655,8 @@ void MWMechanics::NpcStats::writeState (ESM::NpcStats& state) const
     std::copy (mUsedIds.begin(), mUsedIds.end(), std::back_inserter (state.mUsedIds));
 
     state.mTimeToStartDrowning = mTimeToStartDrowning;
+    state.mTrainingWindowStart = mTrainingWindowStart;
+    state.mTrainingCount = mTrainingCount;
 }
 void MWMechanics::NpcStats::readState (const ESM::CreatureStats& state)
 {
@@ -736,4 +739,23 @@ void MWMechanics::NpcStats::readState (const ESM::NpcStats& state)
             mUsedIds.insert (*iter);
 
     mTimeToStartDrowning = state.mTimeToStartDrowning;
+    mTrainingWindowStart = state.mTrainingWindowStart;
+    mTrainingCount = std::clamp(state.mTrainingCount, 0, 3);
+}
+
+int MWMechanics::NpcStats::getTrainingCount(double gameHours) const
+{
+    if (mTrainingWindowStart < 0.0 || gameHours - mTrainingWindowStart >= 24.0)
+        return 0;
+    return mTrainingCount;
+}
+
+void MWMechanics::NpcStats::recordTraining(double gameHours)
+{
+    if (getTrainingCount(gameHours) == 0)
+    {
+        mTrainingWindowStart = gameHours;
+        mTrainingCount = 0;
+    }
+    mTrainingCount = std::min(3, mTrainingCount + 1);
 }

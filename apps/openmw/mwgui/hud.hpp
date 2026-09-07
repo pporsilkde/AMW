@@ -87,6 +87,14 @@ namespace MWGui
         MyGUI::ProgressBar *mHealth, *mMagicka, *mStamina, *mEnemyHealth, *mDrowning;
         MyGUI::TextBox *mHealthText, *mMagickaText, *mStaminaText, *mFpsBox;
         MyGUI::TextBox *mEnemyName, *mEnemySummary;
+        // Y039: death XP countdown / potion and party recovery prompt.
+        MyGUI::Widget* mDeathRecoveryPanel;
+        MyGUI::ProgressBar* mDeathRecoveryXpBar;
+        MyGUI::TextBox* mDeathRecoveryTitle;
+        MyGUI::TextBox* mDeathRecoveryXpText;
+        MyGUI::TextBox* mDeathRecoveryPrompt;
+        MyGUI::TextBox* mDeathRecoveryAction;
+        float mDeathRecoveryBlinkTimer;
         MyGUI::Widget *mHealthFrame, *mMagickaFrame, *mFatigueFrame;
         MyGUI::Widget *mWeapBox, *mSpellBox, *mSneakBox;
         ItemWidget *mWeapImage;
@@ -123,7 +131,7 @@ namespace MWGui
             // Y023: combat HP no longer uses MyGUI::ProgressBar at all. The bar is
             // a stable transparent container with an ordinary red child whose width
             // is the HP fraction. This removes ProgressBar Track lifetime/range bugs.
-            MyGUI::Widget* mWidget = nullptr;
+            MyGUI::ProgressBar* mWidget = nullptr;
             MyGUI::Widget* mFill = nullptr;
             // Decorative frame is a separate child and is visible only after the
             // bar has arrived in the docked HUD stack.
@@ -133,6 +141,7 @@ namespace MWGui
             MyGUI::TextBox* mName = nullptr;
             MWWorld::Ptr mActor;
             bool mAlly = false;
+            bool mSkinAlly = false;
             // X024: presentation state. The raw per-frame anchor produced by
             // getObjectScreenBounds follows the animated bounding box, so a running
             // NPC made the bar jump up and down every stride. Everything below is

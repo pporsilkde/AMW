@@ -1,6 +1,7 @@
 #ifndef MWGUI_SPELLICONS_H
 #define MWGUI_SPELLICONS_H
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -54,11 +55,32 @@ namespace MWGui
     class SpellIcons
     {
     public:
+        /*
+            Start of AMP change (Y044)
+
+            The icon cache used to be a bare map of raw MyGUI pointers that outlived
+            the widgets it pointed at. Whenever the effect box was rebuilt or its
+            children were destroyed elsewhere, the next update called a virtual
+            method on freed memory. Track the parent the cache belongs to and drop
+            entries that are no longer live children of it.
+        */
+        ~SpellIcons();
+
         void updateWidgets(MyGUI::Widget* parent, bool adjustSize);
+
+        // Forget every cached widget without touching it. Safe to call after the
+        // parent or its children have already been destroyed.
+        void invalidate();
 
     private:
 
+        void pruneDeadWidgets(MyGUI::Widget* parent);
+
+        MyGUI::Widget* mParent = nullptr;
         std::map<int, MyGUI::ImageBox*> mWidgetMap;
+        /*
+            End of AMP change (Y044)
+        */
     };
 
 }

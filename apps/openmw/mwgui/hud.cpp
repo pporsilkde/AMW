@@ -620,7 +620,7 @@ namespace MWGui
             if (mHealthText)
                 mHealthText->setCaption(valStr);
             mHealthFrame->setUserString("Caption_HealthDescription", "#{sHealthDesc}\n" + valStr);
-            registerBarChange(mHealthBarState, current, modified);
+            registerBarChange(mHealthBarState, current, modified, true);
         }
         else if (id == "MBar")
         {
@@ -1401,11 +1401,12 @@ namespace MWGui
         }
     }
 
-    void HUD::registerBarChange(AutoHideBarState& state, int current, int modified)
+    void HUD::registerBarChange(AutoHideBarState& state, int current, int modified, bool wakeOnIncrease)
     {
         const bool firstUpdate = !state.initialized;
         const bool maximumChanged = state.initialized && state.modified != modified;
         const bool valueDecreased = state.initialized && current < state.current;
+        const bool valueIncreased = state.initialized && current > state.current;
 
         state.current = current;
         state.modified = modified;
@@ -1413,7 +1414,7 @@ namespace MWGui
 
         // Show a bar when the resource is actually spent/damaged or its maximum changes.
         // Passive regeneration must not continuously restart the auto-hide timer.
-        if (firstUpdate || maximumChanged || valueDecreased)
+        if (firstUpdate || maximumChanged || valueDecreased || (wakeOnIncrease && valueIncreased))
         {
             state.idleTimer = 0.f;
             state.alpha = 1.f;

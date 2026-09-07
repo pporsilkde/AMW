@@ -144,6 +144,10 @@ void ESM::NpcStats::load (ESMReader &esm)
 
     mCrimeId = -1;
     esm.getHNOT (mCrimeId, "CRID");
+    mTrainingWindowStart = -1.0;
+    mTrainingCount = 0;
+    esm.getHNOT(mTrainingWindowStart, "ATTS");
+    esm.getHNOT(mTrainingCount, "ATTC");
 }
 
 void ESM::NpcStats::save (ESMWriter &esm) const
@@ -237,6 +241,12 @@ void ESM::NpcStats::save (ESMWriter &esm) const
 
     if (mCrimeId != -1)
         esm.writeHNT ("CRID", mCrimeId);
+
+    if (mTrainingCount > 0)
+    {
+        esm.writeHNT("ATTS", mTrainingWindowStart);
+        esm.writeHNT("ATTC", mTrainingCount);
+    }
 }
 
 void ESM::NpcStats::blank()
@@ -260,4 +270,6 @@ void ESM::NpcStats::blank()
         mSpecIncreases[i] = 0;
     mTimeToStartDrowning = 20;
     mCrimeId = -1;
+    mTrainingWindowStart = -1.0;
+    mTrainingCount = 0;
 }

@@ -46,6 +46,7 @@ namespace MWGui
 
         MyGUI::Widget* mTrainingOptions;
         MyGUI::Button* mCancelButton;
+        MyGUI::TextBox* mTrainingRemaining;
         MyGUI::TextBox* mPlayerGold;
 
         WaitDialogProgressBar mProgressBar;

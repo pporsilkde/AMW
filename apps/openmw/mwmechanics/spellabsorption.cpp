@@ -1,3 +1,5 @@
+#include "classarchetype.hpp"
+#include <algorithm>
 #include "spellabsorption.hpp"
 
 #include <components/misc/rng.hpp>
@@ -50,7 +52,8 @@ namespace MWMechanics
             return 0;
 
         CreatureStats& stats = target.getClass().getCreatureStats(target);
-        if (stats.getMagicEffects().get(ESM::MagicEffect::SpellAbsorption).getMagnitude() <= 0.f)
+        const float archetypeChance = target.getClass().isNpc() ? ClassArchetype::getSpellAbsorptionChance(target) : 0.f;
+        if (stats.getMagicEffects().get(ESM::MagicEffect::SpellAbsorption).getMagnitude() <= 0.f && archetypeChance <= 0.f)
             return 0;
 
         GetAbsorptionProbability check;
@@ -59,7 +62,11 @@ namespace MWMechanics
         if (target.getClass().hasInventoryStore(target))
             target.getClass().getInventoryStore(target).visitEffectSources(check);
 
-        return check.mProbability * 100;
+        float probability = check.mProbability;
+        if (archetypeChance > 0.f)
+            probability = 1.f - (1.f - probability) * (1.f - archetypeChance / 100.f);
+
+        return std::clamp(probability * 100.f, 0.f, 100.f);
     }
 
     void absorbSpell (const std::string& spellId, const MWWorld::Ptr& caster, const MWWorld::Ptr& target)

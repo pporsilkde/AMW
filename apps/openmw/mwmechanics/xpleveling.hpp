@@ -42,6 +42,17 @@ namespace MWMechanics
 
         // Arena Y012 penalties affect only unbanked XP in the current level.
         // Earned levels, Skill Points and skills are never reduced.
+        void beginDeathRecovery(const MWWorld::Ptr& player);
+        void updateDeathRecovery(const MWWorld::Ptr& player, float dt);
+        bool isDeathRecoveryActive();
+        bool isDeathRecoveryExpired();
+        float getDeathRecoveryRemainingSeconds();
+        float getDeathRecoveryDurationSeconds();
+        float getDeathRecoveryInitialXp();
+        int getRestoreHealthPotionCount(const MWWorld::Ptr& player);
+        bool tryPotionRecovery(const MWWorld::Ptr& player);
+        void finishDeathRecovery();
+
         void applyDeathPenalty(const MWWorld::Ptr& player);
         void applyJailPenalty(const MWWorld::Ptr& player);
 

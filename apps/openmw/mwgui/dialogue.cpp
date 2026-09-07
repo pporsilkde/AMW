@@ -1,3 +1,5 @@
+#include "../mwmechanics/classarchetype.hpp"
+#include <MyGUI_LanguageManager.h>
 #include "dialogue.hpp"
 
 #include <MyGUI_LanguageManager.h>
@@ -1756,8 +1758,19 @@ namespace MWGui
         const int currentHealth = std::max(0, std::min(maximumHealth,
             static_cast<int>(std::lround(stats.getHealth().getCurrent()))));
 
-        mNpcName->setCaption(mPtr.getClass().getName(mPtr) + " - "
-            + MyGUI::utility::toString(level) + " lvl");
+        std::string npcCaption = mPtr.getClass().getName(mPtr);
+        if (mPtr.getClass().isNpc())
+        {
+            MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+            if (MWMechanics::ClassArchetype::getDisplayInfo(mPtr, false, archetypeInfo))
+            {
+                const std::string name = MyGUI::LanguageManager::getInstance().replaceTags(
+                    "#{arenamp=archetype." + archetypeInfo.id + ".name}");
+                npcCaption += " — " + name;
+            }
+        }
+        npcCaption += " - " + MyGUI::utility::toString(level) + " lvl";
+        mNpcName->setCaption(npcCaption);
         mNpcHealthBar->setProgressRange(static_cast<size_t>(maximumHealth));
         mNpcHealthBar->setProgressPosition(static_cast<size_t>(currentHealth));
         mNpcHealthText->setCaption(MyGUI::utility::toString(currentHealth) + " / "

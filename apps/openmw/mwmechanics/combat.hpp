@@ -18,6 +18,10 @@ bool applyOnStrikeEnchantment(const MWWorld::Ptr& attacker, const MWWorld::Ptr& 
                               const bool fromProjectile=false);
 
 /// @return can we block the attack?
+float applyClassArchetypeElementalHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim,
+    const MWWorld::Ptr& object, float physicalDamage, const osg::Vec3f& hitPosition);
+
+/// @return can we block the attack?
 bool blockMeleeAttack (const MWWorld::Ptr& attacker, const MWWorld::Ptr& blocker, const MWWorld::Ptr& weapon, float damage, float attackStrength);
 
 /// @return does normal weapon resistance and weakness apply to the weapon?

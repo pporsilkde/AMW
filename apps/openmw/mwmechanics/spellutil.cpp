@@ -1,3 +1,4 @@
+#include "classarchetype.hpp"
 #include <cmath>
 
 #include "spellutil.hpp"
@@ -326,6 +327,8 @@ namespace MWMechanics
 
         float castBonus = -stats.getMagicEffects().get(ESM::MagicEffect::Sound).getMagnitude();
         float castChance = baseChance + castBonus;
+        if (actor.getClass().isNpc())
+            castChance += ClassArchetype::getSpellSuccessBonus(actor);
         castChance *= stats.getFatigueTerm();
 
         return std::max(0.f, cap ? std::min(100.f, castChance) : castChance);

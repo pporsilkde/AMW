@@ -48,6 +48,9 @@ namespace ESM
         std::vector<std::string> mUsedIds; // lower case IDs
         float mTimeToStartDrowning;
         int mCrimeId;
+        // Alpha 0.01: per-reference trainer quota, persisted in saved games.
+        double mTrainingWindowStart = -1.0;
+        int mTrainingCount = 0;
 
         /// Initialize to default state
         void blank();

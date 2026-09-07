@@ -4,6 +4,11 @@
 #include "statswatcher.hpp"
 #include "windowpinnablebase.hpp"
 
+namespace MyGUI
+{
+    class ProgressBar;
+}
+
 namespace MWGui
 {
     class StatsWindow : public WindowPinnableBase, public NoDrop, public StatsListener
@@ -45,6 +50,7 @@ namespace MWGui
             void setFactions (const FactionList& factions);
             void setExpelled (const std::set<std::string>& expelled);
             void setBirthSign (const std::string &signId);
+            void updateArchetypeInfo();
 
             void onWindowResize(MyGUI::Window* window);
             void onMouseWheel(MyGUI::Widget* _sender, int _rel);
@@ -53,6 +59,9 @@ namespace MWGui
 
             MyGUI::Widget* mLeftPane;
             MyGUI::Widget* mRightPane;
+            MyGUI::TextBox* mArchetypeText;
+            MyGUI::ProgressBar* mArchetypePowerBar;
+            MyGUI::TextBox* mArchetypePowerText;
 
             MyGUI::ScrollView* mSkillView;
 

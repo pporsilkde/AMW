@@ -501,6 +501,9 @@ namespace MWClass
         }
 
 
+        if (successful && ishealth && !object.isEmpty() && damage > 0.f)
+            MWMechanics::applyClassArchetypeElementalHit(attacker, ptr, object, damage, hitPosition);
+
     }
 
     std::shared_ptr<MWWorld::Action> Creature::activate (const MWWorld::Ptr& ptr,
