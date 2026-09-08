@@ -52,7 +52,7 @@ private:
 
     Memory buffer is freed once the class instance is destroyed.
  */
-class MemoryInputStream : virtual MemoryInputStreamBuf, std::istream {
+class MemoryInputStream : virtual MemoryInputStreamBuf, public std::istream {
 public:
     explicit MemoryInputStream(size_t bufferSize);
     char* getRawData() override;

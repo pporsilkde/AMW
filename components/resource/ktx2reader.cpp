@@ -12,6 +12,18 @@
 #include <string>
 #include <vector>
 
+// Windows GL 1.1 headers do not declare the texture-RG extension tokens.
+// Values from Khronos glcorearb.h; runtime format support is still checked separately.
+#ifndef GL_R8
+#define GL_R8 0x8229
+#endif
+#ifndef GL_RG8
+#define GL_RG8 0x822B
+#endif
+#ifndef GL_RG
+#define GL_RG 0x8227
+#endif
+
 namespace
 {
     constexpr std::size_t maxBytes = 512u * 1024u * 1024u;
