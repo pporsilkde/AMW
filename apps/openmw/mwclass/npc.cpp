@@ -1145,6 +1145,10 @@ namespace MWClass
             moveSpeed *= gmst.fWereWolfRunMult->mValue.getFloat();
 
         moveSpeed *= MWMechanics::ClassArchetype::getMovementSpeedMultiplier(ptr);
+        // Alpha 0.14: transient exhaustion penalty; never change base Speed.
+        if (ptr == MWMechanics::getPlayer() && stats.getFatigue().getCurrent() <= 0.f)
+            moveSpeed *= 0.8f;
+
         return moveSpeed;
     }
 

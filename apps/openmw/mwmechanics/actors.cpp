@@ -1792,6 +1792,23 @@ namespace MWMechanics
             creatureStats.setDynamic(i, stat);
         }
 
+        // Daedric equipment intimidates: only worn/wielded items, not inventory stacks.
+        // Recompute on each modifier update so unequipping cannot leave permanent loss.
+        int daedricPenalty = 0;
+        if (ptr == getPlayer())
+        {
+            const MWWorld::InventoryStore& inventory = ptr.getClass().getInventoryStore(ptr);
+            for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
+            {
+                if (slot == MWWorld::InventoryStore::Slot_Ammunition) continue;
+                const auto item = inventory.getSlot(slot);
+                if (item == inventory.end()) continue;
+                const std::string id = Misc::StringUtils::lowerCase(item->getCellRef().getRefId());
+                if (id.find("daedric") != std::string::npos)
+                    daedricPenalty += 15;
+            }
+        }
+
         // attributes
         for(int i = 0;i < ESM::Attribute::Length;++i)
         {
@@ -1803,7 +1820,8 @@ namespace MWMechanics
                 drain = effects.get(EffectKey(ESM::MagicEffect::DrainAttribute, i)).getMagnitude();
                 absorb = effects.get(EffectKey(ESM::MagicEffect::AbsorbAttribute, i)).getMagnitude();
             }
-            stat.setModifier(static_cast<int>(fortify - drain - absorb));
+            stat.setModifier(static_cast<int>(fortify - drain - absorb)
+                - (i == ESM::Attribute::Personality ? daedricPenalty : 0));
 
             creatureStats.setAttribute(i, stat);
         }
