@@ -243,7 +243,8 @@ namespace
         notifyXp(message.str());
     }
 
-    void addExperience(const MWWorld::Ptr& player, float amount, const std::string& notification)
+    void addExperience(const MWWorld::Ptr& player, float amount, const std::string& notification,
+        bool theftReward = false)
     {
         if (!MWMechanics::XPLeveling::isEnabled() || player.isEmpty() || !player.getClass().isNpc())
             return;
@@ -253,6 +254,11 @@ namespace
             return;
 
         MWMechanics::NpcStats& stats = player.getClass().getNpcStats(player);
+        // Persist the last rewarded action across saves and multiplayer profiles.
+        // Failed rolls and zero/invalid gains must not reopen the theft reward.
+        stats.removeXpRewardKeysWithPrefix("theft-reward-blocked:");
+        if (theftReward)
+            stats.addXpRewardKey("theft-reward-blocked:1");
         stats.setExperience(std::max(0.f, stats.getExperience()) + amount);
 
         if (!notification.empty())
@@ -567,6 +573,7 @@ namespace MWMechanics
         void awardSuccessfulTheft(const MWWorld::Ptr& player, const MWWorld::Ptr& item, int count)
         {
             if (!isEnabled() || player.isEmpty() || item.isEmpty() || count <= 0 || player != MWMechanics::getPlayer()
+                || player.getClass().getNpcStats(player).hasXpRewardKey("theft-reward-blocked:1")
                 || !randomRewardRoll("theft bonus xp chance", 0.30f))
                 return;
             const float xp = nonNegativeSetting("theft bonus xp");
@@ -574,7 +581,7 @@ namespace MWMechanics
                 return;
             std::ostringstream message;
             message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.theft");
-            addExperience(player, xp, message.str());
+            addExperience(player, xp, message.str(), true);
         }
 
         void awardBookRead(const MWWorld::Ptr& player, const ESM::Book& book)

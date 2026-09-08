@@ -7,6 +7,9 @@
 #include <components/vfs/manager.hpp>
 
 #include "objectcache.hpp"
+#ifdef ARENA_ENABLE_KTX2
+#include "ktx2reader.hpp"
+#endif
 
 #ifdef OSG_LIBRARY_STATIC
 // This list of plugins should match with the list in the top-level CMakelists.txt.
@@ -107,6 +110,24 @@ namespace Resource
             std::string ext;
             if (extPos != std::string::npos && extPos+1 < normalized.size())
                 ext = normalized.substr(extPos+1);
+#ifdef ARENA_ENABLE_KTX2
+            if (ext == "ktx2")
+            {
+                try
+                {
+                    osg::ref_ptr<osg::Image> image = readKtx2(*stream);
+                    image->setFileName(normalized);
+                    mCache->addEntryToObjectCache(normalized, image);
+                    return image;
+                }
+                catch (const std::exception& error)
+                {
+                    Log(Debug::Error) << "Error loading " << filename << ": " << error.what();
+                    mCache->addEntryToObjectCache(normalized, mWarningImage);
+                    return mWarningImage;
+                }
+            }
+#endif
             osgDB::ReaderWriter* reader = osgDB::Registry::instance()->getReaderWriterForExtension(ext);
             if (!reader)
             {

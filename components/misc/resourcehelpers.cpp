@@ -93,6 +93,14 @@ std::string Misc::ResourceHelpers::correctResourcePath(const std::string &topLev
         correctedPath = prefix1 + correctedPath;
 
     std::string origExt = correctedPath;
+#ifdef ARENA_ENABLE_KTX2
+    // An explicit .ktx2 reference must not be silently redirected to .dds.
+    const auto extension = correctedPath.rfind('.');
+    if (extension != std::string::npos && correctedPath.substr(extension) == ".ktx2"
+        && vfs->exists(correctedPath))
+        return correctedPath;
+#endif
+
 
     // since we know all (GOTY edition or less) textures end
     // in .dds, we change the extension
@@ -103,6 +111,18 @@ std::string Misc::ResourceHelpers::correctResourcePath(const std::string &topLev
     // verify, and revert if false (this call succeeds quickly, but fails slowly)
     if (changedToDds && vfs->exists(origExt))
         return origExt;
+
+#ifdef ARENA_ENABLE_KTX2
+    // Existing DDS/TGA replacements retain priority. A KTX2-only conversion
+    // works with the original NIF path without rewriting the mesh.
+    std::string ktxPath = origExt;
+    const auto dot = ktxPath.rfind('.');
+    if (dot != std::string::npos)
+    {
+        ktxPath.replace(dot, std::string::npos, ".ktx2");
+        if (vfs->exists(ktxPath)) return ktxPath;
+    }
+#endif
 
     // fall back to a resource in the top level directory if it exists
     std::string fallback = topLevelDirectory + "\\" + getBasename(correctedPath);
@@ -116,6 +136,13 @@ std::string Misc::ResourceHelpers::correctResourcePath(const std::string &topLev
             return fallback;
     }
 
+#ifdef ARENA_ENABLE_KTX2
+    if (dot != std::string::npos)
+    {
+        const std::string ktxFallback = topLevelDirectory + "\\" + getBasename(ktxPath);
+        if (vfs->exists(ktxFallback)) return ktxFallback;
+    }
+#endif
     return correctedPath;
 }
 

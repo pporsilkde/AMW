@@ -225,6 +225,22 @@ include_directories(${BULLET_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 
 add_library(components STATIC ${COMPONENT_FILES} ${MOC_SRCS} ${ESM_UI_HDR})
 
+# Alpha 0.12: PC builds ship the KTX2 decoder statically.
+# Mobile dependency integration remains opt-in until the Android projects are updated.
+if(ANDROID)
+    set(_arena_ktx_default OFF)
+else()
+    set(_arena_ktx_default ON)
+endif()
+option(ARENA_ENABLE_KTX2 "Read KTX2 textures including Basis Universal" ${_arena_ktx_default})
+if(ARENA_ENABLE_KTX2)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ArenaKtx.cmake)
+    target_sources(components PRIVATE resource/ktx2reader.cpp)
+    target_compile_definitions(components PRIVATE ARENA_ENABLE_KTX2)
+    target_link_libraries(components arena_ktx_read)
+endif()
+
+
 target_link_libraries(components
     # CMake's built-in OSG finder does not use pkgconfig, so we have to
     # manually ensure the order is correct for inter-library dependencies.

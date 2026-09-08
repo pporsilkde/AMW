@@ -2557,7 +2557,7 @@ void HUD::pushDamageNumber(float damage)
         const int cardWidth = std::max(1, std::min(std::max(300, std::min(480, viewSize.width / 3)),
             anchorRight - 6));
         const int cardLeft = anchorRight - cardWidth;
-        constexpr int cardGap = 4;
+        constexpr int cardGap = 2;
         int nextBottom = anchorBottom;
         for (std::size_t row = 0; row < active.size(); ++row)
         {
@@ -2568,23 +2568,25 @@ void HUD::pushDamageNumber(float damage)
             const float alpha = std::min(fadeIn, fadeOut);
             const bool hasIcon = state.mIcon && state.mIcon->getVisible();
             const bool hasValue = state.mValue && !state.mValue->getCaption().empty();
-            const int textLeft = hasIcon ? 40 : 6;
+            const int textLeft = hasIcon ? 36 : 4;
             const int valueWidth = hasValue ? std::min(120, std::max(60, cardWidth / 4)) : 0;
-            const int titleWidth = std::max(1, cardWidth - textLeft - 6
-                - (hasValue ? valueWidth + 8 : 0));
+            const int titleWidth = std::max(1, cardWidth - textLeft - 4
+                - (hasValue ? valueWidth + 4 : 0));
             state.mTitle->setCoord(textLeft, 3, titleWidth, 32);
             state.mValue->setCoord(cardWidth - 6 - valueWidth, 3, std::max(1, valueWidth), 32);
             const int textHeight = std::max(state.mTitle->getTextSize().height,
                 hasValue ? state.mValue->getTextSize().height : 0);
-            const int cardHeight = std::max(38, textHeight + 6);
+            const int cardHeight = std::max(hasIcon ? 32 : 24, textHeight + 4);
             const int top = nextBottom - cardHeight;
             nextBottom = top - cardGap;
             if (state.mPanel)
             {
                 state.mPanel->setCoord(cardLeft, top, cardWidth, cardHeight);
-                state.mTitle->setCoord(textLeft, 3, titleWidth, cardHeight - 6);
-                state.mValue->setCoord(cardWidth - 6 - valueWidth, 3,
-                    std::max(1, valueWidth), cardHeight - 6);
+                state.mTitle->setCoord(textLeft, 2, titleWidth, cardHeight - 4);
+                state.mValue->setCoord(cardWidth - 4 - valueWidth, 2,
+                    std::max(1, valueWidth), cardHeight - 4);
+                if (state.mIcon)
+                    state.mIcon->setPosition(3, (cardHeight - state.mIcon->getHeight()) / 2);
                 state.mPanel->setAlpha(alpha);
                 // Older cards that no longer fit must not draw outside the viewport.
                 state.mPanel->setVisible(alpha > 0.01f && top >= 6 - origin.top);

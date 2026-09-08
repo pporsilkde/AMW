@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <vector>
 /*
   OpenMW - The completely unofficial reimplementation of Morrowind
   Copyright (C) 2008-2010  Nicolay Korslund
@@ -23,6 +25,7 @@
 
  */
 #include "compressedbsafile.hpp"
+#include "compressedbsautils.hpp"
 
 #include <stdexcept>
 #include <cassert>
@@ -85,26 +88,14 @@ std::uint32_t CompressedBSAFile::FileRecord::getSizeWithoutCompressionFlag() con
 
 void CompressedBSAFile::getBZString(std::string& str, std::istream& filestream)
 {
-    char size = 0;
-    filestream.read(&size, 1);
-
-    boost::scoped_array<char> buf(new char[size]);
-    filestream.read(buf.get(), size);
-
-    if (buf[size - 1] != 0)
-    {
-        str.assign(buf.get(), size);
-        if (str.size() != ((size_t)size)) {
-            fail("getBZString string size mismatch");
-        }
-    }
-    else
-    {
-        str.assign(buf.get(), size - 1); // don't copy null terminator
-        if (str.size() != ((size_t)size - 1)) {
-            fail("getBZString string size mismatch (null terminator)");
-        }
-    }
+    unsigned char size = 0;
+    if (!filestream.read(reinterpret_cast<char*>(&size), 1))
+        fail("Truncated BSA string length");
+    str.resize(size);
+    if (size != 0 && !filestream.read(&str[0], size))
+        fail("Truncated BSA string");
+    if (!str.empty() && str.back() == '\0')
+        str.pop_back();
 }
 
 CompressedBSAFile::CompressedBSAFile()
@@ -352,58 +343,35 @@ Files::IStreamPtr CompressedBSAFile::getFile(const char* file)
 
 Files::IStreamPtr CompressedBSAFile::getFile(const FileRecord& fileRecord)
 {
-    size_t size = fileRecord.getSizeWithoutCompressionFlag();
-    size_t uncompressedSize = size;
-    bool compressed = fileRecord.isCompressed(mCompressedByDefault);
-    Files::IStreamPtr streamPtr = Files::openConstrainedFileStream(mFilename.c_str(), fileRecord.offset, size);
-    std::istream* fileStream = streamPtr.get();
-    if (mEmbeddedFileNames)
+    const bool compressed = fileRecord.isCompressed(mCompressedByDefault);
+    Files::IStreamPtr stream = Files::openConstrainedFileStream(mFilename.c_str(),
+        fileRecord.offset, fileRecord.getSizeWithoutCompressionFlag());
+    const PayloadSizes sizes = readPayloadHeader(*stream,
+        fileRecord.getSizeWithoutCompressionFlag(), mEmbeddedFileNames, compressed);
+    auto memory = std::make_shared<Bsa::MemoryInputStream>(sizes.unpacked);
+    if (!compressed)
     {
-        // Skip over the embedded file name
-        char length = 0;
-        fileStream->read(&length, 1);
-        fileStream->ignore(length);
-        size -= length + sizeof(char);
+        if (sizes.stored && !stream->read(memory->getRawData(), sizes.stored))
+            fail("Truncated BSA payload");
     }
-    if (compressed)
+    else if (mVersion != 0x69)
     {
-        fileStream->read(reinterpret_cast<char*>(&uncompressedSize), sizeof(uint32_t));
-        size -= sizeof(uint32_t);
-    }
-    std::shared_ptr<Bsa::MemoryInputStream> memoryStreamPtr = std::make_shared<MemoryInputStream>(uncompressedSize);
-
-    if (compressed)
-    {
-        if (mVersion != 0x69) // Non-SSE: zlib
-        {
-            boost::iostreams::filtering_streambuf<boost::iostreams::input> inputStreamBuf;
-            inputStreamBuf.push(boost::iostreams::zlib_decompressor());
-            inputStreamBuf.push(*fileStream);
-
-            boost::iostreams::basic_array_sink<char> sr(memoryStreamPtr->getRawData(), uncompressedSize);
-            boost::iostreams::copy(inputStreamBuf, sr);
-        }
-        else // SSE: lz4
-        {
-            boost::scoped_array<char> buffer(new char[size]);
-            fileStream->read(buffer.get(), size);
-            LZ4F_decompressionContext_t context = nullptr;
-            LZ4F_createDecompressionContext(&context, LZ4F_VERSION);
-            LZ4F_decompressOptions_t options = {};
-            LZ4F_errorCode_t errorCode = LZ4F_decompress(context, memoryStreamPtr->getRawData(), &uncompressedSize, buffer.get(), &size, &options);
-            if (LZ4F_isError(errorCode))
-                fail("LZ4 decompression error (file " + mFilename + "): " + LZ4F_getErrorName(errorCode));
-            errorCode = LZ4F_freeDecompressionContext(context);
-            if (LZ4F_isError(errorCode))
-                fail("LZ4 decompression error (file " + mFilename + "): " + LZ4F_getErrorName(errorCode));
-        }
+        boost::iostreams::filtering_streambuf<boost::iostreams::input> input;
+        input.push(boost::iostreams::zlib_decompressor());
+        input.push(*stream);
+        boost::iostreams::basic_array_sink<char> output(memory->getRawData(), sizes.unpacked);
+        if (boost::iostreams::copy(input, output) != static_cast<std::streamsize>(sizes.unpacked))
+            fail("BSA zlib unpacked-size mismatch");
     }
     else
     {
-        fileStream->read(memoryStreamPtr->getRawData(), size);
+        // At least one byte keeps the pointer valid for a zero-size malformed input.
+        std::vector<char> bytes(std::max<std::size_t>(1, sizes.stored));
+        if (sizes.stored && !stream->read(bytes.data(), sizes.stored))
+            fail("Truncated BSA LZ4 payload");
+        decompressLz4Frame(bytes.data(), sizes.stored, memory->getRawData(), sizes.unpacked);
     }
-
-    return std::shared_ptr<std::istream>(memoryStreamPtr, (std::istream*)memoryStreamPtr.get());
+    return std::shared_ptr<std::istream>(memory, static_cast<std::istream*>(memory.get()));
 }
 
 BsaVersion CompressedBSAFile::detectVersion(std::string filePath)
@@ -444,29 +412,17 @@ BsaVersion CompressedBSAFile::detectVersion(std::string filePath)
 //mFiles used by OpenMW expects uncompressed sizes
 void CompressedBSAFile::convertCompressedSizesToUncompressed()
 {
-    for (auto & mFile : mFiles)
+    for (auto& file : mFiles)
     {
-        const FileRecord& fileRecord = getFileRecord(mFile.name());
-        if (!fileRecord.isValid())
-        {
-            fail("Could not find file " + std::string(mFile.name()) + " in BSA");
-        }
-
-        if (!fileRecord.isCompressed(mCompressedByDefault))
-        {
-            //no need to fix fileSize in mFiles - uncompressed size already set
-            continue;
-        }
-
-        Files::IStreamPtr dataBegin = Files::openConstrainedFileStream(mFilename.c_str(), fileRecord.offset, fileRecord.getSizeWithoutCompressionFlag());
-
-        if (mEmbeddedFileNames)
-        {
-            std::string embeddedFileName;
-            getBZString(embeddedFileName, *(dataBegin.get()));
-        }
-
-        dataBegin->read(reinterpret_cast<char*>(&(mFile.fileSize)), sizeof(mFile.fileSize));
+        const FileRecord& record = getFileRecord(file.name());
+        if (!record.isValid()) fail("Could not find file " + std::string(file.name()) + " in BSA");
+        const bool compressed = record.isCompressed(mCompressedByDefault);
+        if (!compressed && !mEmbeddedFileNames) continue;
+        Files::IStreamPtr stream = Files::openConstrainedFileStream(mFilename.c_str(),
+            record.offset, record.getSizeWithoutCompressionFlag());
+        const PayloadSizes sizes = readPayloadHeader(*stream,
+            record.getSizeWithoutCompressionFlag(), mEmbeddedFileNames, compressed);
+        file.fileSize = static_cast<std::uint32_t>(sizes.unpacked);
     }
 }
 
