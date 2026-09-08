@@ -59,6 +59,7 @@
 #include "../mwbase/inputmanager.hpp"
 #include "../mwbase/statemanager.hpp"
 #include "../mwbase/soundmanager.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 #include "../mwbase/world.hpp"
 
 #include "../mwrender/vismask.hpp"
@@ -1459,6 +1460,13 @@ namespace MWGui
 
     void WindowManager::pushGuiMode(GuiMode mode, const MWWorld::Ptr& arg)
     {
+        if (mode == GM_Inventory || mode == GM_Container || mode == GM_Barter)
+        {
+            const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            if (MWMechanics::XPLeveling::isDeathRecoveryActive()
+                || (!player.isEmpty() && player.getClass().getCreatureStats(player).isDead()))
+                return;
+        }
         if (mode==GM_Inventory && mAllowed==GW_None)
             return;
 

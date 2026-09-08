@@ -77,6 +77,7 @@
 #include "camera.hpp"
 #include "viewovershoulder.hpp"
 #include "water.hpp"
+#include "shelteredwater.hpp"
 #include "terrainstorage.hpp"
 #include "navmesh.hpp"
 #include "actorspaths.hpp"
@@ -193,7 +194,7 @@ namespace MWRender
             stateset->addUniform(new osg::Uniform("arenaShadowTexelSize", 1.0f / 512.0f));
         }
 
-        void apply(osg::StateSet* stateset, osg::NodeVisitor*) override
+        void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override
         {
             osg::LightModel* lightModel = static_cast<osg::LightModel*>(stateset->getAttribute(osg::StateAttribute::LIGHTMODEL));
             lightModel->setAmbientIntensity(mAmbientColor);
@@ -204,7 +205,19 @@ namespace MWRender
             if (osg::Uniform* uniform = stateset->getUniform("isInterior"))
                 uniform->set(mIsInterior);
             if (osg::Uniform* uniform = stateset->getUniform("waterCausticsIntensity"))
-                uniform->set(std::clamp(Settings::Manager::getFloat("caustics intensity", "Water"), 0.0f, 3.0f));
+            {
+                float sheltered = 0.f;
+                MWBase::World* world = MWBase::Environment::get().getWorld();
+                if (world)
+                {
+                    MWWorld::Ptr player = world->getPlayerPtr();
+                    if (!player.isEmpty() && player.isInCell())
+                        sheltered = MWRender::getShelteredWaterFactor(player.getCell()->getWaterLevel(), !player.getCell()->isExterior(), nv);
+                }
+                const float base = std::clamp(Settings::Manager::getFloat("caustics intensity", "Water"), 0.0f, 3.0f);
+                const float shelteredMul = std::clamp(Settings::Manager::getFloat("sheltered caustics multiplier", "Water"), 0.0f, 1.0f);
+                uniform->set(base * ((1.f - sheltered) + sheltered * shelteredMul));
+            }
             if (osg::Uniform* uniform = stateset->getUniform("waterUnderwaterTint"))
                 uniform->set(std::clamp(Settings::Manager::getFloat("underwater tint", "Water"), 0.0f, 2.0f));
             if (osg::Uniform* uniform = stateset->getUniform("waterUnderwaterBlend"))

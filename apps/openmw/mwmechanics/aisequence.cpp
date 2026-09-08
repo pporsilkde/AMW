@@ -350,9 +350,10 @@ void AiSequence::stack (const AiPackage& package, const MWWorld::Ptr& actor, boo
     // Also there is no point to stack return packages.
     const auto currentTypeId = getTypeId();
     const auto newTypeId = package.getTypeId();
-    if (currentTypeId <= MWMechanics::AiPackageTypeId::Wander
+    // Alpha 0.10: temporary summons have no home cell before placement.
+    if (actor.isInCell() && currentTypeId <= MWMechanics::AiPackageTypeId::Wander
         && !hasPackage(MWMechanics::AiPackageTypeId::InternalTravel)
-        && (newTypeId <= MWMechanics::AiPackageTypeId::Combat
+        && (newTypeId == MWMechanics::AiPackageTypeId::Combat
         || newTypeId == MWMechanics::AiPackageTypeId::Pursue
         || newTypeId == MWMechanics::AiPackageTypeId::Cast))
     {

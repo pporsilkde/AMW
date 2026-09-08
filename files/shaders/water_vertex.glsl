@@ -8,6 +8,7 @@ varying vec4  position;
 varying float linearDepth;
 uniform float osg_SimulationTime;
 uniform mat4 osg_ViewMatrixInverse;
+uniform float waterVerticalWaveStrength;
 
 #include "shadows_vertex.glsl"
 
@@ -49,7 +50,7 @@ void main(void)
         // УЛУЧШЕНИЕ 3: Амплитуда уменьшена в 2 раза (12.5 → 6.25)
         // Верхняя точка - это реальный уровень воды, волны идут только вниз
         // ========================================================================
-        glvertice.z -= 6.25/sqrt(g) * sqrt(h * g);  // было 12.5
+        glvertice.z -= (6.25/sqrt(g) * sqrt(h * g)) * waterVerticalWaveStrength;  // Y051: no vertical bobbing in sheltered water
     }
     
     if(campos.z < -1.0)

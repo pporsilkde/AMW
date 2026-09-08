@@ -506,6 +506,7 @@ namespace MWGui
                 "HudEventTitle" + MyGUI::utility::toString(i));
             state.mTitle->setNeedMouseFocus(false);
             state.mTitle->setFontHeight(16);
+            state.mTitle->getSubWidgetText()->setWordWrap(true);
             state.mTitle->setTextAlign(MyGUI::Align::Left | MyGUI::Align::VCenter);
             state.mTitle->setTextShadow(true);
             state.mTitle->setTextShadowColour(MyGUI::Colour::Black);
@@ -516,6 +517,7 @@ namespace MWGui
                 "HudEventValue" + MyGUI::utility::toString(i));
             state.mValue->setNeedMouseFocus(false);
             state.mValue->setFontHeight(16);
+            state.mValue->getSubWidgetText()->setWordWrap(true);
             state.mValue->setTextAlign(MyGUI::Align::Right | MyGUI::Align::VCenter);
             state.mValue->setTextShadow(true);
             state.mValue->setTextShadowColour(MyGUI::Colour::Black);
@@ -2549,10 +2551,14 @@ void HUD::pushDamageNumber(float damage)
                 - static_cast<int>(dockedRows) * CombatBar::sDockRowStride - 8;
         }
 
-        constexpr int cardWidth = 300;
-        constexpr int cardHeight = 38;
+        // Alpha 0.10: wrap both columns and stack actual measured card heights.
+        // Positions use GUI coordinates, so the edge margin also follows UI scaling.
+        anchorRight = viewSize.width - 6 - origin.left;
+        const int cardWidth = std::max(1, std::min(std::max(300, std::min(480, viewSize.width / 3)),
+            anchorRight - 6));
+        const int cardLeft = anchorRight - cardWidth;
         constexpr int cardGap = 4;
-        const int cardLeft = std::max(6, anchorRight - cardWidth);
+        int nextBottom = anchorBottom;
         for (std::size_t row = 0; row < active.size(); ++row)
         {
             HudNotificationState& state = mHudNotifications[active[row]];
@@ -2560,13 +2566,28 @@ void HUD::pushDamageNumber(float damage)
             const float fadeOut = state.mAge > state.mLifetime - 0.55f
                 ? std::max(0.f, (state.mLifetime - state.mAge) / 0.55f) : 1.f;
             const float alpha = std::min(fadeIn, fadeOut);
-            const int top = anchorBottom - cardHeight
-                - static_cast<int>(row) * (cardHeight + cardGap);
+            const bool hasIcon = state.mIcon && state.mIcon->getVisible();
+            const bool hasValue = state.mValue && !state.mValue->getCaption().empty();
+            const int textLeft = hasIcon ? 40 : 6;
+            const int valueWidth = hasValue ? std::min(120, std::max(60, cardWidth / 4)) : 0;
+            const int titleWidth = std::max(1, cardWidth - textLeft - 6
+                - (hasValue ? valueWidth + 8 : 0));
+            state.mTitle->setCoord(textLeft, 3, titleWidth, 32);
+            state.mValue->setCoord(cardWidth - 6 - valueWidth, 3, std::max(1, valueWidth), 32);
+            const int textHeight = std::max(state.mTitle->getTextSize().height,
+                hasValue ? state.mValue->getTextSize().height : 0);
+            const int cardHeight = std::max(38, textHeight + 6);
+            const int top = nextBottom - cardHeight;
+            nextBottom = top - cardGap;
             if (state.mPanel)
             {
                 state.mPanel->setCoord(cardLeft, top, cardWidth, cardHeight);
+                state.mTitle->setCoord(textLeft, 3, titleWidth, cardHeight - 6);
+                state.mValue->setCoord(cardWidth - 6 - valueWidth, 3,
+                    std::max(1, valueWidth), cardHeight - 6);
                 state.mPanel->setAlpha(alpha);
-                state.mPanel->setVisible(alpha > 0.01f);
+                // Older cards that no longer fit must not draw outside the viewport.
+                state.mPanel->setVisible(alpha > 0.01f && top >= 6 - origin.top);
             }
         }
     }

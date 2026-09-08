@@ -29,6 +29,7 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
+#include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
 
 #include "../mwworld/class.hpp"
@@ -259,6 +260,7 @@ namespace
 
         // XP is banked immediately. No vanilla sleep gate or attribute picker is
         // involved; each completed level grants spendable skill points instead.
+        const int levelBefore = stats.getLevel();
         for (int guard = 0; guard < 100; ++guard)
         {
             const float required = xpRequirementForLevel(stats.getLevel());
@@ -268,6 +270,8 @@ namespace
             stats.setExperience(std::max(0.f, stats.getExperience() - required));
             completeLevelUp(player);
         }
+        if (stats.getLevel() > levelBefore)
+            MWBase::Environment::get().getSoundManager()->streamMusic("Special/MW_Triumph.mp3");
     }
 
     bool awardOnce(const MWWorld::Ptr& player, const std::string& key, float amount,
@@ -596,6 +600,10 @@ namespace MWMechanics
             if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc() || sDeathRecovery.active)
                 return;
             sDeathRecovery.active = true;
+            auto* windowManager = MWBase::Environment::get().getWindowManager();
+            windowManager->removeGuiMode(MWGui::GM_Barter);
+            windowManager->removeGuiMode(MWGui::GM_Container);
+            windowManager->removeGuiMode(MWGui::GM_Inventory);
             sDeathRecovery.elapsed = 0.f;
             sDeathRecovery.duration = 30.f;
             sDeathRecovery.initialXp = std::max(0.f, player.getClass().getNpcStats(player).getExperience());
@@ -714,6 +722,9 @@ float getDeathRespawnDelay(const MWWorld::Ptr& player, float baseDelay)
         bool spendSkillPoints(const MWWorld::Ptr& player, int skillId)
         {
             if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+                return false;
+            // Also guard the transaction, including callbacks from an already open window.
+            if (isDeathRecoveryActive() || player.getClass().getCreatureStats(player).isDead())
                 return false;
             if (skillId < 0 || skillId >= ESM::Skill::Length)
                 return false;

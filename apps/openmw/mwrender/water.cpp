@@ -1,4 +1,5 @@
 #include "water.hpp"
+#include "shelteredwater.hpp"
 
 #include <iomanip>
 #include <algorithm>
@@ -246,6 +247,7 @@ protected:
         stateset->addUniform(new osg::Uniform("envSkyAwayColor", osg::Vec3f(0.50f, 0.55f, 0.65f)));
         stateset->addUniform(new osg::Uniform("envSkyStrength", 0.0f));
         stateset->addUniform(new osg::Uniform("waterWaveStrength", 1.0f));
+        stateset->addUniform(new osg::Uniform("waterVerticalWaveStrength", 1.0f));
         stateset->addUniform(new osg::Uniform("waterSurfaceRoughness", 0.22f));
         stateset->addUniform(new osg::Uniform("waterTransparency", 1.0f));
         stateset->addUniform(new osg::Uniform("waterFoamIntensity", 1.0f));
@@ -261,7 +263,7 @@ protected:
         }
     }
 
-    void apply(osg::StateSet* stateset, osg::NodeVisitor* /*nv*/) override
+    void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override
     {
         if (osg::Uniform* rainIntensityUniform = stateset->getUniform("rainIntensity"))
             rainIntensityUniform->set(mRainIntensity);
@@ -287,17 +289,40 @@ protected:
         if (osg::Uniform* interiorUniform = stateset->getUniform("isInteriorWater"))
             interiorUniform->set(mInterior ? *mInterior : false);
 
+        const float waterLevel = mWaterNode ? mWaterNode->getPosition().z() : 0.f;
+        const float sheltered = MWRender::getShelteredWaterFactor(waterLevel, mInterior ? *mInterior : false, nv);
+        const float shelteredWave = std::clamp(Settings::Manager::getFloat("sheltered wave multiplier", "Water"), 0.0f, 1.0f);
+        const float shelteredVerticalWave = std::clamp(Settings::Manager::getFloat("sheltered vertical wave multiplier", "Water"), 0.0f, 1.0f);
+        const float shelteredFoam = std::clamp(Settings::Manager::getFloat("sheltered foam multiplier", "Water"), 0.0f, 1.0f);
+        const float shelteredTransparency = std::clamp(Settings::Manager::getFloat("sheltered transparency bonus", "Water"), 0.0f, 0.4f);
+
         if (osg::Uniform* waterWaveStrengthUniform = stateset->getUniform("waterWaveStrength"))
-            waterWaveStrengthUniform->set(std::clamp(Settings::Manager::getFloat("wave strength", "Water"), 0.0f, 1.0f));
+        {
+            const float base = std::clamp(Settings::Manager::getFloat("wave strength", "Water"), 0.0f, 1.0f);
+            waterWaveStrengthUniform->set(base * ((1.f - sheltered) + sheltered * shelteredWave));
+        }
+
+        if (osg::Uniform* waterVerticalWaveStrengthUniform = stateset->getUniform("waterVerticalWaveStrength"))
+        {
+            // Keep normal-map ripples on calm water, but stop the actual water
+            // plane from bobbing vertically in a fully sheltered cove/pond.
+            waterVerticalWaveStrengthUniform->set((1.f - sheltered) + sheltered * shelteredVerticalWave);
+        }
 
         if (osg::Uniform* waterSurfaceRoughnessUniform = stateset->getUniform("waterSurfaceRoughness"))
             waterSurfaceRoughnessUniform->set(std::clamp(Settings::Manager::getFloat("surface roughness", "Water"), 0.02f, 1.0f));
 
         if (osg::Uniform* waterTransparencyUniform = stateset->getUniform("waterTransparency"))
-            waterTransparencyUniform->set(std::clamp(Settings::Manager::getFloat("transparency", "Water"), 0.0f, 1.4f));
+        {
+            const float base = std::clamp(Settings::Manager::getFloat("transparency", "Water"), 0.0f, 1.4f);
+            waterTransparencyUniform->set(std::clamp(base + sheltered * shelteredTransparency, 0.f, 1.4f));
+        }
 
         if (osg::Uniform* waterFoamIntensityUniform = stateset->getUniform("waterFoamIntensity"))
-            waterFoamIntensityUniform->set(std::clamp(Settings::Manager::getFloat("foam intensity", "Water"), 0.0f, 2.0f));
+        {
+            const float base = std::clamp(Settings::Manager::getFloat("foam intensity", "Water"), 0.0f, 2.0f);
+            waterFoamIntensityUniform->set(base * ((1.f - sheltered) + sheltered * shelteredFoam));
+        }
 
         if (osg::Uniform* waterHighlightIntensityUniform = stateset->getUniform("waterHighlightIntensity"))
             waterHighlightIntensityUniform->set(std::clamp(Settings::Manager::getFloat("highlight intensity", "Water"), 0.0f, 2.0f));
