@@ -38,6 +38,7 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
     animations/*.yaml
     animations/*.txt
     meshes/*.nif
+    meshes/e/*.nif
     sound/*.wav
     sound/*.mp3
     textures/*.dds
